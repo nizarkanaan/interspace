@@ -1,0 +1,80 @@
+# Engineering conventions
+
+These conventions apply to Interspace contributors and coding agents. The current repository is a design study; the production stack remains undecided. Prefer the smallest maintainable solution that meets a demonstrated requirement.
+
+## Current repository
+
+| Location | Responsibility |
+| --- | --- |
+| `AGENTS.md` | Entry point, product boundaries, and contributor instructions |
+| `README.md` | Status, preview instructions, and documentation links |
+| `design/observatory.fragment.html` | Canonical source of the throwaway UI prototype |
+| `design/index.html` | Generated standalone preview, committed for easy opening |
+| `design/evidence/` | Dated design-check records and inspectable screenshots |
+| `docs/` | Design direction, engineering decisions, and validation limits |
+| `scripts/` | Small, reproducible repository maintenance commands |
+
+Do not edit both copies of the preview. Regenerate the standalone page from its source. Evidence screenshots are historical observations, not proof that future changes passed. Refresh affected evidence when behavior or layout changes.
+
+## Application organization when implementation begins
+
+Start with one application and explicit module boundaries. Do not introduce a monorepo, microservices, plugin framework, or generic repository abstraction merely to anticipate growth. The exact physical layout follows the chosen desktop/local-web stack; this is the proposed ownership map, not an existing scaffold.
+
+| Proposed location | Owns |
+| --- | --- |
+| `src/features/projects/` | Project creation, selection, and project workflows |
+| `src/features/agents/` | Role configuration and run coordination |
+| `src/features/approvals/` | Proposal review and decision workflows |
+| `src/features/knowledge/` | Source collections and evidence workflows |
+| `src/core/` | Framework-independent entities, policies, state transitions, and capability interfaces |
+| `src/integrations/<provider>/` | Provider-specific authentication and external tool adapters |
+| `src/platform/` | Desktop/OS services, local storage, process execution, and credential-store adapters |
+| `src/ui/` | Reusable presentation components and design tokens |
+| `tests/integration/` | Tests across real module/storage boundaries using controlled dependencies |
+| `tests/e2e/` | A small set of complete user workflows |
+| `docs/decisions/` | Short records of significant architecture choices and tradeoffs |
+
+Keep unit tests alongside the behavior they protect. Add folders only when code needs them. Keep runtime data, credentials, downloaded papers, experiment outputs and caches in application/user storage, outside the source repository.
+
+### Dependency rules
+
+- Core policies must not import UI frameworks, provider SDKs, databases, or OS APIs.
+- Features coordinate use cases through explicit interfaces. A composition root wires concrete adapters; avoid hidden service locators and global mutable state.
+- Provider and platform adapters implement those interfaces and validate external input. Provider-specific response formats do not spread through the UI.
+- Presentation components display state and dispatch user intentions; they do not directly launch processes, read arbitrary files, or approve actions.
+- Keep feature internals private. Use small explicit public APIs for genuine cross-feature collaboration; avoid circular imports.
+- Share code after a real repeated responsibility appears. Do not accumulate unrelated functions in a catch-all `utils` directory.
+
+## Finding and fixing bugs
+
+1. Record expected and actual behavior, exact reproduction steps, environment, relevant commit, and impact. Distinguish a confirmed defect from a suspicion.
+2. Reproduce the issue. Read errors and stack traces; inspect recent changes. If reproduction fails, gather targeted evidence rather than making speculative patches.
+3. Trace the failing value or state across boundaries to its source. Inspect similar working behavior and form one testable explanation.
+4. Test that explanation with a small experiment. Change one relevant factor at a time. If repeated attempts contradict it, revisit the explanation or design.
+5. For a reproducible behavioral defect, capture a focused failing regression test before fixing it. Test observable behavior, not the implementation's internal shape. Use a documented manual/browser reproduction where automation is disproportionate or impossible.
+6. Apply the smallest coherent fix at the source. Keep unrelated cleanup separate. Never suppress an error, disable a check, or add arbitrary delays to make a failure disappear.
+7. Verify the original reproduction now passes, run affected integration/workflow checks, and inspect the diff. Broaden testing when the scope or evidence warrants it.
+8. Record the cause, correction, verification commands/results and remaining uncertainty. Do not label an environmental or unavailable check as passed.
+
+## Testing and review
+
+- Unit tests protect policies, state transitions, parsers, and meaningful edge cases. Integration tests protect adapter/storage boundaries. End-to-end tests protect critical user journeys.
+- Prioritize approval scope, filesystem access boundaries, cancellation, timeouts, retries, duplicate execution, crash recovery, persistence and migrations when those features exist.
+- Use deterministic fixtures and controlled clocks where needed. Routine tests must not consume paid model calls or contact personal accounts.
+- A timeout or retry must be bounded. Retry an external write only when its idempotency or execution status is known; do not silently duplicate a consequential action.
+- Use strict types and runtime validation at untrusted boundaries once the language/framework is chosen. Types do not replace runtime validation.
+- Add formatting, linting, type checking, tests and CI with the application toolchain. Do not claim those gates exist today. Current checks are the preview-source check, whitespace validation, and documented browser review.
+- Review changes for correctness, module boundaries, error handling, privacy and usability. Avoid tests for trivial text changes or tests that merely restate the code.
+
+## Data, permissions, and diagnosability
+
+- Keep credentials in the OS credential store. Never commit or log tokens, prompts containing private material, email bodies, paper contents, or arbitrary file contents.
+- Log structured operational events with project/run identifiers, tool names, durations, outcomes and redacted error categories. Provide enough context to reproduce failures without collecting private content by default.
+- Model run/approval state explicitly. Approval binds to an exact proposal, scope, and version; changing the proposal invalidates the approval. Enforce this at the execution boundary, not only in the interface.
+- Validate selected-folder boundaries, including symlink resolution. UI visibility is not an access-control mechanism.
+- Make persistent state changes transactional where appropriate. Version schemas, test migrations, and plan recovery before changing user data formats.
+- Expose failures, partial results, cancellation and recovery paths honestly. Keep sample/demo state separate from live application state.
+
+## Change discipline
+
+Use small coherent commits. Explain the problem, resulting behavior, relevant evidence, and limits in change descriptions. Keep dependencies justified and locked. Record architectural decisions when they change ownership, persistence, permissions, or distribution. Keep this document current as the actual implementation replaces proposed structure.

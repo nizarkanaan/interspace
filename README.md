@@ -25,6 +25,19 @@ Each person installs Interspace on their own machine and uses their own files, p
 
 - [Design direction and boundaries](docs/design-direction.md)
 - [Preview validation](docs/validation.md)
+- [Engineering and debugging conventions](docs/engineering.md)
 - [Standalone prototype](design/index.html)
 
 Application architecture, agent execution, authentication, distribution, licensing, and integrations remain to be decided and implemented.
+
+## Maintaining the preview
+
+Edit `design/observatory.fragment.html`, then run:
+
+```sh
+node scripts/build-preview.mjs
+node scripts/build-preview.mjs --check
+git diff --check
+```
+
+The first command regenerates the standalone preview; the check fails if it has drifted from its source. These commands require Node.js and no packages. Opening the preview itself does not require Node.js.

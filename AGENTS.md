@@ -17,4 +17,8 @@ This is currently a design repository, not an implemented agent application.
 
 Read docs/design-direction.md before changing the UI. Preserve the observatory direction, accessible controls, light/dark appearance, and responsive layout. Avoid decorative activity that implies real agent work.
 
-The standalone preview is design/index.html; its reusable fragment is design/observatory.fragment.html. Keep both in sync when changing the prototype. Do not promote this throwaway UI into the production app before agreeing on architecture and scope.
+The preview source is design/observatory.fragment.html. Generate design/index.html with `node scripts/build-preview.mjs`; never edit the generated page independently. Run `node scripts/build-preview.mjs --check` before committing preview changes. Do not promote this throwaway UI into the production app before agreeing on architecture and scope.
+
+## Engineering conventions
+
+Read docs/engineering.md before implementing or debugging. Keep changes focused and follow the dependency boundaries there. Reproduce bugs and trace their cause before editing; use meaningful regression coverage for behavioral fixes. Verify the affected behavior and report actual results, including anything untested. Do not create speculative framework layers, empty application directories, or shared utilities without a concrete use.
