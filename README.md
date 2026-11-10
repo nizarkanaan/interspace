@@ -2,7 +2,7 @@
 
 A personal observatory for projects, research, knowledge, and specialist AI agents.
 
-**Status: design study.** This repository contains a clickable UI prototype and proposed product direction. It does not run agents, authenticate AI accounts, read project folders, or connect to external apps.
+**Status: design study with a read-only workflow pilot.** The clickable prototype remains illustrative. The isolated [pilot](pilot/README.md) reviews a committed Sample Project snapshot through real specialist sessions dispatched by the controlling Codex chat and displays their recorded results. Standalone chat, automatic provider dispatch and external-app integrations are not implemented.
 
 ## Preview
 

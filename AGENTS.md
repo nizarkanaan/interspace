@@ -1,6 +1,8 @@
 # Interspace project guidance
 
-This is currently a design repository, not an implemented agent application.
+This repository contains a design prototype and an isolated read-only workflow pilot. It is not yet a standalone agent application.
+
+The user authorized the first working workflow on a branch with Sample Project as read-only input. Keep pilot implementation under `pilot/`, its tests under `tests/`, and run data under ignored `workspace-data/`. Never modify, checkout or run the sample project from the pilot. Preserve existing source edits; use committed snapshots and verify integrity. Do not merge the pilot branch into main without the user accepting it. Read `pilot/README.md` for the explicit current-session bridge and its limitations.
 
 ## Product boundaries
 
