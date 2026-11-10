@@ -17,7 +17,7 @@ This is currently a design repository, not an implemented agent application.
 
 Read docs/design-direction.md before changing the UI. Preserve the observatory direction, accessible controls, light/dark appearance, and responsive layout. Avoid decorative activity that implies real agent work. Agent figures stay in fixed departments; do not add walking, idle animation, or a simulation loop.
 
-The preview sources are design/observatory.fragment.html (UI/state) and design/scene/lab-scene.js (original static character artwork and hit testing). Generate design/index.html and design/preview.fragment.html with `node scripts/build-preview.mjs`; never edit the generated page independently. Run `node scripts/build-preview.mjs --check` before committing preview changes. Do not promote this throwaway UI into the production app before agreeing on architecture and scope.
+The preview sources are design/observatory.fragment.html (UI/state), design/scene/lab-scene.js (original static character artwork and hit testing), and design/agents/ (role catalog and contract data). Generate design/index.html and design/preview.fragment.html with `node scripts/build-preview.mjs`; never edit the generated page independently. Run `node scripts/build-preview.mjs --check` and `node scripts/build-role-playbooks.mjs --check` before committing preview changes. Role contract changes regenerate docs/agent-playbooks.md. Template validation is structural; never claim agent accuracy without model-backed evaluation evidence. Do not promote this throwaway UI into the production app before agreeing on architecture and scope.
 
 ## Engineering conventions
 

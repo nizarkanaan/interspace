@@ -1,6 +1,6 @@
 # Static laboratory validation
 
-Checked 2026-11-10 in Chromium against the generated standalone preview. All tasks, activity, artifacts, approval decisions and provider connections are sample state.
+Historical four-agent scene checked 2026-11-10 in Chromium against the generated standalone preview. All tasks, activity, artifacts, approval decisions and provider connections are sample state.
 
 ## Observed behavior
 
@@ -26,4 +26,4 @@ Evidence is recorded in `design/evidence/laboratory-report.json` with screenshot
 
 ## Limits
 
-Only one illustrative agent per department is present. Agent creation, multiple concurrent runs, real event logs, provider usage/cost accounting, persistent preferences, connectors and actual output opening remain application work. State resets on reload. The canvas and roster provide alternative selection surfaces; the roster is the keyboard-accessible equivalent.
+This historical check used one illustrative agent per department. The later expandable Role library is covered in role-library-validation.md. Agent creation, multiple concurrent runs, real event logs, provider usage/cost accounting, persistent preferences, connectors and actual output opening remain application work. State resets on reload. The canvas and roster provide alternative selection surfaces; the roster is the keyboard-accessible equivalent.

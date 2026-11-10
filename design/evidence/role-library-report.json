@@ -1,0 +1,69 @@
+{
+  "contract": "Expandable role library and task/department views; inspectable role contracts explicitly marked not evaluated. See docs/design-direction.md and docs/role-library-validation.md.",
+  "targetViewports": [
+    "1280x900",
+    "1024x900",
+    "390x900"
+  ],
+  "accessibility": {
+    "status": "pass",
+    "evidence": "Native buttons and labelled fields support role selection, forms, department filters and playbook details. Added agents focus their task assignment. Selected agents retain pressed state. Scoped review, not a full audit."
+  },
+  "responsive": {
+    "status": "pass",
+    "evidence": "Tasks, Observatory and Role library fit 1280, 1024, 390 and 320 widths. Expanded desktop and mobile playbooks inspected in light/dark appearances."
+  },
+  "contentStates": {
+    "loading": {
+      "status": "not-applicable",
+      "reason": "No asynchronous agent requests or provider connections exist."
+    },
+    "empty": {
+      "status": "pass",
+      "evidence": "No matching role search and empty team department show explicit empty states."
+    },
+    "error": {
+      "status": "pass",
+      "evidence": "Duplicate role names and whitespace-only task assignments are rejected with feedback; input HTML/script strings display literally."
+    },
+    "partial": {
+      "status": "pass",
+      "evidence": "Custom roles explicitly disclose that they lack a reviewed workflow and evaluation cases."
+    },
+    "success": {
+      "status": "pass",
+      "evidence": "All 22 built-ins were added, yielding 26 independent sample agents; separate task assignment, dynamic departments, multi-row figure selection, removal and playbook links worked without page errors."
+    },
+    "permission": {
+      "status": "pass",
+      "evidence": "New agents remain Unassigned until a task is saved; saving queues sample state only. Tool labels and template status explicitly grant no real access or accuracy guarantee."
+    }
+  },
+  "renderedEvidence": [
+    {
+      "viewport": "1280x900",
+      "artifact": "role-library-light.png",
+      "observation": "Research templates with distinct equipment and readable playbook controls."
+    },
+    {
+      "viewport": "1280x900",
+      "artifact": "expanded-team-light.png",
+      "observation": "Multiple research specialists with independent tasks and a shared inspector."
+    },
+    {
+      "viewport": "1024x900",
+      "artifact": "research-department-dark.png",
+      "observation": "Expanded research department with four instances in two rows."
+    },
+    {
+      "viewport": "1024x900",
+      "artifact": "citation-playbook.png",
+      "observation": "Complete citation-checker contract and its unexecuted evaluation scenarios."
+    },
+    {
+      "viewport": "390x900",
+      "artifact": "role-playbook-mobile.png",
+      "observation": "Readable narrow calendar playbook and explicit draft evaluation status."
+    }
+  ]
+}

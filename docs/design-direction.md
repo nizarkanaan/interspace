@@ -27,11 +27,19 @@ The memorable interaction is the project atlas: the research question sits at th
 The user requested the stylized lab as an option alongside conventional task management. The Agents workspace now offers **Tasks** (the default) and **Observatory**. The design study opens on this workspace so both options are easy to compare.
 
 - Tasks groups the shared sample items into Queued, Working, Needs you, and Done.
-- Observatory places the same agents in fixed Scout, Research, Builder, and Review areas. Click a figure or its accessible roster button to open the shared task inspector. On desktop it sits beside the scene; narrower layouts stack it. The inspector exposes current activity, expected output, next step/blocker, role, tools, boundaries, and dependencies. Artifact names are illustrative; no files are created.
+- Observatory groups agents into Discovery, Research, Engineering, Analysis, Review, Writing, and Operations departments, showing only populated departments in the current filter. Click a figure or its accessible roster button to open the shared task inspector. On desktop it sits beside the scene; narrower layouts stack it. The inspector exposes current activity, expected output, next step/blocker, role, tools, boundaries, and dependencies. Artifact names are illustrative; no files are created.
 - Both views use the same task projection and selected-task inspector. Switching views preserves selection, approval state, pause state, and the sample handoff. Returning from another screen preserves the selected view during the session.
 - A labelled Preview review stage control demonstrates an evidence-matrix transfer from Researcher to Reviewer. The Researcher task completes and the Reviewer task becomes active in both views. Pausing disables this preview action. Reset sample stage restores the sample sequence without undoing approval decisions.
 - There is no walking, pose animation, frame loop, timer, or pathfinding. A stage preview updates task state immediately and leaves figures in their departments. The Canvas redraws only on mount, resize, or appearance changes; selection and state changes remount it. Observer and event listeners are disposed when leaving the view.
 - The existing decision inbox remains the approval surface. Approval changes the sample experiment to Queued; it does not start a real run.
+
+### Extensible role library
+
+The original four sample agents are not a product limit. The library now offers 22 role templates, with multiple agent instances per role and a custom-role form. Each instance has an independent task and starts Unassigned when added; saving a task changes only its sample state to Queued. Added instances can be removed without affecting the original fixtures. A department filter scopes both task and lab projections.
+
+Department silhouettes are stable, and specialty equipment plus short role/instance codes distinguish agents within a department. The scene lays out multiple workstations and expands rooms to fit. Native roster buttons remain the accessible equivalent of figure selection. Role search and department filtering keep the catalog usable.
+
+Each built-in role exposes an inspectable playbook: mission, routing, inputs, workflow, output fields, checks, boundaries, handoffs and three seed evaluation scenarios. These are draft contracts, not measured model performance. Researcher extracts evidence; Literature reviewer synthesizes a corpus; Idea generator proposes falsifiable hypotheses; Citation checker audits support; research Reviewer and Code reviewer have different responsibilities. See the research record and generated playbook collection. Custom roles are explicitly unreviewed drafts.
 
 View preferences currently live only in the prototype session. Persisting a user's preferred view and connecting actual execution events are future application work.
 

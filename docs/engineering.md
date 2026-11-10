@@ -33,6 +33,9 @@ Apply the relevant installed skill when doing that work, and read its current in
 | `AGENTS.md` | Entry point, product boundaries, and contributor instructions |
 | `README.md` | Status, preview instructions, and documentation links |
 | `design/observatory.fragment.html` | Canonical UI and sample-state source of the throwaway prototype |
+| `design/agents/role-catalog.js` | Reusable role identities, departments, appearance and custom draft creation |
+| `design/agents/role-contracts.json` | Canonical specialist workflows, boundaries, output fields and seed evaluation cases |
+| `docs/agent-playbooks.md` | Generated human-readable role contracts; never edit independently |
 | `design/scene/lab-scene.js` | Original static Canvas artwork, department layout, and figure hit testing |
 | `design/preview.fragment.html` | Generated self-contained fragment for conversation previews |
 | `design/index.html` | Generated standalone preview, committed for easy opening |
@@ -40,7 +43,7 @@ Apply the relevant installed skill when doing that work, and read its current in
 | `docs/` | Design direction, engineering decisions, and validation limits |
 | `scripts/` | Small, reproducible repository maintenance commands |
 
-Do not edit generated preview copies. Regenerate the standalone page and bundled fragment from the two sources. Evidence screenshots are historical observations, not proof that future changes passed. Refresh affected evidence when behavior or layout changes.
+Do not edit generated preview copies. Regenerate the standalone page and bundled fragment from the UI, scene, catalog and contract sources. Regenerate the human-readable playbooks after changing their data. Evidence screenshots are historical observations, not proof that future changes passed. Refresh affected evidence when behavior or layout changes.
 
 ## Application organization when implementation begins
 
