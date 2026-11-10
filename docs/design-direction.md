@@ -33,9 +33,13 @@ The user requested the stylized lab as an option alongside conventional task man
 - There is no walking, pose animation, frame loop, timer, or pathfinding. A stage preview updates task state immediately and leaves figures in their departments. The Canvas redraws only on mount, resize, or appearance changes; selection and state changes remount it. Observer and event listeners are disposed when leaving the view.
 - The existing decision inbox remains the approval surface. Approval changes the sample experiment to Queued; it does not start a real run.
 
+### Proposed conversational control
+
+The Orchestrator is a distinct role for workspace-wide or project-scoped conversation, authorized specialist dispatch and evidence-backed progress. The proposed interface adds a scope selector and per-scope threads, linked to the existing task inspector, Observatory and Decisions. The Project coordinator remains a planning specialist. See [Orchestrator design](orchestrator-design.md) for the interaction, shared budget, runtime authorization and cancellation contract. Only the role playbook is present in the prototype; chat and dispatch are not implemented.
+
 ### Extensible role library
 
-The original four sample agents are not a product limit. The library now offers 22 role templates, with multiple agent instances per role and a custom-role form. Each instance has an independent task and starts Unassigned when added; saving a task changes only its sample state to Queued. Added instances can be removed without affecting the original fixtures. A department filter scopes both task and lab projections.
+The original four sample agents are not a product limit. The library now offers 23 role templates, with multiple agent instances per role and a custom-role form. Each instance has an independent task and starts Unassigned when added; saving a task changes only its sample state to Queued. Added instances can be removed without affecting the original fixtures. A department filter scopes both task and lab projections.
 
 Department silhouettes are stable, and specialty equipment plus short role/instance codes distinguish agents within a department. The scene lays out multiple workstations and expands rooms to fit. Native roster buttons remain the accessible equivalent of figure selection. Role search and department filtering keep the catalog usable.
 

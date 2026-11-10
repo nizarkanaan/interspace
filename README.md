@@ -12,7 +12,7 @@ Try the project map, project tabs, agent roles, first-launch state, connection s
 
 The preview opens in **Agents → Tasks**. Switch to **Observatory** for the optional research-lab view. Both views share task selection and status. Characters stay at workstations grouped into departments as the team grows. Click a figure or its keyboard-accessible roster button to inspect its task, activity, output, blockers, and permissions. **Preview review stage** changes sample task status without moving characters. Choose Blueprint, Fieldwork, or Printshop to compare palettes. No real agents run.
 
-**Role library** contains 22 specialist templates across Discovery, Research, Engineering, Analysis, Review, Writing, and Operations. Read each role playbook, add multiple instances, assign separate sample tasks, or create a custom role. Department filters keep larger teams manageable. The 22 playbooks include 66 seed evaluation scenarios; model evaluations have **not** been run. Custom roles are user-written drafts without reviewed playbooks.
+**Role library** contains 23 specialist templates across Discovery, Research, Engineering, Analysis, Review, Writing, and Operations. Read each role playbook, add multiple instances, assign separate sample tasks, or create a custom role. Department filters keep larger teams manageable. The 23 playbooks include 69 seed evaluation scenarios; model evaluations have **not** been run. Custom roles are user-written drafts without reviewed playbooks. The new Orchestrator playbook defines scoped conversation and bounded specialist dispatch; those runtime capabilities are not implemented.
 
 Earlier conversation previews are preserved in [design/archive](design/archive/README.md). All Interspace project files now live within this repository; the archive is historical. Current sources are the UI in `design/observatory.fragment.html`, the scene in `design/scene/lab-scene.js`, and the role definitions in `design/agents/`.
 
@@ -34,6 +34,7 @@ Each person installs Interspace on their own machine and uses their own files, p
 - [Agent views validation](docs/agent-views-validation.md)
 - [Static laboratory validation](docs/laboratory-validation.md)
 - [Agent playbooks](docs/agent-playbooks.md)
+- [Orchestrator design](docs/orchestrator-design.md)
 - [Template research and design](docs/research/agent-template-design.md)
 - [Role library validation](docs/role-library-validation.md)
 - [Engineering and debugging conventions](docs/engineering.md)

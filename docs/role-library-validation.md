@@ -19,3 +19,9 @@ Checked 2026-11-10 in Chromium. This is prototype behavior verification, not mod
 All state resets on reload. Tool labels are requested capabilities, not granted access. Playbooks are provider-independent draft specifications. The 66 scenarios still need concrete fixtures, a sandboxed runtime, independent expected results, repeated model trials and calibrated expert grading. No accuracy percentage, reliability certification or production readiness is claimed.
 
 Evidence is recorded in design/evidence/role-library-report.json. Earlier screenshots/reports describe prior prototype versions.
+
+## Orchestrator addition — 2026-11-10
+
+The catalog now contains 23 roles and 69 seed evaluation scenarios. Chromium checks confirmed the Orchestrator can be found by search, its full playbook opens, and Add agent creates an unassigned sample instance with focus in the task field. The playbook fits 1280px and 390px viewports without horizontal document overflow; no page errors were observed. Structural contract, generated-preview and syntax checks pass. The first browser-check attempt used an unavailable locator helper; the corrected check inspected the focused element directly and passed. Evidence: design/evidence/orchestrator-role.png.
+
+This addition defines an orchestration contract and proposed conversation interface. It does not implement chat, dispatch, authorization gates, budgets or cancellation. No model evaluation was run; earlier 22-role browser records remain historical.

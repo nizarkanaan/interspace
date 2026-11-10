@@ -33,6 +33,7 @@
     ['slides','Slide designer','writing','SD','slides','Turn project findings into clear presentation slides.','Selected results, figures and audience brief','Slide outline, figures and speaker notes'],
     ['inbox','Inbox assistant','operations','IN','mail','Prioritize selected messages and prepare reply drafts.','Selected email scope; connection required','Priority briefing and unsent reply drafts'],
     ['calendar','Calendar assistant','operations','CA','calendar','Find scheduling conflicts and propose time blocks.','Selected calendar scope; connection required','Proposed schedule changes awaiting approval'],
+    ['orchestrator','Orchestrator','operations','OR','bulb','Turn your goals into bounded plans, dispatch specialists and reconcile their results within the selected scope.','Scoped project state, role registry and authorized dispatch controls; runtime required','Execution plan, assignments, verified progress and decisions for you'],
     ['coordinator','Project coordinator','operations','PC','clipboard','Track dependencies, milestones and decisions across tasks.','Selected project tasks and decisions','Project plan, blockers and proposed next actions'],
     ['knowledge','Knowledge curator','operations','KC','book','Organize approved notes and connect sources to project knowledge.','Selected Obsidian vault, Notion pages or folders','Proposed note updates with provenance']
   ];
