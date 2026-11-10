@@ -10,6 +10,8 @@ Open `design/index.html` in a modern browser. No installation, server, API key, 
 
 Try the project map, project tabs, agent roles, first-launch state, connection scope previews, and the approval / request-changes flow. All content is illustrative. State resets on reload.
 
+The preview opens in **Agents → Tasks**. Switch to **Observatory** for the optional research-lab view. Both views share task selection and status; **Preview handoff** demonstrates a researcher passing its output to a reviewer. No real agents run.
+
 ## Intended product
 
 Each person installs Interspace on their own machine and uses their own files, projects, and AI connections. Sharing the application does not share a workspace, credentials, or an AI usage allowance.
@@ -25,6 +27,7 @@ Each person installs Interspace on their own machine and uses their own files, p
 
 - [Design direction and boundaries](docs/design-direction.md)
 - [Preview validation](docs/validation.md)
+- [Agent views validation](docs/agent-views-validation.md)
 - [Engineering and debugging conventions](docs/engineering.md)
 - [Standalone prototype](design/index.html)
 

@@ -1,0 +1,20 @@
+{
+  "contract": "docs/design-direction.md: optional Observatory and default Tasks project the same work items, preserve selection and status, and clearly identify sample activity.",
+  "targetViewports": ["1024x900", "390x844"],
+  "accessibility": {"status":"pass","evidence":"Native buttons have task-specific accessible names and aria-pressed selection. View switching restores focus; Tab reaches Observatory with a visible solid outline. Details expose role and access boundaries. Reduced-motion mode suppressed the handoff animation; normal mode produced one event animation. Screenshots were inspected in both appearances. This is a scoped prototype check, not a full accessibility audit."},
+  "responsive": {"status":"pass","evidence":"Both views checked at 1024, 390 and 320 CSS-pixel widths without horizontal document overflow. Narrow workstations stack; controls and task inspector remain available."},
+  "contentStates": {
+    "loading":{"status":"not-applicable","reason":"This static sample makes no asynchronous agent or connector requests."},
+    "empty":{"status":"pass","evidence":"Completing the Researcher task through the sample handoff and approving the Builder proposal leaves the Needs you lane empty with a No tasks label."},
+    "error":{"status":"not-applicable","reason":"This view change adds no fallible external operation or user-entered data. Runtime failures remain unimplemented; prior task-composer validation is recorded separately."},
+    "partial":{"status":"not-applicable","reason":"All task records are local fixtures. Partial retrieval and disconnected live-agent states are future runtime work."},
+    "success":{"status":"pass","evidence":"Researcher becomes Done and Reviewer Working after the sample handoff in both projections. Selected task survives view switches. Reset, pause/resume, and return navigation were exercised without page errors."},
+    "permission":{"status":"pass","evidence":"Builder requires the existing sample approval flow; approval changes its state to Queued in both views and explicitly does not start execution."}
+  },
+  "renderedEvidence": [
+    {"viewport":"1024x900","artifact":"agent-tasks-dark.png","observation":"Default task board with state lanes and the selected Researcher task inspector."},
+    {"viewport":"1024x900","artifact":"agent-observatory-dark.png","observation":"Four research-lab workstations, visible sample source handoff, and the selected Builder task inspector."},
+    {"viewport":"1024x900","artifact":"agent-observatory-light.png","observation":"Light appearance with equivalent controls, readable activity, and task selection."},
+    {"viewport":"390x844","artifact":"agent-observatory-mobile.png","observation":"Full-page narrow capture with stacked workstations, wrapping handoff label, and reachable controls."}
+  ]
+}

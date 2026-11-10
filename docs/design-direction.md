@@ -13,6 +13,19 @@ A personal observatory: a quiet, precise working environment with orbital geomet
 
 The memorable interaction is the project atlas: the research question sits at the centre, with evidence, hypotheses, experiments and review surrounding it. Every node opens an ordinary, readable workspace. The map complements the list navigation.
 
+### Accepted direction: two views of the same agent work
+
+The user requested the stylized lab as an option alongside conventional task management. The Agents workspace now offers **Tasks** (the default) and **Observatory**. The design study opens on this workspace so both options are easy to compare.
+
+- Tasks groups the shared sample items into Queued, Working, Needs you, and Done.
+- Observatory presents the same items as Scout, Researcher, Builder, and Reviewer workstations, including their current activity and status.
+- Both views use the same task projection and selected-task inspector. Switching views preserves selection, approval state, pause state, and the sample handoff. Returning from another screen preserves the selected view during the session.
+- A labelled Preview handoff control demonstrates an evidence-matrix transfer from Researcher to Reviewer. The Researcher task completes and the Reviewer task becomes active in both views. Pausing disables this preview action. Reset handoff restores the sample sequence without undoing approval decisions.
+- The transfer has a short, event-triggered motion in Observatory mode only. Reduced-motion users get the same state change without animation. There is no looping activity or suggestion that a real agent is running.
+- The existing decision inbox remains the approval surface. Approval changes the sample experiment to Queued; it does not start a real run.
+
+View preferences currently live only in the prototype session. Persisting a user's preferred view and connecting actual execution events are future application work.
+
 ## Surface contract
 
 - Primary job: resume a project, see the next decision, and inspect agent work.
