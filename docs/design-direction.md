@@ -1,7 +1,7 @@
 # Interspace — Observatory design study
 
 Date: 2026-11-10
-Status: proposed visual direction; production architecture and implementation are not approved.
+Status: historical design direction, now complemented by an authorized bounded Mac app in app/. See app/README.md and the Mac app specification for the implemented runtime; the standalone design preview remains illustrative.
 
 ## Confirmed intent
 

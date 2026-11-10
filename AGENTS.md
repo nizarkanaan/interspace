@@ -1,8 +1,8 @@
 # Interspace project guidance
 
-This repository contains a design prototype and an isolated read-only workflow pilot. It is not yet a standalone agent application.
+This repository contains the design prototype, an offline pilot and a native Mac application in `app/`. The user authorized the launchable app and read-only Orchestrator workflow on the existing feature branch. The app runtime supports Orchestrator chat and Researcher/Reviewer dispatch; it does not execute all catalog roles.
 
-The user authorized the first working workflow on a branch with Sample Project as read-only input. Keep pilot implementation under `pilot/`, its tests under `tests/`, and run data under ignored `workspace-data/`. Never modify, checkout or run the sample project from the pilot. Preserve existing source edits; use committed snapshots and verify integrity. Do not merge the pilot branch into main without the user accepting it. Read `pilot/README.md` for the explicit current-session bridge and its limitations.
+The user authorized the first working workflow on a branch with Sample Project as read-only input. Keep snapshot/pilot helpers under `pilot/`, native/backend/UI code under `app/`, tests under `tests/`, and development run data under ignored `workspace-data/`. App user data belongs in its Application Support directory. See `app/README.md`. Never modify, checkout or run the sample project from the pilot. Preserve existing source edits; use committed snapshots and verify integrity. Do not merge the pilot branch into main without the user accepting it. Read `pilot/README.md` for the explicit current-session bridge and its limitations.
 
 ## Product boundaries
 

@@ -1,6 +1,6 @@
 # Engineering conventions
 
-These conventions apply to Interspace contributors and coding agents. The current repository is a design study; the production stack remains undecided. Prefer the smallest maintainable solution that meets a demonstrated requirement.
+These conventions apply to Interspace contributors and coding agents. The repository includes a historical design study and the first native Mac runtime (AppKit/WebKit shell, Python pipe backend, Codex CLI adapter). Prefer the smallest maintainable solution that meets a demonstrated requirement.
 
 ## Source guidance and project-specific adaptations
 
@@ -45,7 +45,11 @@ Apply the relevant installed skill when doing that work, and read its current in
 
 Do not edit generated preview copies. Regenerate the standalone page and bundled fragment from the UI, scene, catalog and contract sources. Regenerate the human-readable playbooks after changing their data. Evidence screenshots are historical observations, not proof that future changes passed. Refresh affected evidence when behavior or layout changes.
 
-## Application organization when implementation begins
+## Current Mac implementation
+
+`app/macos/main.swift` owns the native shell and restricted UI bridge. `app/backend/service.py` owns local state and bounded orchestration; `provider.py` owns Codex processes. `app/ui/index.html` renders state and sends enumerated intentions. `pilot/runner.py` remains the source snapshot/evidence helper. `scripts/build-macos-app.py` packages resources without user data. Do not add a local HTTP service: the current shell uses JSON-lines pipes. See app/README.md for limits.
+
+## Broader application organization
 
 Start with one application and explicit module boundaries. Do not introduce a monorepo, microservices, plugin framework, or generic repository abstraction merely to anticipate growth. The exact physical layout follows the chosen desktop/local-web stack; this is the proposed ownership map, not an existing scaffold.
 

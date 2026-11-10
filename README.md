@@ -2,9 +2,13 @@
 
 A personal observatory for projects, research, knowledge, and specialist AI agents.
 
-**Status: design study with a read-only workflow pilot.** The clickable prototype remains illustrative. The isolated [pilot](pilot/README.md) reviews a committed Sample Project snapshot through real specialist sessions dispatched by the controlling Codex chat and displays their recorded results. Standalone chat, automatic provider dispatch and external-app integrations are not implemented.
+**Status: native Mac development app with a bounded read-only workflow.** Launch `dist/Interspace.app` after [building](app/README.md). It has an in-app Orchestrator conversation, persistent local state and automatic Codex Researcher/Reviewer dispatch. The design preview and earlier offline pilot remain separate. Other role execution and external-app integrations are not implemented.
 
-## Preview
+## Mac app
+
+Double-click `dist/Interspace.app`. Choose Sample Project, check the Codex connection, and ask for an evidence review. Start its read-only plan to run the two specialists. See [app setup and limits](app/README.md).
+
+## Design preview
 
 Open `design/index.html` in a modern browser. No installation, server, API key, or network requests are required. The preview follows your system's light/dark appearance.
 
@@ -18,7 +22,7 @@ Earlier conversation previews are preserved in [design/archive](design/archive/R
 
 ## Intended product
 
-The first working workflow will target **a sample research project**. Sample project screens use an illustrative research domain.
+Sample project screens use an illustrative research domain.
 
 Each person installs Interspace on their own machine and uses their own files, projects, and AI connections. Sharing the application does not share a workspace, credentials, or an AI usage allowance.
 
@@ -42,7 +46,7 @@ Each person installs Interspace on their own machine and uses their own files, p
 - [Engineering and debugging conventions](docs/engineering.md)
 - [Standalone prototype](design/index.html)
 
-Application architecture, agent execution, authentication, distribution, licensing, and integrations remain to be decided and implemented.
+The Mac app implements a bounded read-only runtime and Codex connection. Broader role execution, external integrations, notarized distribution and additional-platform packaging remain future work.
 
 ## Maintaining the preview
 

@@ -1,6 +1,6 @@
 # Interspace Orchestrator
 
-Status: proposed interaction and runtime contract; the role playbook is available in the design prototype. Conversational control, dispatch and persistent history are not implemented. No real agents run.
+Status: broader proposed contract with a bounded Mac implementation in `app/`. The app implements persistent Workspace/project conversation and read-only Researcher/Reviewer dispatch through Codex. Additional roles, general project mutations and external-action approvals remain future work. See `app/README.md` and the Mac app specification for the implemented scope.
 
 ## Purpose
 
