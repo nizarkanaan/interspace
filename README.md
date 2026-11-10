@@ -12,6 +12,8 @@ Try the project map, project tabs, agent roles, first-launch state, connection s
 
 The preview opens in **Agents → Tasks**. Switch to **Observatory** for the optional research-lab view. Both views share task selection and status; **Preview handoff** demonstrates a researcher passing its output to a reviewer. No real agents run.
 
+Earlier conversation previews are preserved in [design/archive](design/archive/README.md). All Interspace project files now live within this repository; the archive is historical, and `design/observatory.fragment.html` remains the current source.
+
 ## Intended product
 
 Each person installs Interspace on their own machine and uses their own files, projects, and AI connections. Sharing the application does not share a workspace, credentials, or an AI usage allowance.
