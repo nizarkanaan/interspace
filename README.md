@@ -10,9 +10,9 @@ Open `design/index.html` in a modern browser. No installation, server, API key, 
 
 Try the project map, project tabs, agent roles, first-launch state, connection scope previews, and the approval / request-changes flow. All content is illustrative. State resets on reload.
 
-The preview opens in **Agents → Tasks**. Switch to **Observatory** for the optional research-lab view. Both views share task selection and status; **Preview handoff** demonstrates a researcher passing its output to a reviewer. No real agents run.
+The preview opens in **Agents → Tasks**. Switch to **Observatory** for the optional research-lab view. Both views share task selection and status. Characters stay in fixed Research, Builders, Web scouts, and Review departments. Click a figure or its keyboard-accessible roster button to inspect its task, activity, output, blockers, and permissions. **Preview review stage** changes sample task status without moving characters. Choose Blueprint, Fieldwork, or Printshop to compare palettes. No real agents run.
 
-Earlier conversation previews are preserved in [design/archive](design/archive/README.md). All Interspace project files now live within this repository; the archive is historical, and `design/observatory.fragment.html` remains the current source.
+Earlier conversation previews are preserved in [design/archive](design/archive/README.md). All Interspace project files now live within this repository; the archive is historical, and `design/observatory.fragment.html` and `design/scene/lab-scene.js` are the current sources.
 
 ## Intended product
 
@@ -30,6 +30,7 @@ Each person installs Interspace on their own machine and uses their own files, p
 - [Design direction and boundaries](docs/design-direction.md)
 - [Preview validation](docs/validation.md)
 - [Agent views validation](docs/agent-views-validation.md)
+- [Static laboratory validation](docs/laboratory-validation.md)
 - [Engineering and debugging conventions](docs/engineering.md)
 - [Standalone prototype](design/index.html)
 
@@ -37,7 +38,7 @@ Application architecture, agent execution, authentication, distribution, licensi
 
 ## Maintaining the preview
 
-Edit `design/observatory.fragment.html`, then run:
+Edit `design/observatory.fragment.html` for the UI and sample state, or `design/scene/lab-scene.js` for the static department scene. Then run:
 
 ```sh
 node scripts/build-preview.mjs
@@ -45,4 +46,4 @@ node scripts/build-preview.mjs --check
 git diff --check
 ```
 
-The first command regenerates the standalone preview; the check fails if it has drifted from its source. These commands require Node.js and no packages. Opening the preview itself does not require Node.js.
+The first command regenerates both the standalone preview and the bundled `design/preview.fragment.html`; the check fails if it has drifted from its source. These commands require Node.js and no packages. Opening the preview itself does not require Node.js.

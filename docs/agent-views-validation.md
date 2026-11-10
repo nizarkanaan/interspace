@@ -1,6 +1,6 @@
 # Agent workspace view validation
 
-Checked 2026-11-10 in Chromium. This extends the earlier static design study; there is no agent backend.
+Historical workstation-card version checked 2026-11-10 in Chromium. See [laboratory-validation.md](laboratory-validation.md) for the newer static character departments; the former handoff animation has been removed. This extends the earlier static design study; there is no agent backend.
 
 ## Behavior exercised
 

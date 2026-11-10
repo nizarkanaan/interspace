@@ -9,7 +9,16 @@ Interspace is a locally installed personal interface for projects, research and 
 
 ## Visual proposal
 
-A personal observatory: a quiet, precise working environment with orbital geometry used for relationships, a warm mineral accent for decisions, muted green for available research paths, and compact monospace labels for operational context. Light mode uses warm paper surfaces; dark mode uses graphite and blue-grey surfaces. No ambient animation, fake telemetry or decorative dashboards.
+A personal observatory with fixed specialist departments. The user rejected the original warm palette and clarified that the scene should be efficient to inspect, without walking or other simulated activity. The palette selector offers Blueprint (cobalt/graphite), Fieldwork (olive, inspired by Sample Project), and Printshop (plum). Each follows the system light/dark appearance. Role identity uses silhouettes and equipment as well as colour.
+
+| Department | Figure identity |
+| --- | --- |
+| Research | Lab coat, glasses, book |
+| Web scouts | Visor, antenna/scanner, satchel |
+| Builders | Hoodie, headphones |
+| Review | Waistcoat, clipboard, bun and glasses |
+
+The room is original procedural Canvas artwork; no external sprites or assets are loaded. Sample Project informed the spatial selection/inspector pattern. Pixel Agents (https://github.com/pixel-agents-hq/pixel-agents) was a reference for recognizable agent characters; its walking/animation interaction is deliberately excluded following the user's correction. No Sample Project code, private research content, or third-party artwork was imported.
 
 The memorable interaction is the project atlas: the research question sits at the centre, with evidence, hypotheses, experiments and review surrounding it. Every node opens an ordinary, readable workspace. The map complements the list navigation.
 
@@ -18,10 +27,10 @@ The memorable interaction is the project atlas: the research question sits at th
 The user requested the stylized lab as an option alongside conventional task management. The Agents workspace now offers **Tasks** (the default) and **Observatory**. The design study opens on this workspace so both options are easy to compare.
 
 - Tasks groups the shared sample items into Queued, Working, Needs you, and Done.
-- Observatory presents the same items as Scout, Researcher, Builder, and Reviewer workstations, including their current activity and status.
+- Observatory places the same agents in fixed Scout, Research, Builder, and Review areas. Click a figure or its accessible roster button to open the shared task inspector. On desktop it sits beside the scene; narrower layouts stack it. The inspector exposes current activity, expected output, next step/blocker, role, tools, boundaries, and dependencies. Artifact names are illustrative; no files are created.
 - Both views use the same task projection and selected-task inspector. Switching views preserves selection, approval state, pause state, and the sample handoff. Returning from another screen preserves the selected view during the session.
-- A labelled Preview handoff control demonstrates an evidence-matrix transfer from Researcher to Reviewer. The Researcher task completes and the Reviewer task becomes active in both views. Pausing disables this preview action. Reset handoff restores the sample sequence without undoing approval decisions.
-- The transfer has a short, event-triggered motion in Observatory mode only. Reduced-motion users get the same state change without animation. There is no looping activity or suggestion that a real agent is running.
+- A labelled Preview review stage control demonstrates an evidence-matrix transfer from Researcher to Reviewer. The Researcher task completes and the Reviewer task becomes active in both views. Pausing disables this preview action. Reset sample stage restores the sample sequence without undoing approval decisions.
+- There is no walking, pose animation, frame loop, timer, or pathfinding. A stage preview updates task state immediately and leaves figures in their departments. The Canvas redraws only on mount, resize, or appearance changes; selection and state changes remount it. Observer and event listeners are disposed when leaving the view.
 - The existing decision inbox remains the approval surface. Approval changes the sample experiment to Queued; it does not start a real run.
 
 View preferences currently live only in the prototype session. Persisting a user's preferred view and connecting actual execution events are future application work.
@@ -31,10 +40,10 @@ View preferences currently live only in the prototype session. Persisting a user
 - Primary job: resume a project, see the next decision, and inspect agent work.
 - Primary action: enter the project or inspect its pending proposal; the task composer prepares work rather than silently executing it.
 - Hierarchy: project state first, pending decision second, agent activity third.
-- Targets: 1024x900 desktop and 390x844 narrow. Also check 320px fit.
+- Targets: 1280x900 and 1024x900 desktop, 390x900 narrow. Also check 320px fit.
 - Navigation: Overview, Projects, Agents, Knowledge, Decisions, Connections.
 - Project sections: Brief, Papers, Hypotheses, Experiments, Files.
-- References: user requirements in this conversation, the earlier Interface concept, and the correction that each installation is independent. No third-party UI imagery or private data was used.
+- References: user requirements in this conversation, the earlier Interface concept, and the correction that each installation is independent. The current static scene also follows the Sample Project spatial inspector pattern and agent-character reference noted above. No third-party UI imagery or private data was used.
 
 ## Prototype states
 

@@ -1,0 +1,64 @@
+{
+  "contract": "docs/design-direction.md: static role departments with distinct figures, shared task inspection, optional Observatory and default Tasks; no walking or animation loop.",
+  "targetViewports": [
+    "1280x900",
+    "1024x900",
+    "390x900"
+  ],
+  "accessibility": {
+    "status": "pass",
+    "evidence": "Native task-specific roster buttons mirror figure selection and support Enter. Pressed selection, visible focus, and aria-live inspector expose state. Inspector details expose boundaries and dependencies. Stage changes work under reduced motion with no animation. Scoped review, not a complete audit."
+  },
+  "responsive": {
+    "status": "pass",
+    "evidence": "Both views fit 1280, 1024, 390 and 320 CSS-pixel widths. The inspector sits beside the scene at 1024 and above. Narrow layouts stack the inspector and use full-width roster targets. Three palette choices and light/dark screenshots inspected."
+  },
+  "contentStates": {
+    "loading": {
+      "status": "not-applicable",
+      "reason": "No asynchronous model or connector operation exists in this static prototype."
+    },
+    "empty": {
+      "status": "pass",
+      "evidence": "Approving the sample Builder proposal empties Needs you; its task lane displays No tasks."
+    },
+    "error": {
+      "status": "not-applicable",
+      "reason": "This change adds no fallible remote operations. Runtime error and retry UI remains future work."
+    },
+    "partial": {
+      "status": "not-applicable",
+      "reason": "Records are complete local fixtures; partial retrieval is not implemented."
+    },
+    "success": {
+      "status": "pass",
+      "evidence": "All four Canvas hit targets and keyboard roster selection open the correct task. Views and palettes preserve selection; review stage, pause/resume and reset update shared sample state. No page errors were reported."
+    },
+    "permission": {
+      "status": "pass",
+      "evidence": "Builder approval changes the sample task to Queued and explicitly starts no execution. Resetting sample stage retains the approval."
+    }
+  },
+  "renderedEvidence": [
+    {
+      "viewport": "1280x900",
+      "artifact": "lab-departments-light.png",
+      "observation": "Blueprint palette, fixed specialist departments, distinct characters and side inspector."
+    },
+    {
+      "viewport": "1024x900",
+      "artifact": "lab-departments-dark.png",
+      "observation": "Fieldwork palette, dark appearance, department map and side inspector."
+    },
+    {
+      "viewport": "390x900",
+      "artifact": "lab-departments-mobile.png",
+      "observation": "Printshop palette, overview map, readable full-width roster and stacked inspector."
+    },
+    {
+      "viewport": "1024x900",
+      "artifact": "lab-tasks-dark.png",
+      "observation": "Default conventional Tasks view and shared expanded inspector content."
+    }
+  ]
+}
