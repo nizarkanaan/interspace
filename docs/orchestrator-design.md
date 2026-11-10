@@ -34,7 +34,7 @@ The Orchestrator figure belongs in Operations, with a headset silhouette, idea-b
 
 ## Example: a research request
 
-User, in a sample project: “Find a defensible gap in the literature and prepare an experiment proposal.”
+User, in Sample Project: “Find a defensible gap in the literature and prepare an experiment proposal.”
 
 1. Inspect the brief, existing source collection and prior work. Ask only for a missing decision that affects the outcome.
 2. Reuse the collection. If coverage is insufficient, assign a bounded Web searcher task; otherwise skip it.

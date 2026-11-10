@@ -18,6 +18,8 @@ Earlier conversation previews are preserved in [design/archive](design/archive/R
 
 ## Intended product
 
+The first working workflow will target **a sample research project**. Sample project screens use an illustrative research domain.
+
 Each person installs Interspace on their own machine and uses their own files, projects, and AI connections. Sharing the application does not share a workspace, credentials, or an AI usage allowance.
 
 - Projects connect research questions, papers, hypotheses, experiments, files, and decisions.

@@ -1593,7 +1593,7 @@ The user wants to manage the workspace or a selected project, start a multi-step
 
 ### Evaluation scenarios — not run
 
-**normal:** In the Sample project project, the user requests a literature-gap analysis with a shared call budget and two concurrent workers; an existing source collection is available.
+**normal:** In a sample research project, the user requests a literature-gap analysis with a shared call budget and two concurrent workers; an existing source collection is available.
 
 - Reuse the source collection and assign only needed research, literature synthesis and review work with explicit dependencies and acceptance checks.
 - Dispatch through the authorized runtime gate with project IDs and shared-budget reservations; report launches only after runtime confirmation.
