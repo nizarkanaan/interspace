@@ -1,0 +1,20 @@
+{
+  "contract": "docs/design-direction.md: local personal observatory; project-first hierarchy; clear prototype state; native controls; system appearance; no external calls.",
+  "targetViewports": ["1024x900", "390x844"],
+  "accessibility": {"status":"pass","evidence":"Native button/input/textarea controls; task and revision fields have labels; decorative nav glyphs hidden from accessibility tree. Keyboard Tab moved Overview to Projects with a visible solid 2px outline. Reviewed light/dark text; muted light text was darkened after finding a 4.12:1 pair. Reduced-motion media enabled, with zero animations. This is a scoped prototype review, not a full accessibility audit."},
+  "responsive": {"status":"pass","evidence":"All six primary views checked at 1024, 390, and 320 CSS-pixel widths: no document horizontal overflow. Desktop and narrow overview screenshots inspected for text fit and structure."},
+  "contentStates": {
+    "loading":{"status":"not-applicable","reason":"Static local preview performs no asynchronous retrieval or agent work. Production loading, cancellation, retries and timeouts remain unimplemented."},
+    "empty":{"status":"pass","evidence":"Preview first launch shows the first-project prompt and connection setup action; sample workspace can be restored."},
+    "error":{"status":"pass","evidence":"Submitting an empty task displays Add a task or research question first. A nonempty task produces a sample planning notice."},
+    "partial":{"status":"not-applicable","reason":"No real source retrieval or integration exists in this design study. Partial retrieval and connector degradation must be designed before production integration."},
+    "success":{"status":"pass","evidence":"Approve once updates the pending count and explicitly says no real action was taken; reset restores the proposal. Request changes accepts feedback and records the sample result."},
+    "permission":{"status":"pass","evidence":"Inspect setup opens a local connection-scope explanation and distinguishes provider sign-in from API billing. No credentials are requested and no connection is made."}
+  },
+  "renderedEvidence": [
+    {"viewport":"1024x900","artifact":"desktop-light.png","observation":"Light overview: project atlas, decision panel, agent rail and task composer fit; no clipped text."},
+    {"viewport":"1024x900","artifact":"desktop-dark.png","observation":"Dark overview: graphite surfaces, warm decision accent and research indicators remain distinct."},
+    {"viewport":"390x844","artifact":"mobile-dark.png","observation":"Narrow viewport full-page capture: navigation wraps, content stacks and actions remain available."},
+    {"viewport":"1024x900","artifact":"empty-state.png","observation":"First-launch state offers a clear connection setup next action without invented project activity."}
+  ]
+}
