@@ -22,3 +22,5 @@ The preview source is design/observatory.fragment.html. Generate design/index.ht
 ## Engineering conventions
 
 Read docs/engineering.md before implementing or debugging. Keep changes focused and follow the dependency boundaries there. Reproduce bugs and trace their cause before editing; use meaningful regression coverage for behavioral fixes. Verify the affected behavior and report actual results, including anything untested. Do not create speculative framework layers, empty application directories, or shared utilities without a concrete use.
+
+The conventions incorporate ECC coding/design/verification guidance and Superpowers debugging/test-first/verification workflows; docs/engineering.md records the sources and adaptations. When installed, read and apply the relevant skill for the task. Keep the repository understandable and usable without requiring contributors to install those plugins. Do not claim skill compliance or successful verification merely because this guidance exists.

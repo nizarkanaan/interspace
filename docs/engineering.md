@@ -2,6 +2,30 @@
 
 These conventions apply to Interspace contributors and coding agents. The current repository is a design study; the production stack remains undecided. Prefer the smallest maintainable solution that meets a demonstrated requirement.
 
+## Source guidance and project-specific adaptations
+
+Reviewed against the installed ECC 2.2.3 and Superpowers 7.0.1 guidance on 2026-11-10. The table identifies the source skills; this document is a project-specific adaptation, not a wholesale copy or a claim that all suggested tooling is installed.
+
+| Source skill | Applied to Interspace |
+| --- | --- |
+| ECC `coding-standards` | Readability, descriptive naming, simple responsibilities, avoiding speculative abstractions, explicit errors, and predictable state updates |
+| ECC `frontend-design-direction` | Checkable UI intent, responsive and accessible states, rendered inspection, and recorded evidence |
+| ECC `verification-loop` | Build/type/lint/test checks where available, change and secret review, and separate reporting of local checks versus target-environment verification |
+| Superpowers `systematic-debugging` | Reproduce and trace the root cause; test one explanation at a time; verify the original failing behavior |
+| Superpowers `test-driven-development` | For production behavioral changes, observe a meaningful test fail for the intended reason, make it pass, then refactor while keeping it green |
+| Superpowers `verification-before-completion` | Fresh evidence before claiming a fix, passing tests, or completion; explicitly report unavailable checks |
+
+Apply the relevant installed skill when doing that work, and read its current instructions rather than assuming this summary contains every detail. These conventions remain usable by labmates without either plugin installed. User requirements and the actual application stack determine the scope: do not copy a Next.js folder tree into a desktop project, impose a coverage percentage as a substitute for critical-path tests, or treat a text search as a complete security audit. Documentation-only and throwaway design changes do not need a production test scaffold.
+
+## Coding baseline
+
+- Prefer descriptive domain names and small functions with one clear responsibility. Explain non-obvious decisions in comments rather than narrating the code.
+- Keep state changes explicit and prefer immutable updates for shared application state. Confine necessary mutation to clearly owned implementation details.
+- Use early returns to reduce nesting and named constants for meaningful limits and timeouts.
+- Handle errors at the appropriate boundary, preserve useful causes, and surface actionable failures without leaking private data. Do not catch an error merely to discard it.
+- Run independent read-only work concurrently when appropriate; preserve ordering for dependent work and consequential writes.
+- Measure a performance problem before adding caches, memoization, or a more elaborate architecture.
+
 ## Current repository
 
 | Location | Responsibility |
@@ -65,6 +89,8 @@ Keep unit tests alongside the behavior they protect. Add folders only when code 
 - Use strict types and runtime validation at untrusted boundaries once the language/framework is chosen. Types do not replace runtime validation.
 - Add formatting, linting, type checking, tests and CI with the application toolchain. Do not claim those gates exist today. Current checks are the preview-source check, whitespace validation, and documented browser review.
 - Review changes for correctness, module boundaries, error handling, privacy and usability. Avoid tests for trivial text changes or tests that merely restate the code.
+- For production behavioral changes, verify the test's initial failure is caused by missing or incorrect behavior, not a broken fixture; then confirm the fix and relevant suite pass. Describe tests by their expected behavior and keep arrange, act, and assert steps clear.
+- Completion reports distinguish passed, failed, unavailable, and not-applicable checks. Installing or running successfully on a developer machine does not establish installer or target-machine acceptance.
 
 ## Data, permissions, and diagnosability
 
