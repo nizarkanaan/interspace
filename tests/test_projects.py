@@ -198,10 +198,13 @@ class ProjectTests(unittest.TestCase):
         legacy={'version':1,'project_path':str(self.source),'threads':{'workspace':[{'role':'user','text':'Workspace history'}],'project':[{'role':'user','text':'Private history'}]},'pending':{'id':'kept','goal':'Review'},'run_id':run.name,'active':None,'error':'','usage':[{'role':'Researcher','run_id':run.name,'tokens':{}}],'connection':{'ready':True,'message':'Connected'}}
         original=json.dumps(legacy).encode(); (storage/'state.json').write_bytes(original)
         app=Application(storage,provider=RecordingProvider())
-        self.assertEqual(app.public()['version'],2)
-        self.assertEqual(app.public()['threads'],legacy['threads'])
+        self.assertEqual(app.public()['version'],3)
+        self.assertEqual(app.public()['threads'],dict(legacy['threads'],task=[]))
         self.assertEqual(app.public()['pending']['id'],'kept')
-        self.assertEqual(app.public()['run']['id'],run.name)
+        self.assertIsNone(app.public()['run'])  # Pending proposal has its own imported task.
+        run_task=next(t for t in app.state['projects'][app.public()['project_id']]['tasks'].values() if run.name in t['run_ids'])
+        self.assertEqual(run_task['run_id'],run.name)
+        self.assertTrue((storage/'state.v2-backup.json').exists())
         self.assertEqual((storage/'state.v1-backup.json').read_bytes(),original)
         Application(storage,provider=RecordingProvider())
         self.assertEqual((storage/'state.v1-backup.json').read_bytes(),original)
