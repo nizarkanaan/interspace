@@ -100,3 +100,13 @@ This document records a visual study and architecture alternatives. It is not ap
 ## Out of scope for this study
 
 Real integrations, scraping, agent execution, email/calendar access, credentials, scheduling, usage-meter accuracy, installers, shared workspaces, live collaboration and provider subscription compatibility claims.
+
+## Native task desk — 2026-11-11
+
+The launchable app in `app/` now defaults to a conventional Tasks desk, following the accepted task-desk visual study. Its quiet white/charcoal surfaces, blue actions, Avenir Next/system type at 15px, divider-based task rows and minimal navigation replace the app’s earlier green conversation-first chrome. The illustrative design preview remains a separate historical artifact.
+
+A selected project groups durable user tasks; each task has Conversation, Plan, Activity and Result. New task is an obvious action, with an editable specialist allowance rather than a hard six-specialist maximum. The Plan surface keeps objective, distinct role instance and dependency/access summary readable by default, with exact public briefs, outputs and source scope available in details before Start. Combined answers lead the Result surface; specialist outputs, evidence/history navigation and technical usage sit in named secondary disclosures. Per-assignment outputs remain distinctly labelled even for repeated roles. Actual reservations/events drive state, without timers or simulated work.
+
+Project conversation and Workspace advice remain separate contexts. Settings groups project metadata, committed source consent and connection controls. The active owner banner stays tied to the actual interaction while browsing. Drafts and delayed task/source/settings replies remain scoped to their owners. The optional Observatory preserves the original procedural figures and fixed departments, with distinct repeated-role labels.
+
+The native CSS supports light/dark and narrow layouts, reduced-motion preferences, visible keyboard focus and macOS 13 WebKit’s fallback palette through `@supports not (color:light-dark(...))`. Chrome screenshot checks do not establish old-WebKit visual compatibility or native-window acceptance. Actual validation and limitations are in `docs/task-desk-validation.md`.
