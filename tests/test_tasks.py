@@ -189,3 +189,30 @@ class TaskStorageTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,'revoked|consumed|live'):
                     restored.handle('start_plan',start)
                 self.assertEqual(restored.provider.calls,[])
+
+    def test_active_malformed_pending_is_isolated_without_clearing_other_proposals(self):
+        for pending in ({'id':[]},{},{'id':''}):
+            with self.subTest(pending=pending):
+                storage=self.base/('malformed-'+str(len(list(self.base.glob('malformed-*')))))
+                app=Application(storage,provider=TeamProvider());pid=test_pilot.legacy_project(app,self.source)['project_id']
+                tid=app.handle('create_task',{'project_id':pid})['task_id'];project=app.state['projects'][pid]
+                project['tasks'][tid]['pending']=copy.deepcopy(pending)
+                raw=copy.deepcopy(project['tasks'][tid])
+                general={'id':'keep-general','goal':'Unrelated general proposal'};project['pending']=copy.deepcopy(general)
+                healthy=projects.new_project(self.source);healthy['pending']={'id':'keep-healthy','goal':'Other project proposal'}
+                healthy_pending=copy.deepcopy(healthy['pending']);app.state['projects'][healthy['id']]=healthy
+                app.state.update(selected_project_id=healthy['id'],active='Orchestrator',active_project_id=pid,active_task_id=tid)
+                app.persist()
+                restored=Application(storage,provider=TeamProvider())
+                self.assertEqual(restored.state['projects'][pid]['tasks'][tid],raw)
+                self.assertEqual(restored.state['projects'][pid]['pending'],general)
+                self.assertEqual(restored.public()['pending'],healthy_pending)
+                self.assertEqual(restored.public()['error'],'')
+                restored.handle('create_task',{'project_id':healthy['id'],'title':'Healthy task'})
+                self.assertEqual(restored.public()['task']['title'],'Healthy task')
+                restored.handle('switch_project',{'project_id':pid})
+                self.assertEqual(restored.public()['tasks'][0]['status'],'unavailable')
+                self.assertIn('unavailable',restored.public()['error'])
+                saved=json.loads((storage/'state.json').read_text())
+                self.assertEqual(saved['projects'][pid]['tasks'][tid],raw)
+                self.assertEqual(restored.provider.calls,[])

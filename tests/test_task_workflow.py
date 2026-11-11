@@ -166,3 +166,55 @@ class TaskWorkflowTests(unittest.TestCase):
         record['events']=[None];runner.save(path/'run.json',record)
         self.assertEqual(self.app.public()['run']['id'],run['id'])
         self.assertEqual(self.app.public()['projects'][0]['latest_run']['id'],run['id'])
+
+    def test_observed_selected_source_invalidation_revokes_imported_approval(self):
+        import orchestration
+        from test_orchestration import assignment
+        for changed in ('revision','scope'):
+            with self.subTest(changed=changed):
+                app=Application(self.base/('selected-'+changed),provider=TeamProvider());self.addCleanup(app.wait)
+                pid=app.handle('add_project',{'path':str(self.source)})['project_id']
+                head=self.git('rev-parse','HEAD')
+                app.handle('save_sources',{'project_id':pid,'selection_version':0,'revision':head,'paths':['README.md']})
+                project=app.state['projects'][pid];selection=copy.deepcopy(project['source_selection'])
+                plan=orchestration.make_plan(project,head,'Imported selected-source approval',[assignment('researcher')])
+                project['pending']=copy.deepcopy(plan);app.state['version']=2;app.persist()
+                app=Application(app.storage,provider=TeamProvider());tid=app.public()['task_id'];project=app.state['projects'][pid]
+                provenance=copy.deepcopy(project['imported_plan_owners'])
+                if changed=='revision':
+                    (self.source/'new.txt').write_text('Changed committed revision\n')
+                    self.git('add','new.txt');self.git('commit','-qm','Changed fixture revision')
+                else:project['source_selection']['selection_version']+=1
+                request={'project_id':pid,'task_id':tid,'plan_id':plan['id'],'plan_digest':plan['digest']}
+                with self.assertRaisesRegex(ValueError,'changed|stale'):app.handle('start_plan',request)
+                self.assertIsNone(project['tasks'][tid]['pending'])
+                self.assertEqual(project['imported_plan_states'][plan['id']],'revoked')
+                saved=json.loads((app.storage/'state.json').read_text())['projects'][pid]
+                self.assertEqual(saved['imported_plan_states'][plan['id']],'revoked')
+                self.assertEqual(project['imported_plan_owners'],provenance)
+                # Restore only pending and the original source state, retaining the revocation.
+                if changed=='revision':self.git('update-ref','HEAD',head)
+                project['source_selection']=selection;project['tasks'][tid]['pending']=copy.deepcopy(plan);app.persist()
+                app=Application(app.storage,provider=TeamProvider());project=app.state['projects'][pid]
+                with self.assertRaisesRegex(ValueError,'revoked|live'):app.handle('start_plan',request)
+                app.handle('select_task',{'project_id':pid,'task_id':None});project['pending']=copy.deepcopy(plan)
+                with self.assertRaisesRegex(ValueError,'task|revoked|live'):
+                    app.handle('start_plan',{'project_id':pid,'plan_id':plan['id'],'plan_digest':plan['digest']})
+                self.assertEqual(app.provider.calls,[])
+
+    def test_transient_selected_context_failure_keeps_imported_approval_live(self):
+        from unittest.mock import patch
+        from test_orchestration import assignment
+        import orchestration
+        app=Application(self.base/'transient',provider=TeamProvider());pid=app.handle('add_project',{'path':str(self.source)})['project_id']
+        head=self.git('rev-parse','HEAD')
+        app.handle('save_sources',{'project_id':pid,'selection_version':0,'revision':head,'paths':['README.md']})
+        project=app.state['projects'][pid]
+        plan=orchestration.make_plan(project,head,'Imported selected-source approval',[assignment('researcher')])
+        project['pending']=copy.deepcopy(plan);app.state['version']=2;app.persist()
+        app=Application(app.storage,provider=TeamProvider());tid=app.public()['task_id'];project=app.state['projects'][pid]
+        with patch('service.sources.context',side_effect=ValueError('Temporary context read failure')):
+            with self.assertRaisesRegex(ValueError,'Temporary'):
+                app.handle('start_plan',{'project_id':pid,'task_id':tid,'plan_id':plan['id'],'plan_digest':plan['digest']})
+        self.assertEqual(project['tasks'][tid]['pending'],plan)
+        self.assertEqual(project['imported_plan_states'][plan['id']],'live');self.assertEqual(app.provider.calls,[])

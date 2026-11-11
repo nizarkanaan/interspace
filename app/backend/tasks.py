@@ -26,7 +26,10 @@ def validate(task, identity):
         if not isinstance(task['thread'],list) or not isinstance(task['run_ids'],list):raise ValueError()
         if any(not isinstance(r,str) or not r for r in task['run_ids']):raise ValueError()
         if task['run_id'] is not None and task['run_id'] not in task['run_ids']:raise ValueError()
-        if task['pending'] is not None and not isinstance(task['pending'],dict):raise ValueError()
+        pending=task['pending']
+        if pending is not None:
+            if not isinstance(pending,dict) or not isinstance(pending.get('id'),str) or not pending['id'].strip():
+                raise ValueError()
     except (KeyError,TypeError,ValueError):
         raise ValueError('Saved task is unavailable. Preserve app data before recovery.') from None
     return task

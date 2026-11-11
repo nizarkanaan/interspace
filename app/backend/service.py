@@ -46,7 +46,8 @@ class Application:
             project = self.state['projects'].get(owner)
             task_id=self.state.get('active_task_id')
             task=next((t for t in tasks.available(project) if t['id']==task_id),None) if project else None
-            interaction_owner=task if task is not None else project
+            # An unavailable task must not fall back to the unrelated general owner.
+            interaction_owner=task if task_id is not None else project
             saved_error = self.state['error']
             recovery_status='interrupted'
             self.state.update(active=None,error_project_id=owner,error_task_id=task_id,
@@ -345,17 +346,22 @@ class Application:
                     raise ValueError('The approved plan content changed; this Start action is stale.')
                 orchestration.validate_plan(plan)
                 if plan.get('source_scope')!=sources.scope(project):
+                    tasks.clear_pending(project,owner)
+                    self.publish()
                     raise ValueError('Source selection changed; this plan is stale.')
-                if plan.get('source_scope'):sources.context(project)
             elif sources.scope(project) is not None:
                 raise ValueError('Selected-source projects require a new specialist plan, not a legacy review.')
             elif method=='start_plan':
                 raise ValueError('This legacy plan requires its original review action.')
-            source = Path(project['source_path'])
-            if plan.get('project_id')!=project['id'] or plan.get('source_path')!=str(source) or plan.get('source_path')!=str(source.resolve()) or runner.git(source,'rev-parse','HEAD').decode().strip()!=plan.get('revision'):
-                tasks.clear_pending(project,owner)
-                self.publish()
-                raise ValueError('The project revision changed; this plan is stale. Request a new review plan.')
+            self.check_plan_revision(project,owner,plan)
+            if plan.get('kind')=='team' and plan.get('source_scope'):
+                try:
+                    sources.context(project)
+                except ValueError:
+                    # A commit may change between the check above and the context read.
+                    # Revoke only an observed source change, not an unrelated read failure.
+                    self.check_plan_revision(project,owner,plan)
+                    raise
             if plan.get('kind')=='team':
                 tasks.clear_pending(project,owner,'consumed')
                 self.launch('Preparing team snapshot',lambda:team.execute(self,project,plan,task=task),project['id'],task['id'] if task else None)
@@ -369,6 +375,13 @@ class Application:
                 tasks.clear_pending(project,owner,'consumed')
                 self.launch('Preparing snapshot',lambda:self.review(project,plan,task),project['id'],task['id'] if task else None)
             return {'started':True}
+
+    def check_plan_revision(self, project, owner, plan):
+        source = Path(project['source_path'])
+        if plan.get('project_id')!=project['id'] or plan.get('source_path')!=str(source) or plan.get('source_path')!=str(source.resolve()) or runner.git(source,'rev-parse','HEAD').decode().strip()!=plan.get('revision'):
+            tasks.clear_pending(project,owner)
+            self.publish()
+            raise ValueError('The project revision changed; this plan is stale. Request a new review plan.')
 
     def selected_run(self, project, reference):
         owner=tasks.owner(project,reference)
