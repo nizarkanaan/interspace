@@ -40,9 +40,9 @@ Read-only source repositories, no Sample Project work or paid model calls. Reuse
 ### Task 3: Inspectable source controls
 **Files:** create `app/ui/sources.js`, `tests/sources-ui.mjs`; modify UI index/app/team sources.
 **Interfaces:** `interspaceSources.render(state,request)` maintains per-project drafts and pending request generations. Source plan cards show immutable paths/selection version; run rendering supports team-v1 and team-v2.
-- [ ] Write controlled UI regression for catalog/preview, new project gate, check/save, source plan scope, retained drafts and delayed response isolation; observe failure.
-- [ ] Implement accessible Sources panel, committed-only labels/omissions, limits, excluded reasons and exact-save identity. Preserve unsaved drafts across background updates/switches.
-- [ ] Run new and prior project/team UI checks on built resources, inspect source panel at 320/390/760/1024/1280 in light/dark. Commit.
+- [x] Write controlled UI regression for catalog/preview, new project gate, check/save, source plan scope, retained drafts and delayed response isolation; observe failure.
+- [x] Implement accessible Sources panel, committed-only labels/omissions, limits, excluded reasons and exact-save identity. Preserve unsaved drafts across background updates/switches.
+- [x] Run new and prior project/team UI checks on built resources, inspect source panel at 320/390/760/1024/1280 in light/dark. Commit.
 
 ### Task 4: Verification and documentation
 **Files:** update app/README.md and docs/engineering.md; create docs/project-sources-validation.md.

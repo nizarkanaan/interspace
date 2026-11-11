@@ -1,7 +1,7 @@
 """Explicit committed-source access and selected snapshots. Never executes project code."""
 import copy
 import json
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 import subprocess
 import unicodedata
 import uuid

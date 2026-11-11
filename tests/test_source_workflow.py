@@ -121,3 +121,20 @@ class SourceWorkflowTests(unittest.TestCase):
         self.assertEqual(self.app.public()['run']['format'],'team-v1')
         self.app.handle('accept_report',{'project_id':self.pid,'run_id':run['id'],'artifact_id':run['artifact_id']})
         self.assertEqual(self.app.public()['run']['stage'],'accepted')
+
+    def test_restored_stale_proposal_cannot_bypass_changed_selection(self):
+        self.setup_app();self.save();old=self.chat();self.save(['README.md'])
+        self.app.state['projects'][self.pid]['pending']=copy.deepcopy(old)
+        with self.assertRaisesRegex(ValueError,'selection|stale'):self.start(old)
+        self.assertEqual(len(self.provider.calls),1)
+        self.assertIsNone(self.app.public()['run'])
+
+    def test_source_actions_reject_requests_for_another_selected_project(self):
+        import shutil
+        self.setup_app();catalog=self.app.handle('list_sources',{'project_id':self.pid})
+        other=self.base/'other';shutil.copytree(self.source,other)
+        self.app.handle('add_project',{'path':str(other)})
+        for method,params in [('list_sources',{}),('preview_source',{'revision':catalog['revision'],'path':'notes/selected.txt'}),('save_sources',{'revision':catalog['revision'],'selection_version':0,'paths':['notes/selected.txt']})]:
+            with self.subTest(method=method),self.assertRaisesRegex(ValueError,'selected|stale'):
+                self.app.handle(method,dict(params,project_id=self.pid))
+        self.assertEqual(self.provider.calls,[])

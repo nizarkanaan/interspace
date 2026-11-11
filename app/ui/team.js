@@ -3,7 +3,7 @@ window.interspaceTeam=(()=>{
   const $=id=>document.getElementById(id);
   const roles={web_searcher:{name:'Web searcher',department:'discovery'},researcher:{name:'Researcher',department:'research'},reviewer:{name:'Reviewer',department:'review'}};
   const labels={waiting:'Waiting for dependencies',queued:'Queued',running:'Working',done:'Done',failed:'Failed',cancelled:'Cancelled',blocked:'Blocked'};
-  const isTeam=run=>run?.format==='team-v1';
+  const isTeam=run=>['team-v1','team-v2'].includes(run?.format);
   function renderPlan(container,plan,state,request,node){
     const panel=node('div','',container);panel.className='plan';
     node('h3','Proposed specialist team',panel);node('p',plan.goal,panel);
@@ -17,6 +17,7 @@ window.interspaceTeam=(()=>{
       if(task.role==='web_searcher')node('p','Public brief sent to web search: '+task.objective,item).className='notice';
     }
     node('p','Usage ceiling: '+plan.tasks.length+' specialist calls + 1 synthesis = '+plan.limits.max_calls+' calls after Start. One planning call already used. Four minutes per call; no retries.',panel);
+    if(plan.source_scope){node('p','Approved sources · selection '+plan.source_scope.selection_version,panel);for(const path of plan.source_scope.paths)node('p',path,panel).className='citation';}
     node('p','Committed revision '+plan.revision.slice(0,12)+'. This limits calls and stage time; token spend, search actions and remaining account allowance are not capped.',panel).className='footnote';
     const button=node('button','Start this plan',panel);button.className='primary';button.disabled=!!state.active;
     button.onclick=()=>request('start_plan',{project_id:plan.project_id,plan_id:plan.id,plan_digest:plan.digest}).catch(()=>{});
