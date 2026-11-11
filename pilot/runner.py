@@ -80,7 +80,7 @@ def load(run):
 
 def event(data, role, status, detail):
     data['events'].append({'time': datetime.now(timezone.utc).isoformat(),
-                           'role': role, 'status': status, 'detail': detail})
+                           'role': role, 'status': status, 'detail': detail, 'round':data.get('revision_round',0)})
 
 
 def prepare(source, storage):
@@ -153,7 +153,7 @@ def start(run, role):
     data = load(run)
     if data['stage'] != role or role not in ('researcher', 'reviewer'):
         raise ValueError('worker order does not match active stage')
-    if any(e['role'] == role and e['status'] == 'started' for e in data['events']):
+    if any(e['role'] == role and e['status'] == 'started' and e.get('round',0)==data.get('revision_round',0) for e in data['events']):
         raise ValueError('worker already started')
     event(data, role, 'started', 'Dispatched by the controlling Codex session against snapshot files only.')
     save(Path(run) / 'run.json', data)
