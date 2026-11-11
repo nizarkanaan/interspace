@@ -35,9 +35,9 @@ Sample Project and all registered sources remain read-only; committed allowliste
 
 **Files:** modify `app/backend/provider.py`; create `tests/test_search_provider.py`.
 **Interfaces:** keep `run(prompt,schema,cwd,cancel)` unchanged for text-only jobs; add `search(prompt,schema,cwd,cancel,on_event)->(result,usage)` for isolated web jobs. `ProviderError` may carry validated usage from completed turns, otherwise unknown.
-- [ ] Write fake-process tests: only search accepts search events, forbidden tools still terminate, web config is live only for search, observed provenance is bounded and forwarded, malformed/unsupported events fail closed, failures preserve known usage.
-- [ ] Run focused tests and observe failure; implement role-scoped search while preserving text-only adapter and cleanup. No live jobs in routine tests.
-- [ ] Run `python3 -m unittest discover -s tests -p 'test*provider.py' -v` and existing ProviderTests; expect all pass. Commit adapter.
+- [x] Write fake-process tests: only search accepts search events, forbidden tools still terminate, web config is live only for search, observed provenance is bounded and forwarded, malformed/unsupported events fail closed, failures preserve known usage.
+- [x] Run focused tests and observe failure; implement role-scoped search while preserving text-only adapter and cleanup. No live jobs in routine tests.
+- [x] Run `python3 -m unittest discover -s tests -p 'test*provider.py' -v` and existing ProviderTests; expect all pass. Commit adapter.
 
 ### Task 3: Application routing and durable dispatch
 

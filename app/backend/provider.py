@@ -12,7 +12,43 @@ import time
 
 
 class ProviderError(RuntimeError):
-    pass
+    def __init__(self, message, usage=None):
+        super().__init__(message)
+        self.usage = usage
+
+
+def search_event(item):
+    """Only provider-observed URL fields establish provenance; final model text never does."""
+    urls = []
+    def visit(value, depth=0):
+        if depth > 12:
+            raise ProviderError('Search provenance exceeds the supported nesting limit.')
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if key == 'url':
+                    if not isinstance(child, str) or len(child) > 2000:
+                        raise ProviderError('Malformed search provenance URL.')
+                    urls.append(child)
+                elif key == 'urls':
+                    if not isinstance(child, list) or any(not isinstance(u,str) or len(u)>2000 for u in child):
+                        raise ProviderError('Malformed search provenance URLs.')
+                    urls.extend(child)
+                elif isinstance(child, (dict,list)):
+                    visit(child,depth+1)
+        elif isinstance(value,list):
+            for child in value: visit(child,depth+1)
+    visit(item)
+    if len(urls)>200:
+        raise ProviderError('Search provenance exceeds the supported URL limit.')
+    query = item.get('query', '')
+    action = item.get('action', {})
+    if not isinstance(action,dict) or not isinstance(query,str):
+        raise ProviderError('Malformed search activity.')
+    if not query:
+        query = action.get('query','')
+    if not isinstance(query,str) or len(query)>2000:
+        raise ProviderError('Malformed search query.')
+    return {'query':query,'urls':list(dict.fromkeys(urls)),'action':str(action.get('type','search'))[:80]}
 
 
 def find_codex():
@@ -88,6 +124,12 @@ class CodexProvider:
         process.wait(timeout=2)
 
     def run(self, prompt, schema, cwd, cancel):
+        return self._run(prompt,schema,cwd,cancel)
+
+    def search(self, prompt, schema, cwd, cancel, on_event):
+        return self._run(prompt,schema,cwd,cancel,on_event)
+
+    def _run(self, prompt, schema, cwd, cancel, on_search=None):
         if cancel.is_set():
             raise ProviderError('Run cancelled before dispatch.')
         if not self.binary:
@@ -100,7 +142,8 @@ class CodexProvider:
             command = [self.binary, '-a', 'never', 'exec', '--ignore-user-config', '--sandbox', 'read-only',
                        '--ephemeral', '--json', '--skip-git-repo-check', '-C', str(cwd),
                        '-c', 'features.shell_tool=false', '-c', 'features.multi_agent=false',
-                       '-c', 'web_search="disabled"', '-c', 'model_reasoning_effort="low"',
+                       '-c', 'web_search="live"' if on_search is not None else 'web_search="disabled"',
+                       '-c', 'model_reasoning_effort="low"',
                        '--output-schema', str(schema_path), '-']
             try:
                 process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -119,17 +162,22 @@ class CodexProvider:
             for stream, name in ((process.stdout,'stdout'),(process.stderr,'stderr')):
                 os.set_blocking(stream.fileno(), False)
                 selector.register(stream, selectors.EVENT_READ, name)
-            deadline = time.monotonic() + self.timeout
+            deadline = time.monotonic() + min(self.timeout,240)
             buffer, stderr, total = b'', b'', 0
-            messages, usage, completed = [], {}, False
+            messages, usage, completed, search_count = [], {}, False, 0
             def consume(line):
-                nonlocal usage, completed
+                nonlocal usage, completed, search_count
                 try:
                     event = json.loads(line)
                 except (ValueError, UnicodeDecodeError):
                     return
                 item = event.get('item', {})
-                if item.get('type') in ('command_execution','file_change','mcp_tool_call','web_search','collab_tool_call'):
+                if item.get('type') == 'web_search' and on_search is not None:
+                    search_count += 1
+                    if search_count > 100:
+                        raise ProviderError('Search activity exceeded the supported event limit.')
+                    on_search(search_event(item))
+                elif item.get('type') in ('command_execution','file_change','mcp_tool_call','web_search','collab_tool_call'):
                     raise ProviderError('Unexpected tool activity: this workflow accepts text-only results.')
                 if event.get('type') in ('turn.failed','error'):
                     raise ProviderError('Codex reported a failed stage.')
@@ -183,6 +231,9 @@ class CodexProvider:
                 if not isinstance(result,dict):
                     raise ProviderError('Codex JSON response must be an object.')
                 return result, usage
+            except ProviderError as error:
+                error.usage = usage if completed else None
+                raise
             finally:
                 selector.close()
                 self.stop(process)
