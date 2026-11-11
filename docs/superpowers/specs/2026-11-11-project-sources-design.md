@@ -1,7 +1,7 @@
 # Inspectable project source selection
 
 Date: 2026-11-11
-Status: draft for approval. The user requested the next milestone after live-team verification and local integration. A reusable project source set is the recommended approach; the preference question is pending. No source-selection product code has been changed.
+Status: approved by the user on 2026-11-11, including reusable project source sets and explicit first Save before model access.
 
 ## Intent
 
