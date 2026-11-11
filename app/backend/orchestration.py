@@ -10,8 +10,15 @@ from urllib.parse import urlsplit
 import uuid
 
 import runner
+import sources
 
 FORMAT = 'team-v1'
+FORMATS = (FORMAT,sources.FORMAT)
+
+
+def is_team(record):
+    return record.get('format') in FORMATS
+
 RESERVED_TASK_IDS = {'synthesis','combined','sources','events'}
 ROLES = {'web_searcher':{'name':'Web searcher','capabilities':['public_web_search']},
          'researcher':{'name':'Researcher','capabilities':['committed_snapshot','dependency_artifacts']},
@@ -110,6 +117,8 @@ def make_plan(project, revision, goal, tasks):
           'source_path':str(Path(project['source_path']).resolve()),'revision':revision,
           'goal':text(goal,'Goal',6000),'tasks':tasks,
           'limits':{'planning_calls':1,'max_calls':len(tasks)+1,'stage_seconds':240,'retries':0}}
+    selected=sources.scope(project)
+    if selected is not None:plan['source_scope']=copy.deepcopy(selected)
     plan['digest']=plan_digest(plan)
     return plan
 
@@ -117,6 +126,9 @@ def make_plan(project, revision, goal, tasks):
 def validate_plan(plan):
     if plan.get('kind')!='team' or plan.get('digest')!=plan_digest(plan):
         raise ValueError('The plan changed; request a new proposal.')
+    if 'source_scope' in plan:
+        sources.validate_scope(plan['source_scope'])
+        if plan['source_scope']['revision']!=plan['revision']:raise ValueError('Plan source revision changed.')
     raw=[{k:v for k,v in task.items() if k not in ('role_version','capabilities')} for task in plan['tasks']]
     if validate_tasks(raw)!=plan['tasks'] or plan['limits']!={'planning_calls':1,'max_calls':len(raw)+1,'stage_seconds':240,'retries':0}:
         raise ValueError('Invalid plan capabilities or usage limits.')
@@ -126,6 +138,8 @@ def validate_record(record):
     """Reject incomplete saved metadata before it reaches UI or recovery actions."""
     try:
         validate_plan(record['plan'])
+        if (record.get('format')==sources.FORMAT)!=('source_scope' in record['plan']):
+            raise ValueError('Team format and source scope do not match.')
         for key in ('project_id','source_path','revision','goal'):
             if record[key]!=record['plan'][key]:raise ValueError('Saved team scope changed.')
         if record['limits']!=record['plan']['limits'] or not isinstance(record['tasks'],list) or len(record['tasks'])!=len(record['plan']['tasks']):
@@ -172,11 +186,12 @@ def validate_record(record):
 
 def prepare(project, plan, storage):
     validate_plan(plan)
-    run=runner.prepare(Path(project['source_path']),storage,required_paths=('README.md',project['context_path']),project_name=project['name'])
-    record=runner.load(run)
+    run=(sources.prepare(project,plan,storage) if 'source_scope' in plan else
+         runner.prepare(Path(project['source_path']),storage,required_paths=('README.md',project['context_path']),project_name=project['name']))
+    record=sources.load(run)
     if record['revision']!=plan['revision']:
         raise ValueError('Source revision changed while preparing the team snapshot.')
-    record.update(format=FORMAT,project_id=project['id'],goal=plan['goal'],plan=copy.deepcopy(plan),
+    record.update(format=sources.FORMAT if 'source_scope' in plan else FORMAT,project_id=project['id'],goal=plan['goal'],plan=copy.deepcopy(plan),
                   stage='queued',limits=copy.deepcopy(plan['limits']),evidence={},jobs=[],combined=None,results={},events=[],
                   provider='Codex CLI · bounded specialist team',
                   usage='Returned token counts per job; unknown consumption remains unknown. Calls and deadlines do not cap monetary spend.',
@@ -185,7 +200,7 @@ def prepare(project, plan, storage):
     runner.event(record,'Orchestrator','planned','Approved specialist plan saved; assignments and call limit cannot expand.')
     runner.save(run/'run.json',record)
     # The legacy offline viewer cannot represent team runs. The native app owns their view.
-    (run/'index.html').unlink()
+    if (run/'index.html').exists():(run/'index.html').unlink()
     return run
 
 
@@ -265,16 +280,10 @@ def artifact_id(record):
 
 
 def verify(run):
-    record=runner.load(run)
-    result={'unchanged':runner.fingerprint(Path(record['source_path']))==record['baseline'],
-            'checked':'HEAD, Git status and SHA-256 of tracked files; untracked contents are not hashed.'}
-    record['verification']=result
-    runner.save(run/'run.json',record)
-    return result
-
+    return sources.verify(run)
 
 def accept(run, reference):
-    record=runner.load(run)
+    record=sources.load(run)
     if reference.get('run_id')!=record['id'] or reference.get('artifact_id')!=artifact_id(record):
         raise ValueError('The report changed; this action is stale.')
     if record['stage']=='accepted' and record.get('user_acceptance',{}).get('artifact_id')==reference['artifact_id']:
@@ -284,7 +293,7 @@ def accept(run, reference):
         raise ValueError('Reviewed acceptance requires a complete synthesis and Reviewer acceptance.')
     if not verify(run)['unchanged']:
         raise ValueError('Source checkout changed; acceptance is unavailable.')
-    record=runner.load(run)
+    record=sources.load(run)
     record['stage']='accepted'
     record['user_acceptance']={'artifact_id':reference['artifact_id'],'scope':'report_only','time':datetime.now(timezone.utc).isoformat()}
     runner.event(record,'User','accepted','Accepted this report version only; no project changes or experiment authorized.')

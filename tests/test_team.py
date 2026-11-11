@@ -49,7 +49,7 @@ class TeamTests(unittest.TestCase):
     def setup_app(self,tasks=None):
         self.provider=TeamProvider(tasks)
         self.app=Application(self.base/'app-data',provider=self.provider)
-        self.pid=self.app.handle('add_project',{'path':str(self.source)})['project_id']
+        self.pid=test_pilot.legacy_project(self.app, self.source)['project_id']
     def propose(self):
         self.app.handle('chat',{'scope':'project','project_id':self.pid,'text':'Review PRIVATE_GOAL_MARKER'})
         self.app.wait();return self.app.public()['pending']

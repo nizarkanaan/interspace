@@ -42,13 +42,13 @@ class ProjectTests(unittest.TestCase):
         self.provider = RecordingProvider()
         self.storage = self.base/'app-data'
         self.app = Application(self.storage, provider=self.provider)
-        self.a = self.app.handle('add_project', {'path':str(self.source)})['project_id']
+        self.a = test_pilot.legacy_project(self.app, self.source)['project_id']
         self.other = self.base/'other'
         shutil.copytree(self.source, self.other)
         (self.other/'README.md').write_text('B_SOURCE_MARKER\n')
         runner.git(self.other,'add','README.md')
         runner.git(self.other,'commit','-qm','Other project')
-        self.b = self.app.handle('add_project', {'path':str(self.other)})['project_id']
+        self.b = test_pilot.legacy_project(self.app, self.other)['project_id']
 
     def switch(self, project):
         return self.app.handle('switch_project', {'project_id':project})
@@ -75,7 +75,7 @@ class ProjectTests(unittest.TestCase):
         plan = copy.deepcopy(self.app.public()['pending'])
         self.switch(self.b); self.switch(self.a)
         self.assertEqual(self.app.public()['pending'],plan)
-        self.app.handle('add_project',{'path':str(self.source/'.')})
+        test_pilot.legacy_project(self.app, self.source/'.')
         self.assertEqual(len(self.app.public()['projects']),2)
         reopened=Application(self.storage,provider=self.provider)
         self.assertEqual(reopened.public()['threads'],self.app.public()['threads'])
@@ -172,7 +172,7 @@ class ProjectTests(unittest.TestCase):
         runner.git(self.other,'rm','docs/PROJECT_CONTEXT.md')
         runner.git(self.other,'commit','-qm','README-only context')
         # Re-register refreshes the committed context choice without clearing data.
-        self.app.handle('add_project',{'path':str(self.other)})
+        test_pilot.legacy_project(self.app, self.other)
         self.chat(self.b,'Review README'); self.start(self.b)
         run=self.app.public()['run']
         self.assertEqual(run['stage'],'completed')

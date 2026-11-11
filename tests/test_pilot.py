@@ -11,6 +11,14 @@ if SPEC.loader and Path(SPEC.origin).exists():
     SPEC.loader.exec_module(runner)
 
 
+def legacy_project(app, path):
+    """Seed the previously authorized registrations used by legacy workflow tests."""
+    result=app.handle('add_project',{'path':str(path)})
+    app.state['projects'][result['project_id']].pop('source_selection',None)
+    app.persist()
+    return app.public()
+
+
 class PilotTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

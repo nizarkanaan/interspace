@@ -17,6 +17,7 @@ def empty_state():
 def new_project(source):
     identity = uuid.uuid4().hex
     return {'id':identity,'name':Path(source).name,'source_path':str(source),
+            'source_selection':{'mode':'unconfirmed','version':1,'selection_version':0,'revision':None,'paths':[]},
             'context_path':'docs/PROJECT_CONTEXT.md','thread':[], 'pending':None,
             'run_id':None,'run_ids':[], 'brief':'','priority':'normal','next_action':''}
 
@@ -44,6 +45,7 @@ def load(storage):
     state['threads']['workspace'] = old['threads']['workspace']
     if old.get('project_path'):
         project = new_project(old['project_path'])
+        project.pop('source_selection')
         project.update(thread=old['threads']['project'],pending=old.get('pending'),run_id=old.get('run_id'))
         if project['pending']:
             project['pending']['project_id'] = project['id']

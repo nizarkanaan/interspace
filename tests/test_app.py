@@ -137,7 +137,7 @@ class AppTests(unittest.TestCase):
 
     def test_chat_plan_and_two_workers_persist_without_source_changes(self):
         app = self.app()
-        app.handle('select_project', {'path': str(self.source)})
+        test_pilot.legacy_project(app, self.source)
         baseline = self.git('status', '--porcelain')
         app.handle('chat', {'project_id':app.public()['project_id'],'scope':'project', 'text':'Review the evidence'})
         app.wait()
@@ -155,7 +155,7 @@ class AppTests(unittest.TestCase):
 
     def test_stale_plan_and_unknown_actions_rejected(self):
         app = self.app()
-        app.handle('select_project', {'path':str(self.source)})
+        test_pilot.legacy_project(app, self.source)
         with self.assertRaisesRegex(ValueError, 'plan'):
             app.handle('start_review', {'project_id':app.public()['project_id'],'plan_id':'stale'})
         with self.assertRaisesRegex(ValueError, 'method'):
@@ -166,7 +166,7 @@ class AppTests(unittest.TestCase):
 
     def test_plan_is_rejected_after_project_commit_changes(self):
         app = self.app()
-        app.handle('select_project', {'path':str(self.source)})
+        test_pilot.legacy_project(app, self.source)
         app.handle('chat', {'project_id':app.public()['project_id'],'scope':'project','text':'Review'})
         app.wait()
         plan = app.public()['pending']
@@ -204,7 +204,7 @@ class AppTests(unittest.TestCase):
                     return {'reply':'A review is ready','action':'propose_review'}, {}
                 raise ProviderError('provider failed')
         app = self.app(Broken())
-        app.handle('select_project', {'path':str(self.source)})
+        test_pilot.legacy_project(app, self.source)
         app.handle('chat', {'project_id':app.public()['project_id'],'scope':'project','text':'Review'})
         app.wait()
         app.handle('start_review', {'project_id':app.public()['project_id'],'plan_id':app.public()['pending']['id']})
@@ -215,7 +215,7 @@ class AppTests(unittest.TestCase):
     def test_reopening_marks_interrupted_run_without_restarting_it(self):
         import runner
         app = self.app()
-        app.handle('select_project', {'path':str(self.source)})
+        test_pilot.legacy_project(app, self.source)
         run = runner.prepare(self.source, app.storage / 'runs')
         project=app.state['projects'][app.public()['project_id']]
         project.update(run_id=run.name,run_ids=[run.name])

@@ -44,7 +44,7 @@ class RevisionTests(unittest.TestCase):
         runner.complete(self.run,'researcher',result())
         runner.start(self.run,'reviewer')
         runner.complete(self.run,'reviewer',result('Define contact events precisely before acceptance.',verdict))
-        self.app.handle('add_project',{'path':str(self.source)})
+        test_pilot.legacy_project(self.app, self.source)
         project=self.app.state['projects'][self.app.public()['project_id']]
         project.update(run_id=self.run.name,run_ids=[self.run.name])
         self.app.persist()

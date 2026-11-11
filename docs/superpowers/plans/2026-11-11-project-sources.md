@@ -33,9 +33,9 @@ Read-only source repositories, no Sample Project work or paid model calls. Reuse
 ### Task 2: Source consent, plan binding and compatibility
 **Files:** modify `app/backend/projects.py`, `service.py`, `orchestration.py`, `team.py`, native action allowlist; create `tests/test_source_workflow.py`; adapt existing fixtures to explicitly represent legacy registrations.
 **Interfaces:** bridge `list_sources(project_id)`, `preview_source(project_id,revision,path)`, `save_sources(project_id,revision,selection_version,paths)`; public state `source_selection`/`source_error`; team-v2 plans include exact `source_scope` with revision/paths/selection version, covered by existing digest.
-- [ ] Write failing integration tests for new registration gate/no model call, save CAS and invalidation, selected-only chat/workers, Workspace/web exclusion, stale Start, source disappearance/HEAD change, active-save rejection, malformed settings, restart, and legacy report acceptance after source edits.
-- [ ] Run focused tests and observe failure. Implement actions and version dispatch; route all app run loads/integrity checks through `sources` so old loaders remain unchanged. Validate before user thread/provider launch.
-- [ ] Run all Python tests; expect all pass, with meaningful legacy fixtures preserved. Commit.
+- [x] Write failing integration tests for new registration gate/no model call, save CAS and invalidation, selected-only chat/workers, Workspace/web exclusion, stale Start, source disappearance/HEAD change, active-save rejection, malformed settings, restart, and legacy report acceptance after source edits.
+- [x] Run focused tests and observe failure. Implement actions and version dispatch; route all app run loads/integrity checks through `sources` so old loaders remain unchanged. Validate before user thread/provider launch.
+- [x] Run all Python tests; expect all pass, with meaningful legacy fixtures preserved. Commit.
 
 ### Task 3: Inspectable source controls
 **Files:** create `app/ui/sources.js`, `tests/sources-ui.mjs`; modify UI index/app/team sources.
