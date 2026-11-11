@@ -1,7 +1,7 @@
 # Bounded dynamic orchestration
 
 Date: 2026-11-11
-Status: proposed design; user selected a complete team before Start. Remaining implementation choices below are assistant proposals pending design approval.
+Status: approved by the user on 2026-11-11, including the ten-job public-data live verification ceiling.
 
 ## Intent and scope
 
@@ -74,4 +74,4 @@ Reserve each job durably before launching it; never repeat a reserved job automa
 
 The user selected the pre-Start complete team. Sequential execution, one instance per role, a fixed final synthesis job, optional independent review with explicit unreviewed status, live search using only its disclosed public brief, no automatic retries/revision for new-format runs, and the ten-job public smoke budget are assistant proposals. Implementation can settle file names, helper boundaries and visual spacing within existing conventions. Changes to source access, authentication, execution scope or these resource limits require a revised design.
 
-Builder review resolved two gaps: reviewed acceptance now requires the Reviewer to cover all other assignments, and the public smoke ceiling is corrected to ten jobs because the local review includes a synthesis call. Both are assistant-proposed design details awaiting approval.
+Builder review resolved two gaps: reviewed acceptance now requires the Reviewer to cover all other assignments, and the public smoke ceiling is corrected to ten jobs because the local review includes a synthesis call. Both details are included in the approved scope.
