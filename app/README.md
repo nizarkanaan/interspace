@@ -2,7 +2,7 @@
 
 Launch `dist/Interspace.app` with a double-click. It opens its own native window; no HTML file, browser tab or local web server is required. The backend starts and stops with the application.
 
-The first executable workflow is a read-only project review. Add a Git repository folder, select its conversation scope, and ask the Orchestrator to review its evidence or propose a bounded experiment. It returns an inspectable plan; **Start read-only review** dispatches Researcher then Reviewer automatically through Codex. Tasks, source citations, results and the static Observatory display recorded work. Other catalog roles and external-app writes are not executable in this release.
+Add a Git repository folder, select its project conversation, and describe an outcome. The Orchestrator can answer directly or propose the smallest team from **Web searcher, Researcher and Reviewer**. Inspect objectives, expected outputs, dependencies, source revision and usage ceiling, then choose **Start this plan**. Tasks and the static Observatory show the same recorded assignments. The Combined result preserves evidence and unresolved questions; each specialist artifact remains inspectable. Other catalog roles and external-app writes remain unavailable.
 
 ## Connection
 
@@ -14,9 +14,9 @@ The CLI's configured authentication determines account usage. ChatGPT sign-in us
 
 Conversations, plans, usage records and source snapshots live in `~/Library/Application Support/Interspace`. The source checkout is never edited or executed. Selected technical evidence comes from its committed revision; uncommitted and private files are excluded. Approvals bind to a stable project ID, canonical project path, committed revision and (for report actions) artifact version. If HEAD changes, request a new plan.
 
-One app backend may own a data directory at a time. One interaction runs at a time; a review uses two sequential worker sessions with a four-minute deadline each and no retries. Stop terminates the owned provider process group. Quit closes the backend input pipe and guarantees cancellation cleanup. On restart, unfinished runs become interrupted rather than silently resuming. A stage deadline is not a monetary spending cap.
+One app backend may own a data directory at a time. One interaction runs at a time; a team uses one to three sequential specialist jobs and one synthesis job, each with a four-minute deadline and no retries. A proposal shows one already-used planning call and up to four calls after Start. Legacy reviews retain their original two-stage path. Stop terminates the owned provider process group. Quit closes the backend input pipe and guarantees cancellation cleanup. On restart, unfinished runs become interrupted rather than silently resuming. A stage deadline is not a monetary spending cap.
 
-External document text is input evidence, never permission to run tools. This workflow disables CLI shell/multi-agent features and web search, ignores user-configured MCP integrations, uses the CLI read-only sandbox/never-approve policy, and aborts on observed command/file/MCP/search events. The process adapter is not a replacement for Codex's sandbox or a containment boundary for a malicious executable. Only use the official Codex installation.
+External document text is input evidence, never permission to run tools. CLI shell and multi-agent features remain disabled; jobs ignore user configuration, execution rules and automatically loaded project instructions. All jobs use the CLI read-only sandbox/never-approve policy. Text-only planner, Researcher, Reviewer and synthesis jobs reject tool events. Only an explicitly approved Web searcher assignment enables hosted live search. It receives the displayed public objective in a fresh app-owned provider workspace, without project sources, the full goal, history, prior reports or dependency artifacts. Search jobs still reject other tools. Observed URL events establish retrieval provenance for accepted web evidence; invented or private/local source URLs fail validation. The process adapter is not a replacement for Codex's sandbox or a containment boundary for a malicious executable. Only use the official Codex installation.
 
 ## Developer build
 
@@ -34,9 +34,11 @@ For isolated development state, the native executable supports `--data-root /abs
 
 - `macos/main.swift`: native window, folder/path picker, restricted local UI bridge, process lifecycle.
 - `backend/projects.py`: versioned registry, v1 migration, project metadata validation.
-- `backend/service.py`: ownership-bound conversations, version-bound plans, dispatch and result acceptance.
+- `backend/service.py`: ownership-bound conversations, content-bound plans, legacy dispatch and protocol actions.
+- `backend/orchestration.py`: bounded team graph, evidence validation, versioned team records and report acceptance.
+- `backend/team.py`: dependency handoffs, durable call reservations, specialist dispatch, synthesis and partial failure.
 - `backend/provider.py`: signed-in Codex CLI process adapter, event validation, deadlines and cancellation.
-- `ui/index.html`, `ui/app.js`: app interface and conversation/report state; model/report text is inserted as text, not executable markup.
+- `ui/index.html`, `ui/app.js`, `ui/team.js`: app interface, conversation state, team plans/tasks/results and legacy report views; model/report text is inserted as text, not executable markup.
 - `ui/workspace.js`: project picker, metadata drafts, overview cards and run-history controls.
 - `../pilot/runner.py`: reusable committed snapshots, evidence validation and source integrity checks.
 - `../scripts/build-macos-app.py`: reproducible app packaging.
@@ -45,13 +47,21 @@ Routine tests use disposable Git repositories and fake provider processes, never
 
 ## How roles connect to Codex
 
-Interspace uses one Codex sign-in and starts separate ephemeral `codex exec` jobs for Orchestrator turns, Researcher passes and Reviewer passes. It does not keep a single ongoing Codex conversation or depend on the controlling ChatGPT chat. Codex's built-in multi-agent spawning is disabled; Interspace coordinates the jobs and hands off artifacts explicitly. All current jobs use the same provider/default model setting, with role-specific instructions and inputs.
+Interspace uses one Codex sign-in and starts separate ephemeral `codex exec` jobs for planning, each approved specialist assignment and final synthesis. It does not keep a single ongoing Codex conversation or depend on the controlling ChatGPT chat. Codex's built-in multi-agent spawning is disabled; Interspace coordinates the jobs and hands off artifacts explicitly. All current jobs use the same provider/default model setting, with role-specific instructions and inputs.
 
-Interspace stores conversations locally. A new Orchestrator job receives recent conversation plus selected project context and prior results. Researcher and Reviewer receive their explicit source snapshot and role playbooks. They do not inherit one another's private session context. These jobs share the authenticated account's usage limits; an idle app does not run model jobs. Separate jobs resend their selected context, so future persistent threads may be an optimization, rather than a current capability.
+Interspace stores conversations locally. A new Orchestrator job receives recent conversation plus selected project context and prior results. Researcher and Reviewer receive their committed snapshot, role playbooks and assigned dependency artifacts. The Reviewer must cover all other assignments in a reviewed plan. Web searcher receives only the disclosed public objective. They do not inherit one another's private session context. These jobs share the authenticated account's usage limits; an idle app does not run model jobs. Separate jobs resend their selected context, so future persistent threads may be an optimization, rather than a current capability.
 
-## Revise and accept reports
+## Team results and evidence
 
-When a Reviewer requests changes, **Revise from reviewer feedback** starts one additional Researcher → Reviewer round against the same committed snapshot. It adds two Codex jobs without an extra planning call. You can instead ask the Orchestrator for a revision plan; that conversation adds its own job. Supplemental instructions in that plan reach both revision workers.
+A proposed team is complete before Start. Changes requested in chat replace its identity and content digest; stale Start actions fail. The runtime accepts one assignment per executable role, rejects dependency cycles and stops when a required task fails. No specialist can dispatch another job. A required call is reserved durably before provider launch; cancellation, timeout and restart never retry it automatically. Completed artifacts survive failed synthesis or cancellation.
+
+Combined results label facts, interpretations and proposals, cite committed source lines or retrieved web excerpts, and retain unresolved questions and Reviewer objections. A Reviewer checks supplied excerpts and artifacts without browsing independently; a retrieved excerpt is not a claim that a full paper was read. Tokens appear when returned; unknown consumption is shown as unavailable. Call/deadline limits do not cap tokens, money, search actions or remaining subscription allowance.
+
+**Accept this report** is available only after Reviewer acceptance, successful synthesis and unchanged source integrity. Acceptance binds the exact plan, evidence and result content and authorizes the report only. Runs without a Reviewer finish as **completed unreviewed** and cannot be accepted through the reviewed-report action. New team runs need a new approved plan for further work; they do not use the legacy revision loop.
+
+## Revise and accept legacy reports
+
+For saved legacy two-stage reviews, when a Reviewer requests changes, **Revise from reviewer feedback** starts one additional Researcher → Reviewer round against the same committed snapshot. It adds two Codex jobs without an extra planning call. You can instead ask the Orchestrator for a revision plan; that conversation adds its own job. Supplemental instructions in that plan reach both revision workers.
 
 The one-round allowance is reserved before dispatch and survives cancellation, failure and restart. It cannot loop indefinitely. Old results remain available in **Artifact version**, and Run history identifies each round. Source changes or stale artifact references block actions. After the Reviewer accepts a report, **Accept this report** records your acceptance of that exact artifact without a model call. It does not authorize code changes or the proposed experiment.
 

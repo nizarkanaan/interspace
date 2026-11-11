@@ -12,6 +12,7 @@ import uuid
 import runner
 
 FORMAT = 'team-v1'
+RESERVED_TASK_IDS = {'synthesis','combined','sources','events'}
 ROLES = {'web_searcher':{'name':'Web searcher','capabilities':['public_web_search']},
          'researcher':{'name':'Researcher','capabilities':['committed_snapshot','dependency_artifacts']},
          'reviewer':{'name':'Reviewer','capabilities':['committed_snapshot','dependency_artifacts']}}
@@ -55,6 +56,8 @@ def validate_tasks(tasks):
     for task in tasks:
         fields(task,('id','role','objective','expected_output','dependencies'),'assignment')
         identity=text(task['id'],'Task ID',40)
+        if identity in RESERVED_TASK_IDS:
+            raise ValueError('Task ID is reserved for internal jobs or result views.')
         if not re.fullmatch(r'[a-z][a-z0-9_-]{0,39}',identity) or not isinstance(task['role'],str) or task['role'] not in ROLES:
             raise ValueError('Unsupported task ID or executable role.')
         text(task['objective'],'Assignment',2000); text(task['expected_output'],'Expected output',1000)
@@ -160,10 +163,7 @@ def validate_record(record):
                     raise ValueError('Invalid saved search result.')
             else:validate_artifact(record,task,result)
         if record['combined'] is not None:
-            # Merged questions may include each specialist's questions as well as review objections.
-            combined=copy.deepcopy(record['combined']);questions(combined['questions'],120)
-            combined['questions']=combined['questions'][:20]
-            validate_artifact(record,{'role':'synthesis'},combined)
+            validate_artifact(record,{'role':'combined'},record['combined'])
         if record['stage'] not in TERMINAL|{'queued','running','synthesizing'}:
             raise ValueError('Invalid saved team stage.')
     except (KeyError,TypeError,AttributeError) as error:
@@ -211,10 +211,10 @@ def public_url(value):
     return value
 
 
-def questions(value, maximum=20):
+def questions(value, maximum=20, character_limit=2000):
     if not isinstance(value,list) or len(value)>maximum:
         raise ValueError('At most twenty unresolved questions are allowed.')
-    return [text(q,'Unresolved question',2000) for q in value]
+    return [text(q,'Unresolved question',character_limit) for q in value]
 
 
 def validate_artifact(record, task, result, observed_urls=()):
@@ -237,7 +237,9 @@ def validate_artifact(record, task, result, observed_urls=()):
         return {'summary':result['summary'],'findings':[],'questions':copy.deepcopy(result['questions']),
                 'verdict':'not_reviewed','web_sources':list(additions)}
     fields(result,('summary','findings','questions','verdict'),'result')
-    text(result['summary'],'Summary',6000);questions(result['questions'])
+    text(result['summary'],'Summary',6000)
+    # Combined questions also preserve full Reviewer summaries (6,000) and claims (3,000).
+    questions(result['questions'],120,6000) if task['role']=='combined' else questions(result['questions'])
     if result['verdict'] not in (('accept','revise','blocked') if task['role']=='reviewer' else ('not_reviewed',)):
         raise ValueError('Invalid review verdict for this role.')
     if not isinstance(result['findings'],list) or not 0<=len(result['findings'])<=20:

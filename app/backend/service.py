@@ -42,6 +42,7 @@ class Application:
         if self.state['active']:
             owner = self.state['active_project_id']
             project = self.state['projects'].get(owner)
+            saved_error = self.state['error']
             self.state.update(active=None,error_project_id=owner,
                               error='Previous interaction was interrupted. Review saved results before starting again.')
             if project:
@@ -50,7 +51,10 @@ class Application:
             if run_id and project and run_id in project['run_ids']:
                 try:
                     run, record = self.owned_run(project,run_id)
-                    if record.get('format')==orchestration.FORMAT or record['stage'] in ('researcher','reviewer'):
+                    if record.get('format')==orchestration.FORMAT and record['stage'] in orchestration.TERMINAL:
+                        # Final record publication precedes clearing active in the registry.
+                        self.state.update(error=saved_error,error_project_id=owner if saved_error else None)
+                    elif record.get('format')==orchestration.FORMAT or record['stage'] in ('researcher','reviewer'):
                         if record.get('format')==orchestration.FORMAT:
                             orchestration.interrupt(record,'interrupted','App reopened; no reserved job will be retried.')
                         else:

@@ -58,6 +58,8 @@ Sample Project and all registered sources remain read-only; committed allowliste
 ### Task 5: Live compatibility, documentation and final verification
 
 **Files:** update `app/README.md`, `docs/engineering.md`; create `docs/dynamic-orchestration-validation.md`; keep live data/scripts under ignored `workspace-data/`.
-- [ ] Run at most ten public/disposable CLI jobs across direct answer (1), local review (4), web/research/review (5), each four minutes/no retry; reserve job count before dispatch. Confirm actual web event provenance or fail closed and report incompatibility. Record actual outcomes, not accuracy claims.
-- [ ] Run full suites on both `python3` and `/usr/bin/python3`, generated preview/role checks and diff review. Build native app, inspect isolated team fixture, verify signature.
-- [ ] Request fresh whole-branch review, address important findings test-first, rerun affected/full suites. Document limitations and live usage; commit. Keep branch for user acceptance.
+- [x] Run at most ten public/disposable CLI jobs across direct answer (1), local review (4), web/research/review (5), each four minutes/no retry; reserve job count before dispatch. Confirm actual web event provenance or fail closed and report incompatibility. Record actual outcomes, not accuracy claims.
+- [x] Run full suites on both `python3` and `/usr/bin/python3`, generated preview/role checks and diff review. Build native app, inspect isolated team fixture, verify signature.
+- [x] Request fresh whole-branch review, address important findings test-first, rerun affected/full suites. Document limitations and live usage; commit. Keep branch for user acceptance.
+
+Execution evidence and unavailable checks: `docs/dynamic-orchestration-validation.md`. Live scenarios were adjusted within the ten-job ceiling after two rejected outputs; full reviewed live completion remains unverified. Native-window inspection is unavailable while the Mac is locked.

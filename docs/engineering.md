@@ -47,7 +47,7 @@ Do not edit generated preview copies. Regenerate the standalone page and bundled
 
 ## Current Mac implementation
 
-`app/macos/main.swift` owns the native shell and restricted UI bridge. `app/backend/service.py` owns local state and bounded orchestration; `provider.py` owns Codex processes. `app/ui/index.html` renders state and sends enumerated intentions. `pilot/runner.py` remains the source snapshot/evidence helper. `scripts/build-macos-app.py` packages resources without user data. Do not add a local HTTP service: the current shell uses JSON-lines pipes. See app/README.md for limits.
+`app/macos/main.swift` owns the native shell and restricted UI bridge. `app/backend/service.py` owns local state and bounded orchestration; `provider.py` owns Codex processes. `orchestration.py` owns bounded team policies and the additive team-v1 run format; `team.py` owns durable job reservations, dependency handoffs and synthesis. `ui/team.js` projects those records alongside legacy reports. `app/ui/index.html` renders state and sends enumerated intentions. `pilot/runner.py` remains the source snapshot/evidence helper. `scripts/build-macos-app.py` packages resources without user data. Do not add a local HTTP service: the current shell uses JSON-lines pipes. See app/README.md for limits.
 
 ## Broader application organization
 

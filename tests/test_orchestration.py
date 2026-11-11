@@ -44,6 +44,11 @@ class PolicyTests(unittest.TestCase):
             task=assignment('researcher');task[key]=value
             with self.subTest(key=key),self.assertRaises(ValueError): teams.validate_tasks([task])
 
+    def test_internal_job_and_tab_names_cannot_be_task_ids(self):
+        for name in ('synthesis','combined','sources','events'):
+            task=assignment('researcher');task['id']=name
+            with self.subTest(identity=name),self.assertRaises(ValueError):teams.validate_tasks([task])
+
     def test_public_urls_reject_credentials_private_literals_and_local_names(self):
         for value in ['file:///etc/passwd','https://user:secret@example.org/','http://127.0.0.1/',
                       'http://[::1]/','https://10.1.2.3/','https://localhost/','https://foo.local/',

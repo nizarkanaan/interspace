@@ -20,7 +20,7 @@ class TeamProvider:
         self.tasks=tasks or [assignment('researcher'),assignment('reviewer',['researcher'])]
         self.calls=[];self.events=[];self.fail=None;self.verdict='accept';self.answer=False
         self.entered=threading.Event();self.release=threading.Event();self.block=None
-        self.before=None
+        self.before=None;self.review_summary=None;self.review_claim=None
     def run(self,prompt,schema,cwd,cancel):
         self.calls.append(prompt)
         if self.before:self.before(prompt)
@@ -30,7 +30,11 @@ class TeamProvider:
         if 'Purpose: synthesis' in prompt:return report(),{'input_tokens':2}
         if 'Role: Orchestrator' in prompt:
             return {'reply':'Fixture plan ready','action':'answer' if self.answer else 'propose_plan','tasks':[] if self.answer else copy.deepcopy(self.tasks)},{'input_tokens':1}
-        return report('accept' if self.verdict=='accept' else self.verdict) if 'Role: Reviewer' in prompt else report(),{'input_tokens':3}
+        result=report(self.verdict) if 'Role: Reviewer' in prompt else report()
+        if 'Role: Reviewer' in prompt:
+            if self.review_summary:result['summary']=self.review_summary
+            if self.review_claim:result['findings'][0]['claim']=self.review_claim
+        return result,{'input_tokens':3}
     def search(self,prompt,schema,cwd,cancel,on_event):
         self.calls.append(prompt)
         if self.before:self.before(prompt)
@@ -215,3 +219,27 @@ class TeamTests(unittest.TestCase):
         self.assertIsNone(public['run'])
         self.assertIn('unavailable',public['error'])
         self.assertEqual(public['runs'][0]['stage'],'unavailable')
+
+    def test_long_reviewer_objections_remain_readable_and_untruncated(self):
+        self.setup_app();self.provider.verdict='revise'
+        self.provider.review_summary='Summary objection '+('x'*2200)
+        self.provider.review_claim='Finding objection '+('y'*2500)
+        self.propose();run=self.start()
+        self.assertIsNotNone(run)
+        self.assertEqual(run['stage'],'needs_revision')
+        self.assertIn(self.provider.review_summary,run['combined']['questions'])
+        self.assertIn(self.provider.review_claim,run['combined']['questions'])
+        restored=Application(self.app.storage,provider=self.provider).public()['run']
+        self.assertEqual(restored['stage'],'needs_revision')
+
+    def test_terminal_run_survives_crash_before_registry_active_flag_clears(self):
+        for reviewed in (False,True):
+            with self.subTest(reviewed=reviewed):
+                self.setup_app(None if reviewed else [assignment('researcher')])
+                self.propose();run=self.start()
+                self.app.state.update(active='Orchestrator',active_project_id=self.pid,active_run_id=run['id'])
+                self.app.persist()
+                restored=Application(self.app.storage,provider=self.provider).public()
+                self.assertEqual(restored['run']['stage'], 'completed' if reviewed else 'completed_unreviewed')
+                self.assertEqual(restored['run']['combined'],run['combined'])
+                self.assertEqual(restored['error'],'')
