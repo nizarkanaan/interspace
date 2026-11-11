@@ -1,6 +1,6 @@
 # Dynamic orchestration validation — 2026-11-11
 
-Branch: `codex/dynamic-orchestration`; approved specification: [bounded dynamic orchestration](superpowers/specs/2026-11-11-dynamic-orchestration-design.md). The verified multi-project predecessor was integrated into local main at `b2fa576` before this branch. Dynamic orchestration remains unmerged and unpushed.
+Branch: `codex/dynamic-orchestration`; approved specification: [bounded dynamic orchestration](superpowers/specs/2026-11-11-dynamic-orchestration-design.md). The verified multi-project predecessor was integrated into local main at `b2fa576` before this branch. Dynamic orchestration was subsequently integrated into local main; see the follow-up complete-team verification below. Nothing has been pushed.
 
 ## Implemented behavior
 
@@ -32,7 +32,7 @@ A durable external test ledger reserved each call before launch and stopped at t
 3. Web searcher → Researcher → Reviewer proposal: routing passed and real hosted search events exposed search/open-page URLs. The web output had an empty summary and was rejected before handoff. Nonempty schema strings and explicit summary instructions were added; evidence checks were not relaxed.
 4. With four jobs left, a fresh smaller public Web searcher → Researcher proposal was explicitly started. Search artifacts passed observed-URL validation, the Researcher used retrieved evidence, and synthesis completed as `completed_unreviewed`. This demonstrated live web provenance, handoff and combined output while preserving the ten-job ceiling.
 
-No successful live full three-specialist reviewed run is established. That path passes deterministic integration tests, including Reviewer accept/revise and exact report acceptance. General specialist quality, source-to-claim correctness and full-paper review are not established by these checks. The ten-job live budget is exhausted; no additional live calls were made.
+At initial sign-off, no successful live full three-specialist reviewed run was established. That path passed deterministic integration tests, including Reviewer accept/revise and exact report acceptance. The separately authorized follow-up below closes this live-check gap. General specialist quality, source-to-claim correctness and full-paper review are not established by these checks. The initial ten-job live budget was exhausted. Later calls used only the separately authorized follow-up budget below.
 
 ## Independent review and corrections
 
@@ -61,3 +61,5 @@ The user authorized a fresh five-call complete-team check and subsequent local i
 The full plan used exactly five calls (planning, three specialists, synthesis), enforced by a separate persistent test ledger under ignored `workspace-data/reviewed-smoke-20261111/`. Report acceptance and repeated acceptance were also verified against the exact artifact without another provider call. The saved test report is `accepted`; the app recorded five usage entries. This closes the earlier missing successful live full-team path. General agent accuracy and independent full-page verification remain unestablished.
 
 Fresh pre-integration suite: 79/79 Python tests passed. No Sample Project files or app data were used. The native-window check remains unavailable while the Mac stays locked; the user explicitly accepted deferring that check. No remote push is included in this integration.
+
+Post-integration verification: 79/79 tests passed on the integrated local main tree. Follow-up provider totals were 120,623 input tokens, 43,904 cached input tokens and 2,733 output tokens; five calls total. These are reported counters, not a spending estimate.
