@@ -53,3 +53,11 @@ A separately identified synthetic native test bundle was built and opened with i
 - Reused the existing approved feature checkout rather than creating another worktree. This matches the requested branch and host checkout preference; it does not isolate filesystem edits from another editor.
 - Used the remaining four live calls for a new smaller web/research plan after the initial rejected outputs. This kept the ten-job limit and no automatic retry policy; it leaves full reviewed live completion unverified.
 - Kept general model accuracy and full-team live reliability outside completion claims. Successful routing and structural validation do not certify semantic correctness.
+
+## Follow-up complete-team verification — 2026-11-11
+
+The user authorized a fresh five-call complete-team check and subsequent local integration. On a new disposable public queue-design repository, the actual Orchestrator selected Web searcher → Researcher → Reviewer. Live hosted retrieval supplied an observed official Python documentation URL; Researcher compared that excerpt with the committed README, and Reviewer accepted the bounded brief while preserving the unspecified tie behavior and absence of implementation/performance evidence. Synthesis completed, retained the limitations/questions and passed citation validation. All three tasks and four execution jobs completed; no retry occurred. HEAD, status and tracked-file hashes matched the pre-run baseline.
+
+The full plan used exactly five calls (planning, three specialists, synthesis), enforced by a separate persistent test ledger under ignored `workspace-data/reviewed-smoke-20261111/`. Report acceptance and repeated acceptance were also verified against the exact artifact without another provider call. The saved test report is `accepted`; the app recorded five usage entries. This closes the earlier missing successful live full-team path. General agent accuracy and independent full-page verification remain unestablished.
+
+Fresh pre-integration suite: 79/79 Python tests passed. No Sample Project files or app data were used. The native-window check remains unavailable while the Mac stays locked; the user explicitly accepted deferring that check. No remote push is included in this integration.
