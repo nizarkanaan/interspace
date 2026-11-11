@@ -10,20 +10,22 @@ Plan exposes the actual assignments, distinct repeated-role labels, dependencies
 
 Drafts are scoped by task/project/workspace. Creation responses arriving after switching or reopening New task leave the created task's goal recoverable without dispatching it into the newer context. Held project metadata/source saves cannot restore an old selected task over another task. Source helpers retain their project-owned late-preview/save and newer-draft guards. The active banner and Stop action follow the actual active owner. Malformed saved team proposals show an unavailable message without Start; other tasks remain usable.
 
+The final review fixes extend saved-task isolation to malformed message objects, message roles/text and optional error/status fields. Invalid tasks remain stored unchanged and appear unavailable; healthy tasks, general conversation and other projects remain navigable. Old omitted optional fields stay compatible, and a saved error without a status projects `failed`. Observatory assignment buttons and the original Canvas figures now share artifact selection: task results open in task detail, while general team and legacy reports open in Project conversation with their selected run and assignment preserved.
+
 The original scene file is unchanged. The UI passes distinct assignment numbers to it, so repeated figures render WS 1 and WS 2 while staying at fixed department stations. No timers, walking, simulated progress, framework or remote fonts were added.
 
 ## Executed checks
 
 | Check | Actual result |
 | --- | --- |
-| `python3 -m unittest discover -s tests -v` with Python 3.14.6 | 145 tests passed, 87.238 seconds on the corrected durable-draft tree. Log `/tmp/interspace-task3-draft-python314.log`. |
-| `/usr/bin/python3 -m unittest discover -s tests -v` with Apple Python 3.9.6, after the 3.14 run completed | 145 tests passed, 64.586 seconds on the same tree. Log `/tmp/interspace-task3-draft-python39.log`. |
-| `INTERSPACE_UI=dist/Interspace.app/Contents/Resources/app/ui/index.html node tests/run-ui.cjs` | All four browser suites passed: task desk, projects, sources and teams. Log `/tmp/interspace-task3-draft-packaged-ui.log`. |
+| `python3 -m unittest discover -s tests -v` with Python 3.14.6 | 147 tests passed, 85.446 seconds on the final-review fix tree. Log `/tmp/interspace-final-fix-python314.log`. |
+| `/usr/bin/python3 -m unittest discover -s tests -v` with Apple Python 3.9.6, after the 3.14 run completed | 147 tests passed, 62.473 seconds on the same tree. Log `/tmp/interspace-final-fix-python39.log`. |
+| `INTERSPACE_UI=dist/Interspace.app/Contents/Resources/app/ui/index.html node tests/run-ui.cjs` | All four browser suites passed: task desk, projects, sources and teams, including final-review regressions. Log `/tmp/interspace-final-fix-packaged-ui.log`. |
 | Task desk responsive journeys | 80 surface/appearance/width checks: eight surfaces at 320, 390, 760, 1024 and 1280px, in light and dark. No horizontal overflow or page errors. Existing suites retain their additional fit checks. |
 | Keyboard and untrusted text | Enter activates New task and exact Start; normal labelled forms/buttons remain keyboard operable. Artifact markup appears literally and creates no image element. |
-| `python3 scripts/build-macos-app.py` | Passed, rebuilding only the sole `dist/Interspace.app`. Log `/tmp/interspace-task3-draft-build.log`. |
-| `codesign --verify --deep --strict --verbose=2 dist/Interspace.app` | Passed: valid on disk and satisfies Designated Requirement. Log `/tmp/interspace-task3-draft-signature.log`. |
-| Packaged resource comparison | Six UI resources and original static scene match source byte-for-byte. No app data or screenshots are bundled. |
+| `python3 scripts/build-macos-app.py` | Passed, rebuilding only the sole `dist/Interspace.app`. Log `/tmp/interspace-final-fix-build.log`. |
+| `codesign --verify --deep --strict --verbose=2 dist/Interspace.app` | Passed: valid on disk and satisfies Designated Requirement. Log `/tmp/interspace-final-fix-signature.log`. |
+| Packaged resource comparison | All 20 source resources under backend/UI/pilot and the design scene/catalog/contracts, plus the original scene copied into packaged UI, match source byte-for-byte. No saved application state is bundled. |
 | JavaScript syntax checks | `node --check` passed for `app.js`, `team.js` and `workspace.js`. |
 | Generated checks | Preview matches source; 23 role contracts and 69 seed scenarios pass structural validation. No model evaluation was run. |
 | `git diff --check` | Passed. |
@@ -35,6 +37,8 @@ The original scene file is unchanged. The UI passes distinct assignment numbers 
 The initial new journey failed because the old app did not open on Tasks. Additional regressions reproduced a late creation sending its goal after leaving/reopening New task, a same-project late metadata save restoring the wrong task, a malformed saved proposal lacking a safe display state, and duplicate WS 1 labels in the packaged original scene. Each received a focused correction and then passed the final browser run. A later full-draft restart regression reproduced the session-only Create draft goal; the authorized optional saved draft field fixes it without autosend or generic autosave. Three backend cases plus the fresh-page browser journey verify restart durability, owner/source-consent guards, workspace privacy, legacy missing-field compatibility and non-BMP title truncation. The project-save regression covers both metadata and source saves.
 
 Existing project/source/team browser fixtures were updated to use Tasks, Settings, Project conversation and distinct assignment labels instead of the removed conversation-scope selector and old default navigation. Output/history interactions explicitly expand the secondary disclosure. Their exact Start/digest, old-report history, project isolation, metadata/source draft preservation, delayed source/send/save protection, consent gate, citation link, partial-output and responsive assertions remain. No obsolete duplicate controls were retained for tests.
+
+The final-review regressions first failed on 15 malformed saved-field cases, the actual backend-to-UI `status.replaceAll` crash, and a general-team Observatory assignment returning to Tasks. The focused task-storage suite then passed 14 tests, and task/project/team browser suites passed. The final packaged journeys include both selected and nonselected malformed status/message records projected by a reopened backend, healthy task and project navigation, and assignment-button plus real scene pointer selection for task-owned, general-team and historical legacy reports. The original scene is loaded for source-only tests when its packaging copy is absent. These checks use temporary local state and an inert provider that rejects any provider access.
 
 ## Visual evidence and limits
 

@@ -2,6 +2,7 @@
 export default async function check(page,url){
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto(url);
+  if(!await page.evaluate(()=>!!document.getElementById('ispace').interspaceLab))await page.addScriptTag({path:'design/scene/lab-scene.js'});
   await page.evaluate(()=>{
     const tasks=[{id:'web',role:'web_searcher',role_version:1,objective:'Public Python heapq documentation only',expected_output:'Published source excerpts',dependencies:[],capabilities:['public_web_search']},{id:'research',role:'researcher',role_version:1,objective:'Compare evidence',expected_output:'Evidence-backed findings',dependencies:['web'],capabilities:['committed_snapshot','dependency_artifacts']},{id:'review',role:'reviewer',role_version:1,objective:'Check every claim',expected_output:'Verdict and gaps',dependencies:['research'],capabilities:['committed_snapshot','dependency_artifacts']}];
     const plan={id:'plan-a',kind:'team',project_id:'a',project:'Team fixture',goal:'Compare approaches',revision:'abcdef1234567890',digest:'exact-content-digest',tasks,limits:{planning_calls:1,max_calls:4,stage_seconds:240,retries:0}};
@@ -26,7 +27,17 @@ export default async function check(page,url){
   await page.locator('[data-view=lab]').click();
   assert(await page.locator('.lab-canvas').isVisible(),'Observatory missing team projection');
   await page.evaluate(()=>window.teamFixture.finish());
+  for(const selection of ['assignment','canvas']){
+    await page.locator('[data-view=lab]').click();
+    if(selection==='assignment')await page.locator('#task-list button').first().click();
+    else await page.locator('.lab-canvas').evaluate(canvas=>{const b=canvas.getBoundingClientRect(),h=Number(canvas.style.aspectRatio.split('/')[1]);canvas.dispatchEvent(new PointerEvent('pointerdown',{clientX:b.left+b.width*88/800,clientY:b.top+b.height*173/h}));});
+    assert(await page.getByRole('heading',{name:'Project conversation',exact:true}).isVisible(),'General team Observatory '+selection+' lost owner surface');
+    assert(await page.locator('#results').isVisible()&&(await page.locator('#result-body').textContent()).includes('Search artifacts'),'General team Observatory '+selection+' hid selected assignment');
+    assert(await page.locator('#result-tabs [data-result=web]').getAttribute('aria-pressed')==='true','General Observatory selected wrong assignment');
+    assert(await page.locator('#run-picker').inputValue()==='team-a','General Observatory changed run identity');
+  }
   await page.getByRole('button',{name:'Project conversation',exact:true}).click();
+  await page.locator('#artifact-browser summary').click();await page.getByRole('button',{name:'Combined result',exact:true}).click();await page.locator('#artifact-browser summary').click();
   assert((await page.locator('#result-body').textContent()).includes('Checked combined result'),'Combined result not default');
   assert((await page.locator('#result-body').textContent()).includes('Full paper remains unread'),'Unresolved question missing');
   await page.locator('#artifact-browser summary').click();

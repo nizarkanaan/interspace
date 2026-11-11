@@ -1,6 +1,8 @@
 /* Native bridge journeys with disposable in-memory records; no model or source access. */
+import {execFileSync} from 'node:child_process';
 export default async function check(page,url){
  const errors=[];page.on('pageerror',e=>errors.push(e.message));await page.goto(url);
+ if(!await page.evaluate(()=>!!document.getElementById('ispace').interspaceLab))await page.addScriptTag({path:'design/scene/lab-scene.js'});
  if(url.includes('/dist/'))await page.evaluate(()=>{window.sceneLabels=[];const original=CanvasRenderingContext2D.prototype.fillText;CanvasRenderingContext2D.prototype.fillText=function(text,...args){if(this.canvas.classList.contains('lab-canvas'))window.sceneLabels.push(text);return original.call(this,text,...args);};});
  await page.evaluate(()=>{
   const projects=[{id:'a',name:'Fixture project',brief:'Disposable',priority:'normal',next_action:''},{id:'b',name:'Other project',brief:'',priority:'normal',next_action:''}];
@@ -54,6 +56,15 @@ export default async function check(page,url){
  if(url.includes('/dist/')){assert(await page.evaluate(()=>!!document.getElementById('ispace').interspaceLab),'Packaged original scene missing');assert(await page.evaluate(()=>window.sceneLabels.includes('WS 2')),'Repeated Observatory figure has duplicate WS 1 label');assert(await page.evaluate(()=>document.querySelector('.lab-canvas').getContext('2d').getImageData(2,2,1,1).data[3]>0),'Packaged original scene did not draw');await page.screenshot({path:'workspace-data/task-desk-native-observatory-light-1280.png',fullPage:true});}
  await page.locator('[data-view=tasks]').click();await page.locator('[data-open-task=task-1]').click();
  await page.evaluate(()=>window.deskFixture.finish());await page.locator('[data-task-tab=result]').click();
+ for(const selection of ['assignment','canvas']){
+  await page.locator('[data-view=lab]').click();
+  if(selection==='assignment')await page.locator('#task-list button').first().click();
+  else await page.locator('.lab-canvas').evaluate(canvas=>{const b=canvas.getBoundingClientRect(),h=Number(canvas.style.aspectRatio.split('/')[1]);canvas.dispatchEvent(new PointerEvent('pointerdown',{clientX:b.left+b.width*88/800,clientY:b.top+b.height*173/h}));});
+  assert(await page.locator('#task-detail').isVisible()&&await page.locator('#results').isVisible(),'Task Observatory '+selection+' lost detail Result');
+  assert(await page.locator('#result-tabs [data-result="web-1"]').getAttribute('aria-pressed')==='true','Task Observatory selected wrong assignment');
+  assert((await page.locator('#result-body').textContent()).includes('Combined <img'),'Task Observatory '+selection+' lost assignment artifact');
+  assert(await page.locator('#run-picker').inputValue()==='run-task-1','Task Observatory changed run identity');
+ }
  assert((await page.locator('#result-body').textContent()).includes('An unresolved question'),'Questions missing');assert(await page.locator('#result-body img').count()===0,'Untrusted markup executed');
  assert(!await page.locator('#artifact-browser').evaluate(e=>e.open),'Secondary artifacts should start collapsed');
  await page.locator('#artifact-browser summary').click();
@@ -154,5 +165,21 @@ export default async function check(page,url){
  await page.evaluate(()=>{window.savedDraftState.source_selection.mode='unconfirmed';window.interspaceReceive({type:'state',state:window.savedDraftState});});assert(await page.locator('#send').isDisabled(),'Saved draft bypassed source consent');assert(await page.locator('#message').inputValue()==='Newer session edit','Source consent erased draft');
  await page.evaluate(()=>{window.savedDraftState.source_selection.mode='selected';window.interspaceReceive({type:'state',state:window.savedDraftState});});await page.getByRole('button',{name:'Send →',exact:true}).click();assert(await page.locator('#message').inputValue()==='','Consumed server draft reappeared after send');
  assert(await page.evaluate(()=>window.savedDraftState.task.draft)==='','Send retained consumed server draft');
+ // Feed actual reopened backend projections through the real UI and bridge navigation.
+ const reopened=JSON.parse(execFileSync('python3',['tests/task_saved_state_fixture.py'],{encoding:'utf8'}));
+ for(const fixture of reopened){for(const selected of ['nonselected','selected']){
+  assert(fixture.raw_preserved,'Saved malformed raw record was rewritten');
+  await page.goto(url);
+  await page.evaluate(({fixture,selected})=>{window.webkit={messageHandlers:{interspace:{postMessage(r){const next=r.method==='switch_project'?fixture.other:r.params.task_id===null?fixture.general:fixture.healthy;queueMicrotask(()=>window.interspaceReceive({id:r.id,result:next}));}}}};window.interspaceReceive({type:'state',state:fixture[selected]});},{fixture,selected});
+  assert(await page.locator('[data-open-task=broken]').isDisabled(),'Malformed '+selected+' task was not isolated');
+  assert(await page.locator('[data-open-task=healthy]').isEnabled(),'Malformed '+selected+' task hid healthy task');
+  await page.locator('[data-open-task=healthy]').click();
+  assert(await page.getByRole('heading',{name:'Healthy task',exact:true}).isVisible(),'Healthy task detail unreachable');
+  assert((await page.locator('#transcript').textContent()).includes('Healthy conversation survives'),'Healthy task conversation missing');
+  await page.getByRole('button',{name:'Project conversation',exact:true}).click();
+  assert((await page.locator('#transcript').textContent()).includes('General history survives'),'Malformed task broke general navigation');
+  await page.locator('#project-picker').selectOption('other');
+  assert((await page.locator('#breadcrumb').textContent()).includes('Other healthy project'),'Malformed task broke other project navigation');
+ }}
  assert(!errors.length,errors.join('\n'));return {checks:'Tasks default, raised allowance, full goal, exact task Start/accept, repeated roles, artifacts/questions, late source isolation, Settings, preserved general conversation, creation race/draft recovery, editable allowance invalidation, source gate, failed chat, active owner/Stop, old acceptance, failed/unreviewed output, malformed-proposal isolation, late project-save snapshots, keyboard actions, durable full-goal fresh-session restoration',responsiveSurfaces:fits.length};
 }

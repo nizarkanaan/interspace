@@ -30,6 +30,13 @@ def validate(task, identity):
         if not isinstance(task,dict) or task['id']!=identity:raise ValueError()
         title(task['title']);orchestration.validate_specialist_limit(task['specialist_limit']);draft_text(task.get('draft',''))
         if not isinstance(task['thread'],list) or not isinstance(task['run_ids'],list):raise ValueError()
+        for message in task['thread']:
+            if (not isinstance(message,dict) or message.get('role') not in ('user','assistant')
+                    or not isinstance(message.get('text'),str)):
+                raise ValueError()
+        if not isinstance(task.get('error',''),str):raise ValueError()
+        status=task.get('error_status')
+        if status is not None and (not isinstance(status,str) or status not in orchestration.TERMINAL):raise ValueError()
         if any(not isinstance(r,str) or not r for r in task['run_ids']):raise ValueError()
         if task['run_id'] is not None and task['run_id'] not in task['run_ids']:raise ValueError()
         pending=task['pending']

@@ -97,6 +97,48 @@ class TaskStorageTests(unittest.TestCase):
         self.assertEqual(next(t for t in restored.public()['tasks'] if t['id']=='broken')['status'],'unavailable')
         with self.assertRaises(ValueError):restored.handle('select_task',{'project_id':pid,'task_id':'broken'})
 
+    def test_reopened_malformed_presentation_fields_are_isolated_without_rewriting(self):
+        from task_saved_state_fixture import reopened_states
+        invalid = [{'error':'Saved failure','error_status':7}, {'error':None}, {'error':False},
+                   {'error':[]}, {'error_status':False}, {'error_status':[]}, {'error_status':''},
+                   {'error_status':'invented'}, {'thread':[None]}, {'thread':['message']},
+                   {'thread':[{}]}, {'thread':[{'role':'user','text':None}]},
+                   {'thread':[{'role':7,'text':'Text'}]}, {'thread':[{'role':'system','text':'Text'}]},
+                   {'thread':[{'role':'assistant'}]}]
+        for index, malformed in enumerate(invalid):
+            with self.subTest(malformed=malformed):
+                states=reopened_states(self.base/('saved-'+str(index)),malformed)
+                for name in ('nonselected','selected','healthy','general'):
+                    self.assertEqual(states[name]['tasks'][0]['status'],'unavailable')
+                    self.assertEqual(states[name]['tasks'][1]['status'],'draft')
+                    self.assertTrue(all(isinstance(t['status'],str) for t in states[name]['tasks']))
+                self.assertTrue(states['raw_preserved'])
+                self.assertIsNone(states['selected']['task'])
+                self.assertEqual(states['selected']['threads']['task'],[])
+                self.assertIn('unavailable',states['selected']['error'])
+                self.assertEqual(states['healthy']['task']['title'],'Healthy task')
+                self.assertEqual(states['general']['threads']['project'][0]['text'],'General history survives')
+                self.assertEqual(states['other']['project'],'Other healthy project')
+
+    def test_old_optional_error_fields_and_supported_recovery_statuses_remain_usable(self):
+        import orchestration
+        import tasks
+        app=Application(self.base/'optional-data',provider=TeamProvider())
+        project=projects.new_project(self.base/'inert-source');app.state['projects'][project['id']]=project
+        app.state['selected_project_id']=project['id']
+        task=tasks.create('Old task');project['tasks'][task['id']]=task;project['selected_task_id']=task['id']
+        for field in ('draft','error','error_status'):task.pop(field)
+        raw=copy.deepcopy(task);app.persist();app=Application(app.storage,provider=TeamProvider())
+        self.assertEqual(app.public()['tasks'][0]['status'],'draft')
+        self.assertEqual(app.state['projects'][project['id']]['tasks'][task['id']],raw)
+        saved=app.state['projects'][project['id']]['tasks'][task['id']]
+        for status in (None,*sorted(orchestration.TERMINAL)):
+            with self.subTest(status=status):
+                saved.update(error='Saved failure',error_status=status);app.persist()
+                restored=Application(app.storage,provider=TeamProvider())
+                self.assertEqual(restored.public()['tasks'][0]['status'],status or 'failed')
+                self.assertEqual(restored.public()['error'],'Saved failure')
+
     def test_imported_policy_one_approval_executes_unchanged_only_in_its_task(self):
         from test_orchestration import assignment
         import orchestration
