@@ -160,7 +160,7 @@ class Application:
             data = copy.deepcopy({key:self.state[key] for key in ('version','active','active_project_id','active_run_id','usage','connection')})
             data.update(active_task_id=self.state.get('active_task_id'),error_task_id=self.state.get('error_task_id'),
                         task_id=project.get('selected_task_id') if project and isinstance(project.get('selected_task_id'),str) else None,
-                        task={k:task[k] for k in ('id','title','specialist_limit')} if task else None,
+                        task=dict({k:task[k] for k in ('id','title','specialist_limit')},draft=task.get('draft','')) if task else None,
                         tasks=self.task_summaries(project) if project else [],
                         project_id=project['id'] if project else None,project=project['name'] if project else None,
                         projects=self.summaries(),pending=copy.deepcopy(owner['pending']) if owner else None,
@@ -259,7 +259,7 @@ class Application:
                 project=projects.selected(self.state,params)
                 if method=='create_task':
                     if not isinstance(project.get('tasks',{}),dict):raise ValueError('Saved tasks are unavailable; preserve app data before recovery.')
-                    task=tasks.create(params.get('title','New task'),params.get('specialist_limit',6))
+                    task=tasks.create(params.get('title','New task'),params.get('specialist_limit',6),draft=params.get('draft',''))
                     project.setdefault('tasks',{})[task['id']]=task
                     project['selected_task_id']=task['id']
                 else:
@@ -330,6 +330,7 @@ class Application:
                     tasks.clear_pending(project,owner)
                 thread = owner['thread'] if project else self.state['threads']['workspace']
                 thread.append({'role':'user','text':text.strip()})
+                if task:task['draft']=''  # Same persistence boundary as the accepted user message.
                 run_id = owner['run_id'] if project else None
                 self.launch('Orchestrator',lambda:self.chat(project,text.strip(),run_id,prior_plan,task),project['id'] if project else None,task['id'] if task else None)
                 return {'started':True}

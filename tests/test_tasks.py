@@ -36,6 +36,34 @@ class TaskStorageTests(unittest.TestCase):
         test_pilot.legacy_project(app,self.source)
         self.assertEqual(app.public()['task_id'],tid)
 
+    def test_full_local_draft_survives_restart_without_chat_or_provider_calls(self):
+        provider=TeamProvider();app=Application(self.base/'data',provider=provider)
+        pid=test_pilot.legacy_project(app,self.source)['project_id']
+        goal='LOCAL_DRAFT_PRIVATE '+('Full outcome and evidence requirements. '*12)+'\nKeep this final paragraph.'
+        state=app.handle('create_task',{'project_id':pid,'title':goal[:160],'draft':goal,'specialist_limit':9})
+        tid=state['task_id'];self.assertEqual(state['task'].get('draft'),goal)
+        self.assertEqual(state['threads']['task'],[]);self.assertEqual(provider.calls,[])
+        restored=Application(app.storage,provider=provider)
+        self.assertEqual(restored.public()['task']['draft'],goal)
+        self.assertEqual(restored.public()['threads']['task'],[]);self.assertEqual(provider.calls,[])
+        before=copy.deepcopy(restored.public())
+        for invalid in (None,False,12,[],{},'x'*6001):
+            with self.subTest(draft_type=type(invalid).__name__):
+                with self.assertRaises(ValueError):restored.handle('create_task',{'project_id':pid,'draft':invalid})
+                self.assertEqual(restored.public(),before)
+        self.assertEqual(restored.state['projects'][pid]['tasks'][tid]['draft'],goal)
+        maximum=restored.handle('create_task',{'project_id':pid,'draft':'x'*6000})
+        self.assertEqual(len(maximum['task']['draft']),6000);self.assertEqual(provider.calls,[])
+
+    def test_old_task_without_draft_is_read_as_empty_without_rewriting_raw_metadata(self):
+        app=Application(self.base/'data',provider=TeamProvider());pid=test_pilot.legacy_project(app,self.source)['project_id']
+        state=app.handle('create_task',{'project_id':pid});tid=state['task_id']
+        self.assertEqual(state['task'].get('draft'),'')
+        raw=app.state['projects'][pid]['tasks'][tid];raw.pop('draft',None);original=copy.deepcopy(raw);app.persist()
+        restored=Application(app.storage,provider=TeamProvider())
+        self.assertEqual(restored.public()['task'].get('draft'),'')
+        self.assertEqual(restored.state['projects'][pid]['tasks'][tid],original)
+
     def test_v2_migration_moves_runs_and_exact_revision_approval_preserving_general_chat(self):
         storage=self.base/'data';storage.mkdir()
         project=projects.new_project(self.source)

@@ -8,7 +8,7 @@ const owner=()=>({project_id:state?.project_id,task_id:state?.task_id??null});
 const sameOwner=p=>p.project_id===state?.project_id&&(p.task_id??null)===(state?.task_id??null);
 const draftKey=()=>scope==='workspace'?'workspace':scope==='task'?'task:'+state?.project_id+':'+state?.task_id:'project:'+state?.project_id;
 const saveDraft=()=>{if(state)drafts.set(draftKey(),$('message').value);};
-const restoreDraft=()=>{$('message').value=drafts.get(draftKey())||'';};
+const restoreDraft=()=>{const key=draftKey();$('message').value=drafts.has(key)?drafts.get(key):scope==='task'?state?.task?.draft||'':'';};
 const roleDefinitions=[{id:'web_searcher',name:'Web searcher',department:'discovery',code:'WS',look:'Scout',prop:'scanner'},{id:'researcher',name:'Researcher',department:'research',code:'RS',look:'Researcher',prop:'book'},{id:'reviewer',name:'Reviewer',department:'review',code:'RV',look:'Reviewer',prop:'clipboard'}];
 root.interspaceRoles={byName:name=>roleDefinitions.find(r=>r.name===name),departments:[{id:'discovery',name:'Web scouts'},{id:'research',name:'Research'},{id:'review',name:'Review'}]};
 function error(text){$('error').hidden=!text;$('error').textContent=text||'';}
@@ -92,13 +92,13 @@ async function createTask(propose){
  const goal=$('new-goal').value.trim(),limit=allowance($('new-limit'));if(!goal||limit===null)return;
  const project_id=state.project_id,epoch=selectionEpoch,draft={...newDrafts.get(project_id)},rawGoal=$('new-goal').value;
  creating=true;renderNew();try{
-  const result=await request('create_task',{project_id,title:goal.slice(0,160),specialist_limit:limit},{manual:true});
+  const result=await request('create_task',{project_id,title:Array.from(goal).slice(0,160).join(''),specialist_limit:limit,draft:rawGoal},{manual:true});
   const task_id=result.task_id;if(!task_id)throw Error('The local task could not be created.');
-  const key='task:'+project_id+':'+task_id;drafts.set(key,goal);
+  const key='task:'+project_id+':'+task_id;drafts.set(key,rawGoal);
   const current=newDrafts.get(project_id);if(current?.goal===rawGoal&&current?.limit===draft.limit)newDrafts.delete(project_id);
   if(selectionEpoch!==epoch||state.project_id!==project_id||view!=='new')return;
   apply(result);taskTab='conversation';navigate('detail');
-  if(propose){await request('chat',{scope:'task',project_id,task_id,text:goal});if(drafts.get(key)===goal)drafts.delete(key);if(draftKey()===key)restoreDraft();if(sameOwner({project_id,task_id})&&view==='detail'){taskTab=state.pending?'plan':'conversation';render();}}
+  if(propose){await request('chat',{scope:'task',project_id,task_id,text:goal});if(drafts.get(key)===rawGoal)drafts.set(key,'');if(draftKey()===key)restoreDraft();if(sameOwner({project_id,task_id})&&view==='detail'){taskTab=state.pending?'plan':'conversation';render();}}
  }catch(e){if(selectionEpoch===epoch&&state.project_id===project_id)error(e.message);}
  finally{creating=false;if(view==='new')renderNew();}
 }
@@ -127,6 +127,6 @@ document.querySelector('[data-action=choose]').onclick=()=>{selectionEpoch++;req
 document.querySelector('[data-action=connection]').onclick=()=>request('connection').catch(()=>{});
 document.querySelector('[data-action=signin]').onclick=()=>request('sign_in').catch(()=>{});
 $('stop').onclick=()=>request('cancel').catch(()=>{});
-$('composer').onsubmit=event=>{event.preventDefault();const raw=$('message').value,text=raw.trim();if(!text)return;const key=draftKey(),params={scope,text,project_id:scope==='workspace'?null:state.project_id};if(scope==='task')params.task_id=state.task_id;request('chat',params).then(()=>{if(drafts.get(key)===raw)drafts.delete(key);if(draftKey()===key)restoreDraft();if(scope==='task'&&draftKey()===key&&state.pending){taskTab='plan';render();}}).catch(()=>{});};
+$('composer').onsubmit=event=>{event.preventDefault();const raw=$('message').value,text=raw.trim();if(!text)return;const key=draftKey(),params={scope,text,project_id:scope==='workspace'?null:state.project_id};if(scope==='task')params.task_id=state.task_id;request('chat',params).then(()=>{if(drafts.get(key)===raw)drafts.set(key,'');if(draftKey()===key)restoreDraft();if(scope==='task'&&draftKey()===key&&state.pending){taskTab='plan';render();}}).catch(()=>{});};
 window.interspaceBoot=()=>request('state').then(()=>request('connection')).catch(e=>error(e.message));
 })();

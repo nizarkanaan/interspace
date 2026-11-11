@@ -30,6 +30,30 @@ class TaskWorkflowTests(unittest.TestCase):
         self.app.handle('start_plan',self.ref(plan_id=plan['id'],plan_digest=plan['digest']));self.app.wait()
         return self.app.public()['run']
 
+    def test_saved_draft_is_private_and_consumed_only_after_owned_chat_passes_source_consent(self):
+        provider=TeamProvider();app=Application(self.base/'draft-data',provider=provider);self.addCleanup(app.wait)
+        pid=app.handle('add_project',{'path':str(self.source)})['project_id']
+        goal='DURABLE_PRIVATE_GOAL '+('More than a title. '*20)
+        tid=app.handle('create_task',{'project_id':pid,'title':'Local task','draft':goal})['task_id']
+        reference={'project_id':pid,'task_id':tid,'scope':'task','text':goal}
+        with self.assertRaisesRegex(ValueError,'[Ss]ource|[Ss]ave'):app.handle('chat',reference)
+        self.assertEqual(app.public()['task'].get('draft'),goal)
+        self.assertEqual(app.public()['threads']['task'],[]);self.assertEqual(provider.calls,[])
+        other=app.handle('create_task',{'project_id':pid,'title':'Other task','draft':'OTHER_OWNER_DRAFT'})['task_id']
+        with self.assertRaisesRegex(ValueError,'stale|changed'):app.handle('chat',reference)
+        self.assertEqual(app.state['projects'][pid]['tasks'][tid]['draft'],goal)
+        app.handle('chat',{'scope':'workspace','text':'Compare project priorities'});app.wait()
+        self.assertNotIn('DURABLE_PRIVATE_GOAL',provider.calls[-1]);self.assertNotIn('OTHER_OWNER_DRAFT',provider.calls[-1])
+        catalog=app.handle('list_sources',{'project_id':pid})
+        app.handle('save_sources',{'project_id':pid,'revision':catalog['revision'],'selection_version':catalog['selection']['selection_version'],'paths':['README.md']})
+        app.handle('select_task',{'project_id':pid,'task_id':tid});app.handle('chat',reference);app.wait()
+        self.assertEqual(app.public()['task']['draft'],'')
+        self.assertEqual(app.public()['threads']['task'][0],{'role':'user','text':goal.strip()})
+        restored=Application(app.storage,provider=provider)
+        self.assertEqual(restored.public()['task']['draft'],'')
+        self.assertEqual(restored.public()['threads']['task'][0]['text'],goal.strip())
+        self.assertEqual(restored.state['projects'][pid]['tasks'][other]['draft'],'OTHER_OWNER_DRAFT')
+
     def test_task_plan_run_history_results_and_general_chat_are_separate(self):
         self.setup_app();p=self.app.state['projects'][self.pid]
         p['thread']=[{'role':'user','text':'GENERAL_SECRET'}]

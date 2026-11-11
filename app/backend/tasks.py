@@ -13,16 +13,22 @@ def title(value):
     return value.strip()
 
 
-def create(name='New task', specialist_limit=6):
+def draft_text(value):
+    if not isinstance(value,str) or len(value)>6000:
+        raise ValueError('Task draft must be text of at most 6000 characters.')
+    return value
+
+
+def create(name='New task', specialist_limit=6, draft=''):
     return {'id':uuid.uuid4().hex,'title':title(name),
-            'specialist_limit':orchestration.validate_specialist_limit(specialist_limit),
+            'specialist_limit':orchestration.validate_specialist_limit(specialist_limit),'draft':draft_text(draft),
             'thread':[],'pending':None,'run_id':None,'run_ids':[],'error':'','error_status':None}
 
 
 def validate(task, identity):
     try:
         if not isinstance(task,dict) or task['id']!=identity:raise ValueError()
-        title(task['title']);orchestration.validate_specialist_limit(task['specialist_limit'])
+        title(task['title']);orchestration.validate_specialist_limit(task['specialist_limit']);draft_text(task.get('draft',''))
         if not isinstance(task['thread'],list) or not isinstance(task['run_ids'],list):raise ValueError()
         if any(not isinstance(r,str) or not r for r in task['run_ids']):raise ValueError()
         if task['run_id'] is not None and task['run_id'] not in task['run_ids']:raise ValueError()

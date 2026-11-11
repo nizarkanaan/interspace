@@ -4,7 +4,7 @@ Date: 2026-11-11. This record covers the launchable application resources in `ap
 
 ## Delivered behavior
 
-The application opens on Tasks, with New task and project navigation visible. Local creation is separate from the planning call. New tasks retain the full goal in task conversation/draft, use a title of at most 160 characters, and accept an editable positive safe-integer specialist allowance (default 6, no fixed six-specialist maximum). Each task has Conversation, Plan, Activity and Result. Project conversation explicitly selects `task_id:null`; Workspace advice remains a distinct metadata-only surface. Settings groups metadata, source consent and connection controls.
+The application opens on Tasks, with New task and project navigation visible. Local creation durably stores the full goal separately from the planning call, including non-BMP characters at the shortened-title boundary. Reopening a local draft restores its full goal without a provider call; newer session edits take precedence. The saved draft clears only when an owned user message passes source consent and is persisted in conversation. New tasks retain the full goal in task conversation/draft, use a title of at most 160 characters, and accept an editable positive safe-integer specialist allowance (default 6, no fixed six-specialist maximum). Each task has Conversation, Plan, Activity and Result. Project conversation explicitly selects `task_id:null`; Workspace advice remains a distinct metadata-only surface. Settings groups metadata, source consent and connection controls.
 
 Plan exposes the actual assignments, distinct repeated-role labels, dependencies, exact public search briefs, source revision/version/manifest and approved call ceiling before Start. Detailed output/access/source information uses inspectable disclosure sections. Start, report acceptance, legacy revision, run selection and committed citations retain their project/task and existing plan/digest/run/artifact references. Combined answers lead the Result surface, followed by report actions. Specialist outputs/evidence/history navigation and usage/integrity are in named secondary disclosures. Per-assignment outputs, unresolved questions, exact historical reports and honest partial/unreviewed states remain accessible. Only recorded activity is shown.
 
@@ -16,13 +16,13 @@ The original scene file is unchanged. The UI passes distinct assignment numbers 
 
 | Check | Actual result |
 | --- | --- |
-| `python3 -m unittest discover -s tests -v` with Python 3.14.6 | 142 tests passed, 90.523 seconds. Log `/tmp/interspace-task3-python314.log`. |
-| `/usr/bin/python3 -m unittest discover -s tests -v` with Apple Python 3.9.6, after the 3.14 run completed | 142 tests passed, 69.697 seconds. Log `/tmp/interspace-task3-python39.log`. |
-| `INTERSPACE_UI=dist/Interspace.app/Contents/Resources/app/ui/index.html node tests/run-ui.cjs` | All four browser suites passed: task desk, projects, sources and teams. Log `/tmp/interspace-task3-packaged-ui-final.log`. |
+| `python3 -m unittest discover -s tests -v` with Python 3.14.6 | 145 tests passed, 87.238 seconds on the corrected durable-draft tree. Log `/tmp/interspace-task3-draft-python314.log`. |
+| `/usr/bin/python3 -m unittest discover -s tests -v` with Apple Python 3.9.6, after the 3.14 run completed | 145 tests passed, 64.586 seconds on the same tree. Log `/tmp/interspace-task3-draft-python39.log`. |
+| `INTERSPACE_UI=dist/Interspace.app/Contents/Resources/app/ui/index.html node tests/run-ui.cjs` | All four browser suites passed: task desk, projects, sources and teams. Log `/tmp/interspace-task3-draft-packaged-ui.log`. |
 | Task desk responsive journeys | 80 surface/appearance/width checks: eight surfaces at 320, 390, 760, 1024 and 1280px, in light and dark. No horizontal overflow or page errors. Existing suites retain their additional fit checks. |
 | Keyboard and untrusted text | Enter activates New task and exact Start; normal labelled forms/buttons remain keyboard operable. Artifact markup appears literally and creates no image element. |
-| `python3 scripts/build-macos-app.py` | Passed, rebuilding only the sole `dist/Interspace.app`. Log `/tmp/interspace-task3-build-final.log`. |
-| `codesign --verify --deep --strict --verbose=2 dist/Interspace.app` | Passed: valid on disk and satisfies Designated Requirement. Log `/tmp/interspace-task3-signature.log`. |
+| `python3 scripts/build-macos-app.py` | Passed, rebuilding only the sole `dist/Interspace.app`. Log `/tmp/interspace-task3-draft-build.log`. |
+| `codesign --verify --deep --strict --verbose=2 dist/Interspace.app` | Passed: valid on disk and satisfies Designated Requirement. Log `/tmp/interspace-task3-draft-signature.log`. |
 | Packaged resource comparison | Six UI resources and original static scene match source byte-for-byte. No app data or screenshots are bundled. |
 | JavaScript syntax checks | `node --check` passed for `app.js`, `team.js` and `workspace.js`. |
 | Generated checks | Preview matches source; 23 role contracts and 69 seed scenarios pass structural validation. No model evaluation was run. |
@@ -32,7 +32,7 @@ The original scene file is unchanged. The UI passes distinct assignment numbers 
 
 ## Test-first evidence and fixture changes
 
-The initial new journey failed because the old app did not open on Tasks. Additional regressions reproduced a late creation sending its goal after leaving/reopening New task, a same-project late metadata save restoring the wrong task, a malformed saved proposal lacking a safe display state, and duplicate WS 1 labels in the packaged original scene. Each received a focused correction and then passed the final browser run. The project-save regression covers both metadata and source saves.
+The initial new journey failed because the old app did not open on Tasks. Additional regressions reproduced a late creation sending its goal after leaving/reopening New task, a same-project late metadata save restoring the wrong task, a malformed saved proposal lacking a safe display state, and duplicate WS 1 labels in the packaged original scene. Each received a focused correction and then passed the final browser run. A later full-draft restart regression reproduced the session-only Create draft goal; the authorized optional saved draft field fixes it without autosend or generic autosave. Three backend cases plus the fresh-page browser journey verify restart durability, owner/source-consent guards, workspace privacy, legacy missing-field compatibility and non-BMP title truncation. The project-save regression covers both metadata and source saves.
 
 Existing project/source/team browser fixtures were updated to use Tasks, Settings, Project conversation and distinct assignment labels instead of the removed conversation-scope selector and old default navigation. Output/history interactions explicitly expand the secondary disclosure. Their exact Start/digest, old-report history, project isolation, metadata/source draft preservation, delayed source/send/save protection, consent gate, citation link, partial-output and responsive assertions remain. No obsolete duplicate controls were retained for tests.
 

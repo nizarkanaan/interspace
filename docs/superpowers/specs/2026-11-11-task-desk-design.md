@@ -35,6 +35,7 @@ Content plan: task list for orientation; goal composer for creation; plan for sc
 A task is a user goal with its own conversation, pending proposal and run history. A specialist assignment is a unit of work within that task; distinguish those labels in code and UI.
 
 - **New task** opens a goal composer in an explicitly selected project. With no project, show the project chooser. Creating/saving a local draft does not call a provider. Sending its first message invokes planning as today.
+- **Create draft** saves the full goal locally (up to the existing 6,000-character message limit), not just its shortened list title. It survives app restart without entering a model prompt. Sending the message consumes that saved draft only after source consent and durable message storage; ordinary newer unsaved edits remain scoped to their task.
 - Only the active task's conversation, approved project sources and explicitly relevant previous result enter its project prompt. Another task's raw messages/results are not implicitly included. Workspace advice retains its existing metadata-only boundary.
 - Plans, Start, source previews, report selection/acceptance and asynchronous responses carry task plus project identity. Switching task/project cannot attach a late reply, draft, approval or result to the new selection.
 - Keep one active interaction globally. Viewing other tasks remains possible. The active banner identifies its true project/task owner. Stop targets that active interaction.
