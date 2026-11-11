@@ -13,3 +13,11 @@ Branch: `feature/multi-project-workspaces`. Implemented scope is described in th
 Limits: no fresh model evaluation of Workspace priority advice; deterministic prompt/ownership checks cover this change. The official provider adapter's prior live validation still applies. No notarized installer or bundled Python; one global interaction; fixed source allowlist; dynamic specialist routing remains future work.
 
 Independent review confirmed no Critical/Important isolation findings. Its metadata-save race was treated as Important because it could discard newer edits; a controlled browser regression failed before the fix and passed after. Corrupt/missing snapshot and run-metadata isolation was also strengthened: backend regressions failed first, then passed with unavailable-history status and other projects still usable. Both fixes preserve strict ownership and evidence checks. Full post-fix suites: 46/46 on both Python versions; native app rebuilt/reopened and signature verified after launch. No model-backed priority advice evaluation was run.
+
+## Integration recheck — 2026-11-11
+
+The user requested integration before dynamic orchestration. Fresh checks at `d3a015f`: 46/46 Python tests pass with both `python3` and `/usr/bin/python3`; generated preview and role-contract checks pass; `git diff --check` passes. The native arm64 app rebuild and strict signature verification pass. The controlled two-project browser check passes for drafts, metadata, report history, delayed responses and 320–1280px fit.
+
+A separately identified native test bundle loaded two disposable Git projects and synthetic reports from isolated development storage. Switching A → B displayed each project's own conversation marker and review history. No personal project was registered, no model job was run, and the saved Sample Project workspace was not changed. An initial duplicate test instance shared a data-directory lock and showed a stopped backend; relaunching the separate test bundle with its own data directory completed the check. Test bundles and data remain ignored under `workspace-data/`.
+
+A fresh independent review of `e594e249..d3a015f` reported no blocking findings in project ownership, stale actions, recovery, migration or source boundaries. This supports local integration only; no new specialist-routing or model-accuracy evaluation is implied.
