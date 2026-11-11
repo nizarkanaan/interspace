@@ -139,9 +139,10 @@ class CodexProvider:
         with tempfile.TemporaryDirectory(prefix='response-schema-', dir=cwd) as temporary:
             schema_path = Path(temporary) / 'schema.json'
             schema_path.write_text(json.dumps(schema))
-            command = [self.binary, '-a', 'never', 'exec', '--ignore-user-config', '--sandbox', 'read-only',
+            command = [self.binary, '-a', 'never', 'exec', '--ignore-user-config', '--ignore-rules', '--sandbox', 'read-only',
                        '--ephemeral', '--json', '--skip-git-repo-check', '-C', str(cwd),
                        '-c', 'features.shell_tool=false', '-c', 'features.multi_agent=false',
+                       '-c', 'project_doc_max_bytes=0',
                        '-c', 'web_search="live"' if on_search is not None else 'web_search="disabled"',
                        '-c', 'model_reasoning_effort="low"',
                        '--output-schema', str(schema_path), '-']
@@ -171,13 +172,17 @@ class CodexProvider:
                     event = json.loads(line)
                 except (ValueError, UnicodeDecodeError):
                     return
+                if not isinstance(event,dict):
+                    raise ProviderError('Malformed provider event.')
                 item = event.get('item', {})
+                if not isinstance(item,dict):
+                    raise ProviderError('Malformed provider item.')
                 if item.get('type') == 'web_search' and on_search is not None:
                     search_count += 1
                     if search_count > 100:
                         raise ProviderError('Search activity exceeded the supported event limit.')
                     on_search(search_event(item))
-                elif item.get('type') in ('command_execution','file_change','mcp_tool_call','web_search','collab_tool_call'):
+                elif event.get('type','').startswith('item.') and item.get('type') not in ('agent_message','reasoning','todo_list'):
                     raise ProviderError('Unexpected tool activity: this workflow accepts text-only results.')
                 if event.get('type') in ('turn.failed','error'):
                     raise ProviderError('Codex reported a failed stage.')

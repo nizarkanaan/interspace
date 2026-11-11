@@ -43,17 +43,17 @@ Sample Project and all registered sources remain read-only; committed allowliste
 
 **Files:** create `app/backend/team.py`, `tests/test_team.py`; modify `app/backend/service.py`, `app/macos/main.swift`.
 **Interfaces:** planner supports `propose_plan` and `tasks`; `team.execute(app,project,plan)`; new bridge `start_plan` requires project_id/plan_id/plan_digest; existing accept_report discriminates run format. `Application.call` remains legacy-compatible; team jobs use durable per-job reservation and explicit owner/run/task records.
-- [ ] Write failing integration tests for dynamic plan/Start/synthesis, direct answers, invalid model plans, full dependency artifacts, public-only search input, proposal digest mutation, duplicate/cross-project starts, failure/cancel/restart, call ceiling and legacy action rejection.
-- [ ] Implement validated proposal creation and explicit dispatch. Persist reservations before provider invocation, unknown usage on failed jobs, events/partial results on failures, reviewer verdict dominance, source verification, and new run history/acceptance. Keep legacy proposal and revision compatibility.
-- [ ] Run `python3 -m unittest discover -s tests -v`; expect all pass. Commit integrated backend and native bridge.
+- [x] Write failing integration tests for dynamic plan/Start/synthesis, direct answers, invalid model plans, full dependency artifacts, public-only search input, proposal digest mutation, duplicate/cross-project starts, failure/cancel/restart, call ceiling and legacy action rejection.
+- [x] Implement validated proposal creation and explicit dispatch. Persist reservations before provider invocation, unknown usage on failed jobs, events/partial results on failures, reviewer verdict dominance, source verification, and new run history/acceptance. Keep legacy proposal and revision compatibility.
+- [x] Run `python3 -m unittest discover -s tests -v`; expect all pass. Commit integrated backend and native bridge.
 
 ### Task 4: Inspectable plan, activity and combined result
 
 **Files:** create `app/ui/team.js`, `tests/team-ui.mjs`; modify `app/ui/app.js`, `app/ui/index.html`.
 **Interfaces:** `interspaceTeam` exposes `isTeam`, `renderPlan`, `items`, `renderResults` with passed DOM helpers/request/source callbacks; legacy UI branches on run format. New tasks use shared fixed department artwork.
-- [ ] Write controlled browser check for assignments, public brief, dependency labels, exact Start references, waiting/running/partial states, source links, combined/individual results, review acceptance and switching legacy/team runs; observe failure before UI changes.
-- [ ] Implement within existing olive light/dark layout, text-only model rendering, accessible buttons and safe links. Preserve selected task across Tasks/Observatory.
-- [ ] Run new and existing controlled browser checks; inspect light/dark at 320, 390, 760, 1024, 1280px; expect no page errors or horizontal overflow. Commit UI.
+- [x] Write controlled browser check for assignments, public brief, dependency labels, exact Start references, waiting/running/partial states, source links, combined/individual results, review acceptance and switching legacy/team runs; observe failure before UI changes.
+- [x] Implement within existing olive light/dark layout, text-only model rendering, accessible buttons and safe links. Preserve selected task across Tasks/Observatory.
+- [x] Run new and existing controlled browser checks; inspect light/dark at 320, 390, 760, 1024, 1280px; expect no page errors or horizontal overflow. Commit UI.
 
 ### Task 5: Live compatibility, documentation and final verification
 

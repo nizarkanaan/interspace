@@ -40,7 +40,7 @@ class PolicyTests(unittest.TestCase):
     def test_model_cannot_grant_capabilities_or_supply_unbounded_fields(self):
         task=assignment('researcher'); task['capabilities']=['shell']
         with self.assertRaises(ValueError): teams.validate_tasks([task])
-        for key,value in [('objective','x'*2001),('id','../escape'),('dependencies','researcher'),('role',True)]:
+        for key,value in [('objective','x'*2001),('id','../escape'),('dependencies','researcher'),('role',True),('role',[])]:
             task=assignment('researcher');task[key]=value
             with self.subTest(key=key),self.assertRaises(ValueError): teams.validate_tasks([task])
 

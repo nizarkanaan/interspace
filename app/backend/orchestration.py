@@ -22,7 +22,7 @@ def object_schema(properties):
     return {'type':'object','additionalProperties':False,'properties':properties,'required':list(properties)}
 
 
-TEXT = {'type':'string'}
+TEXT = {'type':'string','minLength':1}
 TASK_SCHEMA = object_schema({'id':TEXT,'role':{'type':'string','enum':list(ROLES)},
                              'objective':TEXT,'expected_output':TEXT,
                              'dependencies':{'type':'array','items':TEXT}})
@@ -55,7 +55,7 @@ def validate_tasks(tasks):
     for task in tasks:
         fields(task,('id','role','objective','expected_output','dependencies'),'assignment')
         identity=text(task['id'],'Task ID',40)
-        if not re.fullmatch(r'[a-z][a-z0-9_-]{0,39}',identity) or task['role'] not in ROLES:
+        if not re.fullmatch(r'[a-z][a-z0-9_-]{0,39}',identity) or not isinstance(task['role'],str) or task['role'] not in ROLES:
             raise ValueError('Unsupported task ID or executable role.')
         text(task['objective'],'Assignment',2000); text(task['expected_output'],'Expected output',1000)
         deps=task['dependencies']
@@ -119,6 +119,57 @@ def validate_plan(plan):
         raise ValueError('Invalid plan capabilities or usage limits.')
 
 
+def validate_record(record):
+    """Reject incomplete saved metadata before it reaches UI or recovery actions."""
+    try:
+        validate_plan(record['plan'])
+        for key in ('project_id','source_path','revision','goal'):
+            if record[key]!=record['plan'][key]:raise ValueError('Saved team scope changed.')
+        if record['limits']!=record['plan']['limits'] or not isinstance(record['tasks'],list) or len(record['tasks'])!=len(record['plan']['tasks']):
+            raise ValueError('Invalid saved team assignments or limits.')
+        for task, approved in zip(record['tasks'],record['plan']['tasks']):
+            if any(task[k]!=v for k,v in approved.items()) or task['status'] not in ('queued','waiting','running','done','failed','cancelled','blocked'):
+                raise ValueError('Invalid saved assignment.')
+        ids={t['id'] for t in record['tasks']}
+        if not isinstance(record['jobs'],list) or len(record['jobs'])>record['limits']['max_calls']:
+            raise ValueError('Invalid saved call reservations.')
+        job_ids=[]
+        for job in record['jobs']:
+            if job['id'] not in ids|{'synthesis'} or job['status'] not in ('reserved','completed','failed','cancelled','interrupted'):
+                raise ValueError('Invalid saved job.')
+            tokens=job['tokens']
+            if tokens is not None and (not isinstance(tokens,dict) or any(type(v) is not int or v<0 for v in tokens.values())):
+                raise ValueError('Invalid saved usage.')
+            job_ids.append(job['id'])
+        if len(set(job_ids))!=len(job_ids) or not isinstance(record['results'],dict) or not set(record['results'])<=ids:
+            raise ValueError('Invalid saved artifact ownership.')
+        if not isinstance(record['evidence'],dict) or len(record['evidence'])>10:
+            raise ValueError('Invalid saved web evidence.')
+        for identity, evidence in record['evidence'].items():
+            if not identity.startswith('web:'+record['id']+':') or evidence['task_id'] not in ids or evidence['kind']!='web':
+                raise ValueError('Invalid saved web source ownership.')
+            public_url(evidence['url']);text(evidence['title'],'Source title',500)
+            text(evidence['excerpt'],'Excerpt',1600);text(evidence['retrieved_at'],'Retrieval time',80)
+            if evidence['lines']!=len(evidence['excerpt'].split('\n')):raise ValueError('Invalid saved excerpt lines.')
+        for task in record['tasks']:
+            if task['id'] not in record['results']:continue
+            result=record['results'][task['id']]
+            if task['role']=='web_searcher':
+                text(result['summary'],'Search summary',6000);questions(result['questions'])
+                if not isinstance(result['web_sources'],list) or any(i not in record['evidence'] for i in result['web_sources']):
+                    raise ValueError('Invalid saved search result.')
+            else:validate_artifact(record,task,result)
+        if record['combined'] is not None:
+            # Merged questions may include each specialist's questions as well as review objections.
+            combined=copy.deepcopy(record['combined']);questions(combined['questions'],120)
+            combined['questions']=combined['questions'][:20]
+            validate_artifact(record,{'role':'synthesis'},combined)
+        if record['stage'] not in TERMINAL|{'queued','running','synthesizing'}:
+            raise ValueError('Invalid saved team stage.')
+    except (KeyError,TypeError,AttributeError) as error:
+        raise ValueError('Saved team metadata is incomplete or malformed.') from error
+
+
 def prepare(project, plan, storage):
     validate_plan(plan)
     run=runner.prepare(Path(project['source_path']),storage,required_paths=('README.md',project['context_path']),project_name=project['name'])
@@ -128,6 +179,7 @@ def prepare(project, plan, storage):
     record.update(format=FORMAT,project_id=project['id'],goal=plan['goal'],plan=copy.deepcopy(plan),
                   stage='queued',limits=copy.deepcopy(plan['limits']),evidence={},jobs=[],combined=None,results={},events=[],
                   provider='Codex CLI · bounded specialist team',
+                  usage='Returned token counts per job; unknown consumption remains unknown. Calls and deadlines do not cap monetary spend.',
                   tasks=[dict(copy.deepcopy(t),status='waiting' if t['dependencies'] else 'queued') for t in plan['tasks']])
     record.pop('verification',None)
     runner.event(record,'Orchestrator','planned','Approved specialist plan saved; assignments and call limit cannot expand.')
@@ -159,8 +211,8 @@ def public_url(value):
     return value
 
 
-def questions(value):
-    if not isinstance(value,list) or len(value)>20:
+def questions(value, maximum=20):
+    if not isinstance(value,list) or len(value)>maximum:
         raise ValueError('At most twenty unresolved questions are allowed.')
     return [text(q,'Unresolved question',2000) for q in value]
 

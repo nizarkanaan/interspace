@@ -25,12 +25,12 @@ class SearchProviderTests(unittest.TestCase):
         self.assertEqual(usage,{'input_tokens':3})
 
     def test_search_mode_is_live_and_ignores_user_integrations(self):
-        binary=self.executable("args=' '.join(sys.argv)\nassert 'web_search=\"live\"' in args\nassert '--ignore-user-config' in args\nassert 'features.shell_tool=false' in args\nassert 'features.multi_agent=false' in args\nprint(json.dumps({'type':'item.completed','item':{'type':'agent_message','text':'{}'}}))\nprint(json.dumps({'type':'turn.completed'}))")
+        binary=self.executable("args=' '.join(sys.argv)\nassert 'web_search=\"live\"' in args\nassert '--ignore-user-config' in args\nassert 'project_doc_max_bytes=0' in args\nassert '--ignore-rules' in args\nassert 'features.shell_tool=false' in args\nassert 'features.multi_agent=false' in args\nprint(json.dumps({'type':'item.completed','item':{'type':'agent_message','text':'{}'}}))\nprint(json.dumps({'type':'turn.completed'}))")
         self.assertEqual(CodexProvider(binary,timeout=3).search('brief',{},self.root,threading.Event(),lambda e:None)[0],{})
 
     def test_search_still_aborts_forbidden_tools(self):
-        for kind in ('command_execution','file_change','mcp_tool_call','collab_tool_call'):
-            binary=self.executable("print(json.dumps({'type':'item.started','item':{'type':"+repr(kind)+"}}))\ntime.sleep(2)")
+        for kind in ('command_execution','file_change','mcp_tool_call','collab_tool_call','computer_use'):
+            binary=self.executable("print(json.dumps({'type':'item.started','item':{'type':"+repr(kind)+"}}),flush=True)\ntime.sleep(2)")
             with self.subTest(kind=kind),self.assertRaisesRegex(ProviderError,'tool'):
                 CodexProvider(binary,timeout=3).search('brief',{},self.root,threading.Event(),lambda e:None)
 
