@@ -31,6 +31,13 @@ def corpus(run, record):
     return content
 
 
+def provenance(record):
+    version=record.get('source_scope',{}).get('selection_version','legacy snapshot')
+    return ('\nSnapshot revision: '+record['revision']+
+            '\nApproved source paths: '+json.dumps(list(record['sources']))+
+            '\nSelection version: '+str(version))
+
+
 def invoke(app, project, run, identity, role, prompt, schema, search=False):
     with app.lock:
         if app.cancel.is_set():raise ProviderError('Run cancelled before dispatch.')
@@ -109,7 +116,7 @@ def execute(app, project, plan):
                     'Keep the result under 1000 words. '+
                     ('Check ALL supplied artifacts including original search excerpts. Return accept/revise/blocked with reasons. ' if task['role']=='reviewer' else 'Return verdict not_reviewed. ')+
                     '\nAssignment: '+task['objective']+'\nExpected output: '+task['expected_output']+
-                    '\nRole playbook: '+playbook(task['role'])+'\nDependency artifacts: '+json.dumps(prior)+
+                    '\nRole playbook: '+playbook(task['role'])+provenance(record)+'\nDependency artifacts: '+json.dumps(prior)+
                     '\nWeb evidence (excerpts only; full pages not independently checked): '+json.dumps({k:v for k,v in record['evidence'].items() if v['task_id'] in deps})+
                     '\nCommitted sources:\n'+source_text)
             schema=copy.deepcopy(policy.RESULT_SCHEMA)
@@ -131,7 +138,7 @@ def execute(app, project, plan):
             'Use only existing citation IDs and ranges. Distinguish facts, interpretations and proposals. '
             'Retain reviewer objections and unanswered questions; do not claim full papers were read from excerpts. '
             'Return verdict not_reviewed (runtime separately retains independent review). Keep under 1000 words.\nGoal: '+plan['goal']+
-            '\nArtifacts: '+json.dumps(record['results'])+'\nWeb evidence: '+json.dumps(record['evidence']))
+            provenance(record)+'\nArtifacts: '+json.dumps(record['results'])+'\nWeb evidence: '+json.dumps(record['evidence']))
     result,_=invoke(app,project,run,'synthesis','Orchestrator',prompt,policy.RESULT_SCHEMA)
     with app.lock:
         if app.cancel.is_set():raise ProviderError('Run cancelled before saving synthesis.')

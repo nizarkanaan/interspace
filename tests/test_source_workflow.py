@@ -168,3 +168,12 @@ class SourceWorkflowTests(unittest.TestCase):
                 self.assertIsNone(restored.public()['run'])
                 self.assertIn('unavailable',restored.public()['error'])
                 restored.handle('switch_project',{'project_id':other_id})
+
+    def test_selected_workers_receive_exact_snapshot_revision_and_manifest(self):
+        self.setup_app();self.save();plan=self.chat();run=self.start(plan)
+        for role in ('Researcher','Reviewer'):
+            with self.subTest(role=role):
+                prompt=next(p for p in self.provider.calls if 'Role: '+role in p)
+                self.assertIn('Snapshot revision: '+run['revision'],prompt)
+                self.assertIn('Approved source paths: ["notes/selected.txt"]',prompt)
+                self.assertIn('Selection version: 1',prompt)
