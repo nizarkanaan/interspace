@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import subprocess
 import threading
 import uuid
 
@@ -19,6 +20,8 @@ CHAT_SCHEMA = {'type':'object','additionalProperties':False,
                'properties':{'reply':{'type':'string'},'action':{'type':'string','enum':['answer','propose_review','propose_revision']}},
                'required':['reply','action']}
 CITATION = {'type':'object','additionalProperties':False,'properties':{'source':{'type':'string'},'start':{'type':'integer'},'end':{'type':'integer'}},'required':['source','start','end']}
+SNAPSHOT_ERRORS = (OSError, ValueError, KeyError, TypeError)
+
 RESULT_SCHEMA = {'type':'object','additionalProperties':False,'properties':{
     'summary':{'type':'string'},'proposal':{'type':'string'},'findings':{'type':'array','items':{'type':'object','additionalProperties':False,'properties':{'claim':{'type':'string'},'evidence':{'type':'array','items':CITATION}},'required':['claim','evidence']}}},'required':['summary','proposal','findings']}
 
@@ -43,12 +46,15 @@ class Application:
                 project['pending'] = None
             run_id = self.state['active_run_id']
             if run_id and project and run_id in project['run_ids']:
-                run, record = self.owned_run(project,run_id)
-                if record['stage'] in ('researcher','reviewer'):
-                    record['stage'] = 'interrupted'
-                    runner.event(record,'Orchestrator','interrupted','App reopened after an unfinished interaction; no automatic retry.')
-                    runner.save(run/'run.json',record)
-                    runner.verify(run)
+                try:
+                    run, record = self.owned_run(project,run_id)
+                    if record['stage'] in ('researcher','reviewer'):
+                        record['stage'] = 'interrupted'
+                        runner.event(record,'Orchestrator','interrupted','App reopened after an unfinished interaction; no automatic retry.')
+                        runner.save(run/'run.json',record)
+                        runner.verify(run)
+                except SNAPSHOT_ERRORS + (subprocess.SubprocessError,):
+                    self.state['error'] = 'Interrupted saved review is unavailable. Other projects remain usable; preserve app data before recovery.'
             self.state.update(active_project_id=None,active_run_id=None)
         self.persist()
 
@@ -65,9 +71,12 @@ class Application:
         return run, record
 
     def run_summary(self, project, run_id):
-        _, record = self.owned_run(project,run_id)
-        return {'id':record['id'],'stage':record['stage'],'goal':record['goal'],
-                'revision':record['revision'],'round':record.get('revision_round',0)}
+        try:
+            _, record = self.owned_run(project,run_id)
+            return {'id':record['id'],'stage':record['stage'],'goal':record['goal'],
+                    'revision':record['revision'],'round':record.get('revision_round',0)}
+        except SNAPSHOT_ERRORS:
+            return {'id':run_id,'stage':'unavailable','goal':'Saved review unavailable','revision':'','round':0}
 
     def summaries(self):
         summaries = []
@@ -91,9 +100,13 @@ class Application:
             data['active_project'] = owner['name'] if owner else 'Workspace'
             data['error'] = self.state['error'] if self.state['error_project_id'] in (None,data['project_id']) else ''
             if project and project['run_id']:
-                _, record = self.owned_run(project,project['run_id'])
-                data['run'] = {k:v for k,v in record.items() if k not in ('source_path','baseline')}
-                data['run'].update(artifact_id=revisions.artifact_id(record),revision_round=record.get('revision_round',0),revision_limit=revisions.MAX_REVISIONS)
+                try:
+                    _, record = self.owned_run(project,project['run_id'])
+                    data['run'] = {k:v for k,v in record.items() if k not in ('source_path','baseline')}
+                    data['run'].update(artifact_id=revisions.artifact_id(record),revision_round=record.get('revision_round',0),revision_limit=revisions.MAX_REVISIONS)
+                except SNAPSHOT_ERRORS:
+                    data['run'] = None
+                    data['error'] = 'Selected saved review is unavailable. Other projects remain usable; preserve app data before recovery.'
             return data
 
     def publish(self):

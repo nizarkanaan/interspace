@@ -42,4 +42,4 @@ Python 3.9+; native macOS 13+ arm64; no new dependencies or HTTP service. Keep t
 - [x] Implement selector, overview, metadata form and run history with explicit IDs; preserve per-scope drafts and discard stale source responses. Keep metadata drafts stable on background state updates.
 - [x] Check switching, metadata saving, history, delayed source races, light/dark and 320–1280px layout with a synthetic browser bridge.
 - [x] Build native app, inspect migrated live state without model work, verify signature after launch; document checks and limitations.
-- [ ] Obtain a fresh independent whole-branch review, address substantive findings, rerun affected checks and commit. Leave feature branch unmerged for user review.
+- [x] Obtain a fresh independent whole-branch review, address substantive findings, rerun affected checks and commit. Leave feature branch unmerged for user review.

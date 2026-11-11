@@ -54,8 +54,10 @@ window.interspaceWorkspace = (() => {
         const value = {};
         for (const key of ['name','brief','priority','next_action']) value[key] = $(key==='name'?'project-name-input':'project-'+key).value;
         request('update_project', {project_id:project.id, ...value}).then(() => {
-          drafts.delete(project.id);
-          if ($('project-picker').value === project.id) $('metadata-status').textContent = 'Saved on your machine';
+          const current = drafts.get(project.id);
+          const unchanged = current && Object.keys(value).every(key => current[key] === value[key]);
+          if (unchanged) drafts.delete(project.id);
+          if ($('project-picker').value === project.id) $('metadata-status').textContent = drafts.has(project.id) ? 'Unsaved changes' : 'Saved on your machine';
         }).catch(() => {});
       };
     }

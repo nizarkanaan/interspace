@@ -18,7 +18,7 @@ export default async function check(page, url) {
       if(request.method==='chat'){window.testBridge.heldChat=request;return;}
       if(request.method==='switch_project'){selected=request.params.project_id;selectedRun=runs[selected][0]?.id;}
       if(request.method==='select_run')selectedRun=request.params.run_id;
-      if(request.method==='update_project')Object.assign(projects.find(p=>p.id===request.params.project_id),request.params);
+      if(request.method==='update_project'){Object.assign(projects.find(p=>p.id===request.params.project_id),request.params);if(window.testBridge.holdMetadata){window.testBridge.heldMetadata=request;return;}}
       result=state();
       queueMicrotask(()=>window.interspaceReceive({id:request.id,result}));
     }}}};
@@ -39,6 +39,15 @@ export default async function check(page, url) {
   assert(await page.locator('#project-brief').inputValue()==='Unsaved A brief','A metadata draft lost');
   await page.locator('#project-form').evaluate(form=>form.requestSubmit());
   assert((await page.evaluate(()=>window.testBridge.requests.find(r=>r.method==='update_project'))).params.project_id==='a','Metadata not project bound');
+  await page.evaluate(()=>window.testBridge.holdMetadata=true);
+  await page.locator('#project-brief').fill('Submitted brief');
+  await page.locator('#project-form').evaluate(form=>form.requestSubmit());
+  await page.locator('#project-brief').fill('Newer unsaved brief');
+  await page.evaluate(()=>window.interspaceReceive({id:window.testBridge.heldMetadata.id,result:window.testBridge.state()}));
+  await page.locator('#project-picker').selectOption('b');
+  await page.locator('#project-picker').selectOption('a');
+  assert(await page.locator('#project-brief').inputValue()==='Newer unsaved brief','Newer metadata edit lost after late save response');
+  assert((await page.locator('#metadata-status').textContent()).includes('Unsaved'),'Newer metadata edit marked saved');
   await page.locator('#run-picker').selectOption('a-old');
   assert((await page.locator('#result-body').textContent()).includes('Report a-old'),'Old run not restored');
   await page.locator('#result-body .citation').click();

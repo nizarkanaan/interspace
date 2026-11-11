@@ -207,6 +207,41 @@ class ProjectTests(unittest.TestCase):
         self.assertEqual((storage/'state.v1-backup.json').read_bytes(),original)
         self.assertEqual(app.public()['usage'][0]['project_id'],app.public()['project_id'])
 
+    def test_unreadable_snapshot_does_not_block_other_projects_or_restart(self):
+        self.setup_app(); self.switch(self.a); self.chat(self.a,'Review A'); self.start(self.a)
+        run_id=self.app.public()['run']['id']
+        (self.storage/'runs'/run_id/'sources/README.md').write_text('Corrupted snapshot')
+        self.app.state.update(active='Researcher',active_project_id=self.a,active_run_id=run_id)
+        self.app.state['selected_project_id']=self.b
+        self.app.persist()
+        reopened=Application(self.storage,provider=self.provider)
+        self.assertEqual(reopened.public()['project_id'],self.b)
+        self.assertEqual(reopened.public()['projects'][0]['latest_run']['stage'],'unavailable')
+        reopened.handle('chat',{'scope':'project','project_id':self.b,'text':'Review B'})
+        reopened.wait()
+        self.assertIsNotNone(reopened.public()['pending'])
+        reopened.handle('switch_project',{'project_id':self.a})
+        self.assertIsNone(reopened.public()['run'])
+        self.assertIn('unavailable',reopened.public()['error'].lower())
+        with self.assertRaises(ValueError):
+            reopened.handle('source',{'project_id':self.a,'run_id':run_id,'source':'README.md'})
+
+    def test_missing_and_malformed_run_metadata_remain_isolated(self):
+        self.setup_app(); self.switch(self.a); self.chat(self.a,'Review A'); self.start(self.a)
+        run=self.storage/'runs'/self.app.public()['run']['id']
+        record=runner.load(run)
+        record.pop('goal')
+        runner.save(run/'run.json',record)
+        self.app.state['selected_project_id']=self.b
+        self.assertEqual(self.app.public()['projects'][0]['latest_run']['stage'],'unavailable')
+        self.switch(self.a)
+        self.assertIsNone(self.app.public()['run'])
+        self.switch(self.b)
+        (run/'run.json').unlink()
+        self.assertEqual(self.app.public()['projects'][0]['latest_run']['stage'],'unavailable')
+        self.switch(self.a)
+        self.assertIsNone(self.app.public()['run'])
+
     def test_unknown_schema_does_not_overwrite_state(self):
         storage=self.base/'future';storage.mkdir()
         original='{"version":999,"important":"preserve me"}'
