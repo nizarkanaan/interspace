@@ -66,6 +66,8 @@ class Application:
             raise ValueError('This run does not belong to the selected project.')
         run = self.storage/'runs'/run_id
         record = runner.load(run)
+        if any(not isinstance(record.get(key),str) or not record[key] for key in ('goal','stage','revision')):
+            raise ValueError('Saved run metadata is invalid.')
         if record['id']!=run_id or record['source_path']!=project['source_path']:
             raise ValueError('The run source does not match the selected project.')
         return run, record
