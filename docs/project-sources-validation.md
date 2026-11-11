@@ -43,7 +43,7 @@ Both focused regressions failed before the correction and passed afterward. An i
 
 ## Scope and limits
 
-No real provider/model call, account change, Sample Project access, source-project execution or external write was used for this milestone. No remote push or main integration is included. Verification uses disposable repositories and controlled providers. The native-window check can be performed after unlocking; source consent and ownership are enforced at the backend regardless of UI state.
+The initial implementation used no real provider/model call, account change, Sample Project access, source-project execution or external write. The separately authorized follow-up below records live verification and local integration; no remote push is included. Verification uses disposable repositories and controlled providers. The native-window check can be performed after unlocking; source consent and ownership are enforced at the backend regardless of UI state.
 
 ## Live source-selection follow-up — 2026-11-11
 
@@ -52,3 +52,5 @@ The user authorized up to four fresh model calls, followed by local integration 
 The live Orchestrator selected Researcher → Reviewer. All four calls (planning, both specialists, synthesis) completed, the Reviewer accepted the bounded brief, and the source integrity comparison passed. Every provider input was checked before launch for the unselected README/note and dirty-draft sentinels; none was present. The resulting team-v2 manifest contained exactly `review/selected-brief.txt`, and findings cited its committed LF lines. Acceptance and repeated acceptance succeeded without another call. The separate durable ledger recorded exactly four calls: 54,759 input tokens, zero reported cached input tokens, and 1,771 output tokens. These are provider counters, not a spending estimate.
 
 The report raised the commit identifier as missing because the worker prompt had not included that runtime metadata. A focused regression failed for both Researcher and Reviewer; prompts now include the captured snapshot revision, approved source paths and selection version, and synthesis receives the same provenance. Web input remains unchanged. The regression and full 101-test Python suite pass; generated checks, native rebuild/signature verification also pass. No additional live call was used to re-evaluate the small prompt-metadata correction. This establishes one successful live selected-source path, not general agent accuracy.
+
+Post-integration verification: both complete suites pass 101/101 on Python 3.14 and Apple Python 3.9. Local main contains the source-selection milestone. A separate Sample Project contact/visit measurement request was prepared from committed technical files only; its source baseline remained unchanged. It is awaiting a separate model-call allowance, with no Sample Project model run started.
