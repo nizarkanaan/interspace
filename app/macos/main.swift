@@ -113,26 +113,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
               let request = message.body as? [String: Any], let method = request["method"] as? String else { return }
         if method == "choose_project" {
             let alert = NSAlert()
-            alert.messageText = "Choose your Sample Project folder"
+            alert.messageText = "Add a project folder"
             alert.informativeText = "Only committed technical files will be reviewed. The app will not edit or run the project."
             let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 480, height: 26))
             field.placeholderString = "Full repository folder path"
-            let candidate = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents/Projects/Sample Project").path
-            field.stringValue = candidate
+            field.stringValue = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents/Projects").path
             alert.accessoryView = field
             alert.addButton(withTitle: "Use folder")
             alert.addButton(withTitle: "Browse…")
             alert.addButton(withTitle: "Cancel")
             alert.beginSheetModal(for: window) { [weak self] response in
                 if response == .alertFirstButtonReturn {
-                    self?.send(["id": request["id"] ?? NSNull(), "method": "select_project", "params": ["path": field.stringValue]])
+                    self?.send(["id": request["id"] ?? NSNull(), "method": "add_project", "params": ["path": field.stringValue]])
                 } else if response == .alertSecondButtonReturn {
                     self?.browseProject(request)
                 } else { self?.deliver(["id": request["id"] ?? NSNull(), "result": ["cancelled": true]]) }
             }
             return
         }
-        guard ["state", "connection", "chat", "start_review", "cancel", "source", "sign_in", "revise_run", "accept_report"].contains(method) else {
+        guard ["state", "connection", "chat", "start_review", "cancel", "source", "sign_in", "revise_run", "accept_report", "switch_project", "update_project", "select_run"].contains(method) else {
             deliver(["id": request["id"] ?? NSNull(), "error": "Unsupported app action."]); return
         }
         send(request)
@@ -140,7 +139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
 
     func browseProject(_ request: [String: Any]) {
         let picker = NSOpenPanel()
-        picker.title = "Choose your Sample Project repository"
+        picker.title = "Add a Git project repository"
         picker.prompt = "Choose folder"
         picker.canChooseDirectories = true
         picker.canChooseFiles = false
@@ -148,7 +147,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         picker.canCreateDirectories = false
         picker.beginSheetModal(for: window) { [weak self] result in
             if result == .OK, let path = picker.url?.path {
-                self?.send(["id": request["id"] ?? NSNull(), "method": "select_project", "params": ["path": path]])
+                self?.send(["id": request["id"] ?? NSNull(), "method": "add_project", "params": ["path": path]])
             } else { self?.deliver(["id": request["id"] ?? NSNull(), "result": ["cancelled": true]]) }
         }
     }

@@ -1,0 +1,13 @@
+# Multi-project validation — 2026-11-11
+
+Branch: `feature/multi-project-workspaces`. Implemented scope is described in the [spec](superpowers/specs/2026-11-11-multi-project.md).
+
+- New tests initially failed because add_project was unsupported and v1 state was not migrated. After implementation, all 44 Python tests pass on Python 3.14.6 (43 on Apple's Python 3.9.6 before the final cancellation scenario was added).
+- Disposable repositories and recording providers verify independent threads/plans/runs, canonical folder deduplication, README-only fallback, metadata validation, stale project/source/report rejection, selected run history, owner-bound worker completion and cancellation after switching, active-owner restart recovery, migration backup and future-schema protection.
+- Workspace prompt inspection confirms registered brief/priority inclusion while source markers, project messages and report bodies remain excluded. Project prompts exclude the other project's context.
+- `tests/project-ui.mjs` exports a controlled Playwright bridge check accepting a Page and local UI URL. Observed pass: project switching, conversation/metadata draft retention, metadata save ownership, history restoration, stale source response suppression, late send response safety, overview cards and horizontal fit at 320, 390, 760, 1024 and 1280 pixels. No live provider/backend is connected in that check.
+- Native arm64 macOS app built and launched. Existing Sample Project state migrated to v2; hashed conversations, current report reference and usage count matched before/after, with original v1 backup retained. Native brief/priority controls, Add project dialog cancellation and static Observatory were inspected. No extra user project was registered and no model work was started.
+- `codesign --verify --deep --strict dist/Interspace.app` passes after launch. No Python bytecode appears in the signed bundle.
+- Generated design preview and role-contract checks pass; no changes to catalog roles or prototype sources. Template checks do not establish model accuracy.
+
+Limits: no fresh model evaluation of Workspace priority advice; deterministic prompt/ownership checks cover this change. The official provider adapter's prior live validation still applies. No notarized installer or bundled Python; one global interaction; fixed source allowlist; dynamic specialist routing remains future work.

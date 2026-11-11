@@ -2,7 +2,7 @@
 
 Launch `dist/Interspace.app` with a double-click. It opens its own native window; no HTML file, browser tab or local web server is required. The backend starts and stops with the application.
 
-The first executable workflow is a read-only Sample Project review. Choose the repository folder, select its conversation scope, and ask the Orchestrator to review its evidence or propose a bounded experiment. It returns an inspectable plan; **Start read-only review** dispatches Researcher then Reviewer automatically through Codex. Tasks, source citations, results and the static Observatory display recorded work. Other catalog roles and external-app writes are not executable in this release.
+The first executable workflow is a read-only project review. Add a Git repository folder, select its conversation scope, and ask the Orchestrator to review its evidence or propose a bounded experiment. It returns an inspectable plan; **Start read-only review** dispatches Researcher then Reviewer automatically through Codex. Tasks, source citations, results and the static Observatory display recorded work. Other catalog roles and external-app writes are not executable in this release.
 
 ## Connection
 
@@ -12,7 +12,7 @@ The CLI's configured authentication determines account usage. ChatGPT sign-in us
 
 ## Data and project protection
 
-Conversations, plans, usage records and source snapshots live in `~/Library/Application Support/Interspace`. The source checkout is never edited or executed. Selected technical evidence comes from its committed revision; uncommitted and private files are excluded. Approvals bind to the canonical project path and committed revision. If HEAD changes, request a new plan.
+Conversations, plans, usage records and source snapshots live in `~/Library/Application Support/Interspace`. The source checkout is never edited or executed. Selected technical evidence comes from its committed revision; uncommitted and private files are excluded. Approvals bind to a stable project ID, canonical project path, committed revision and (for report actions) artifact version. If HEAD changes, request a new plan.
 
 One app backend may own a data directory at a time. One interaction runs at a time; a review uses two sequential worker sessions with a four-minute deadline each and no retries. Stop terminates the owned provider process group. Quit closes the backend input pipe and guarantees cancellation cleanup. On restart, unfinished runs become interrupted rather than silently resuming. A stage deadline is not a monetary spending cap.
 
@@ -33,9 +33,11 @@ For isolated development state, the native executable supports `--data-root /abs
 ## Source ownership
 
 - `macos/main.swift`: native window, folder/path picker, restricted local UI bridge, process lifecycle.
-- `backend/service.py`: conversation state, version-bound plans, dispatch and result acceptance.
+- `backend/projects.py`: versioned registry, v1 migration, project metadata validation.
+- `backend/service.py`: ownership-bound conversations, version-bound plans, dispatch and result acceptance.
 - `backend/provider.py`: signed-in Codex CLI process adapter, event validation, deadlines and cancellation.
-- `ui/index.html`: app interface; model/report text is inserted as text, not executable markup.
+- `ui/index.html`, `ui/app.js`: app interface and conversation/report state; model/report text is inserted as text, not executable markup.
+- `ui/workspace.js`: project picker, metadata drafts, overview cards and run-history controls.
 - `../pilot/runner.py`: reusable committed snapshots, evidence validation and source integrity checks.
 - `../scripts/build-macos-app.py`: reproducible app packaging.
 
@@ -52,3 +54,15 @@ Interspace stores conversations locally. A new Orchestrator job receives recent 
 When a Reviewer requests changes, **Revise from reviewer feedback** starts one additional Researcher → Reviewer round against the same committed snapshot. It adds two Codex jobs without an extra planning call. You can instead ask the Orchestrator for a revision plan; that conversation adds its own job. Supplemental instructions in that plan reach both revision workers.
 
 The one-round allowance is reserved before dispatch and survives cancellation, failure and restart. It cannot loop indefinitely. Old results remain available in **Artifact version**, and Run history identifies each round. Source changes or stale artifact references block actions. After the Reviewer accepts a report, **Accept this report** records your acceptance of that exact artifact without a model call. It does not authorize code changes or the proposed experiment.
+
+## Multiple projects
+
+**Add project folder** registers another repository without clearing existing conversations or reviews. Choose its repository root, with a committed `README.md`. Project chat prefers committed `docs/PROJECT_CONTEXT.md` when present, otherwise README. Review snapshots still use the explicit technical allowlist in `pilot/runner.py`; registering a repository does not expose all its files. Source selection beyond that allowlist is future work. Re-adding the same canonical folder selects its existing record and refreshes its context choice.
+
+The project picker switches among separate conversations, pending plans and report histories. **Project brief & priority** saves a name, brief (1,200 characters), high/normal/low priority and next action locally, without a model call or source edits. **Project review history** restores a prior run; **Artifact version** selects rounds within that run. Unsent chat and metadata drafts survive switching in the current app session, but are not persisted across app restarts.
+
+In Workspace scope, the project desk shows all registered projects. Workspace Orchestrator receives only names, briefs, priorities, next actions, proposal availability and latest review status. It can suggest priorities; it does not automatically edit metadata or dispatch across projects. Raw sources, report bodies and project conversations are excluded from Workspace prompts. Project scope receives only that project's own context and selected report. User-entered briefs are intentionally available to Workspace summaries.
+
+You can browse another project or report while a job runs. The active banner names the actual owner, and the worker saves results, failures and usage to that owner. Only one interaction runs at a time. Mutating actions carry explicit project IDs; stale project/run/artifact references fail before dispatch.
+
+Existing single-project state migrates automatically to version 2, preserving its conversations, plan, run and usage. The original is kept once as `state.v1-backup.json` beside `state.json`. Migration does not revise or accept a saved report. Unknown future schema versions fail without overwriting the state.

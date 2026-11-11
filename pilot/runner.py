@@ -83,7 +83,7 @@ def event(data, role, status, detail):
                            'role': role, 'status': status, 'detail': detail, 'round':data.get('revision_round',0)})
 
 
-def prepare(source, storage):
+def prepare(source, storage, required_paths=None, project_name=None):
     source, storage = Path(source).resolve(), Path(storage).resolve()
     if storage.is_relative_to(source):
         raise ValueError('storage must be outside the source project')
@@ -100,11 +100,11 @@ def prepare(source, storage):
             raise ValueError('unsupported source size or format: ' + name)
         data.decode('utf-8')
         blobs[name] = data
-    if any(name not in blobs for name in REQUIRED):
+    if any(name not in blobs for name in (REQUIRED if required_paths is None else required_paths)):
         raise ValueError('missing required committed context')
     if fingerprint(source) != baseline:
         raise ValueError('source changed during snapshot; retry after reconciling')
-    run = storage / ('pilot-' + uuid.uuid4().hex[:12])
+    run = storage / (('review-' if project_name is not None else 'pilot-') + uuid.uuid4().hex[:12])
     run.mkdir(parents=True)
     manifest = {}
     for name, blob in blobs.items():
@@ -113,7 +113,7 @@ def prepare(source, storage):
         target.write_bytes(blob)
         # Citations use LF-delimited lines, matching the browser; ignore a trailing empty segment.
         manifest[name] = {'sha256': digest(blob), 'lines': len(blob.decode().split('\n')) - int(blob.endswith(b'\n'))}
-    record = {'id': run.name, 'project': 'Sample Project', 'source_path': str(source),
+    record = {'id': run.name, 'project': project_name if project_name is not None else 'Sample Project', 'source_path': str(source),
               'revision': baseline['head'], 'baseline': baseline, 'sources': manifest, 'missing': missing,
               'stage': 'researcher', 'provider': 'Current Codex session · artifact bridge',
               'usage': 'Token usage and monetary cost unavailable for this bridge; two specialist sessions maximum.',

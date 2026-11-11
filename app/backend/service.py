@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT / 'pilot'))
 import runner
 from provider import CodexProvider, ProviderError
 import revisions
+import projects
 
 CHAT_SCHEMA = {'type':'object','additionalProperties':False,
                'properties':{'reply':{'type':'string'},'action':{'type':'string','enum':['answer','propose_review','propose_revision']}},
@@ -31,34 +32,66 @@ class Application:
         self.lock = threading.RLock()
         self.cancel = threading.Event()
         self.worker = None
-        path = self.storage / 'state.json'
-        self.state = json.loads(path.read_text()) if path.exists() else {
-            'version':1,'project_path':None,'threads':{'workspace':[],'project':[]},'pending':None,
-            'active':None,'run_id':None,'error':'','usage':[],'connection':{'ready':False,'message':'Not checked yet'}}
+        self.current_run = None
+        self.state = projects.load(self.storage)
         if self.state['active']:
-            self.state['active'] = None
-            self.state['pending'] = None
-            self.state['error'] = 'Previous interaction was interrupted. Review saved results before starting again.'
-            if self.state['run_id']:
-                run = self.storage / 'runs' / self.state['run_id']
-                record = runner.load(run)
+            owner = self.state['active_project_id']
+            project = self.state['projects'].get(owner)
+            self.state.update(active=None,error_project_id=owner,
+                              error='Previous interaction was interrupted. Review saved results before starting again.')
+            if project:
+                project['pending'] = None
+            run_id = self.state['active_run_id']
+            if run_id and project and run_id in project['run_ids']:
+                run, record = self.owned_run(project,run_id)
                 if record['stage'] in ('researcher','reviewer'):
                     record['stage'] = 'interrupted'
                     runner.event(record,'Orchestrator','interrupted','App reopened after an unfinished interaction; no automatic retry.')
                     runner.save(run/'run.json',record)
                     runner.verify(run)
+            self.state.update(active_project_id=None,active_run_id=None)
         self.persist()
 
     def persist(self):
         runner.save(self.storage / 'state.json', self.state)
 
+    def owned_run(self, project, run_id):
+        if not isinstance(run_id,str) or Path(run_id).name!=run_id or run_id not in project['run_ids']:
+            raise ValueError('This run does not belong to the selected project.')
+        run = self.storage/'runs'/run_id
+        record = runner.load(run)
+        if record['id']!=run_id or record['source_path']!=project['source_path']:
+            raise ValueError('The run source does not match the selected project.')
+        return run, record
+
+    def run_summary(self, project, run_id):
+        _, record = self.owned_run(project,run_id)
+        return {'id':record['id'],'stage':record['stage'],'goal':record['goal'],
+                'revision':record['revision'],'round':record.get('revision_round',0)}
+
+    def summaries(self):
+        summaries = []
+        for project in self.state['projects'].values():
+            summary = {key:project[key] for key in ('id','name','brief','priority','next_action')}
+            summary['latest_run'] = self.run_summary(project,project['run_ids'][-1]) if project['run_ids'] else None
+            summary['has_pending_plan'] = bool(project['pending'])
+            summaries.append(summary)
+        return summaries
+
     def public(self):
         with self.lock:
-            data = copy.deepcopy({k:v for k,v in self.state.items() if k not in ('project_path','run_id')})
-            data['project'] = Path(self.state['project_path']).name if self.state['project_path'] else None
-            data['run'] = None
-            if self.state['run_id']:
-                record = runner.load(self.storage / 'runs' / self.state['run_id'])
+            project = self.state['projects'].get(self.state['selected_project_id'])
+            data = copy.deepcopy({key:self.state[key] for key in ('version','active','active_project_id','active_run_id','usage','connection')})
+            data.update(project_id=project['id'] if project else None,project=project['name'] if project else None,
+                        projects=self.summaries(),pending=copy.deepcopy(project['pending']) if project else None,
+                        threads={'workspace':copy.deepcopy(self.state['threads']['workspace']),
+                                 'project':copy.deepcopy(project['thread']) if project else []},
+                        runs=[self.run_summary(project,r) for r in reversed(project['run_ids'])] if project else [],run=None)
+            owner = self.state['projects'].get(self.state['active_project_id'])
+            data['active_project'] = owner['name'] if owner else 'Workspace'
+            data['error'] = self.state['error'] if self.state['error_project_id'] in (None,data['project_id']) else ''
+            if project and project['run_id']:
+                _, record = self.owned_run(project,project['run_id'])
                 data['run'] = {k:v for k,v in record.items() if k not in ('source_path','baseline')}
                 data['run'].update(artifact_id=revisions.artifact_id(record),revision_round=record.get('revision_round',0),revision_limit=revisions.MAX_REVISIONS)
             return data
@@ -84,91 +117,99 @@ class Application:
             if method == 'cancel':
                 self.cancel.set()
                 return {'cancellation_requested':bool(self.state['active'])}
-            if method == 'source':
-                if not self.state['run_id']:
-                    raise ValueError('No run selected')
-                run = self.storage / 'runs' / self.state['run_id']
-                data = runner.load(run)
+            if method == 'switch_project':
+                identity = params.get('project_id')
+                if not isinstance(identity,str) or identity not in self.state['projects']:
+                    raise ValueError('Unknown project.')
+                self.state['selected_project_id'] = identity
+                self.publish()
+                return self.public()
+            if method in ('source','select_run'):
+                project = projects.selected(self.state,params)
+                run, record = self.owned_run(project,params.get('run_id'))
+                if method == 'select_run':
+                    project['run_id'] = record['id']
+                    self.publish()
+                    return self.public()
+                if record['id']!=project['run_id']:
+                    raise ValueError('This run is stale or no longer selected.')
                 name = params.get('source')
-                if name not in data['sources']:
+                if name not in record['sources']:
                     raise ValueError('Unknown source')
-                return {'source':name,'text':(run / 'sources' / name).read_text()}
-            if method not in ('select_project','chat','start_review','sign_in','revise_run','accept_report'):
+                return {'project_id':project['id'],'run_id':record['id'],'source':name,'text':(run/'sources'/name).read_text()}
+            if method not in ('add_project','select_project','update_project','chat','start_review','sign_in','revise_run','accept_report'):
                 raise ValueError('Unknown method')
             if self.state['active']:
                 raise ValueError('An interaction is active. Stop it before starting another.')
             if method == 'sign_in':
-                self.launch('Signing in', lambda: self.sign_in())
+                self.launch('Signing in',lambda:self.sign_in())
                 return {'started':True}
-            if method == 'select_project':
-                source = Path(params.get('path','')).expanduser().resolve()
-                if not source.is_dir() or self.storage.is_relative_to(source):
-                    raise ValueError('Choose a separate Sample Project repository folder.')
-                head = runner.git(source,'rev-parse','HEAD').decode().strip()
-                for name in runner.REQUIRED:
-                    runner.git(source,'show',head+':'+name)
-                if str(source) != self.state['project_path']:
-                    self.state.update(project_path=str(source),pending=None,run_id=None)
-                    self.state['threads']['project'] = []
+            if method in ('add_project','select_project'):
+                projects.register(self.state,params.get('path'),self.storage)
+                self.publish()
+                return self.public()
+            if method == 'update_project':
+                projects.update(projects.selected(self.state,params),params)
                 self.publish()
                 return self.public()
             if method in ('revise_run','accept_report'):
-                run, record = self.selected_run(params)
+                project = projects.selected(self.state,params)
+                run, record = self.selected_run(project,params)
                 if method == 'accept_report':
                     if revisions.accept_report(run,params):
-                        self.state['threads']['project'].append({'role':'assistant','text':'Report accepted. This records your acceptance of this artifact only; no experiment or project change was authorized.'})
-                    self.state['pending'] = None
+                        project['thread'].append({'role':'assistant','text':'Report accepted. This records your acceptance of this artifact only; no experiment or project change was authorized.'})
+                    project['pending'] = None
                     self.publish()
                     return self.public()
                 revisions.check_revision(record)
                 revisions.check_source(run,record)
-                self.state['pending'] = None
-                self.launch('Preparing revision',lambda:self.revise(run))
+                project['pending'] = None
+                self.launch('Preparing revision',lambda:self.revise(project,run),project['id'])
                 return {'started':True}
             if method == 'chat':
                 scope, text = params.get('scope'), params.get('text')
                 if scope not in ('workspace','project') or not isinstance(text,str) or not text.strip() or len(text)>6000:
                     raise ValueError('Enter a message of up to 6000 characters and choose its scope.')
-                if scope == 'project' and not self.state['project_path']:
-                    raise ValueError('Choose your Sample Project folder first.')
-                self.state['pending'] = None
-                self.state['threads'][scope].append({'role':'user','text':text.strip()})
-                self.launch('Orchestrator', lambda: self.chat(scope,text.strip()))
+                project = projects.selected(self.state,params) if scope=='project' else None
+                if project:
+                    project['pending'] = None
+                thread = project['thread'] if project else self.state['threads']['workspace']
+                thread.append({'role':'user','text':text.strip()})
+                run_id = project['run_id'] if project else None
+                self.launch('Orchestrator',lambda:self.chat(project,text.strip(),run_id),project['id'] if project else None)
                 return {'started':True}
-            pending = self.state['pending']
+            project = projects.selected(self.state,params)
+            pending = project['pending']
             if not pending or params.get('plan_id') != pending['id']:
                 raise ValueError('This plan is stale. Ask the Orchestrator for a new plan.')
             plan = copy.deepcopy(pending)
-            source = Path(self.state['project_path'])
-            if plan.get('source_path') != str(source) or runner.git(source,'rev-parse','HEAD').decode().strip() != plan.get('revision'):
-                self.state['pending'] = None
+            source = Path(project['source_path'])
+            if plan.get('project_id')!=project['id'] or plan.get('source_path')!=str(source) or runner.git(source,'rev-parse','HEAD').decode().strip()!=plan.get('revision'):
+                project['pending'] = None
                 self.publish()
                 raise ValueError('The project revision changed; this plan is stale. Request a new review plan.')
             if plan.get('kind')=='revision':
-                run, record = self.selected_run(plan)
+                run, record = self.selected_run(project,plan)
                 revisions.check_revision(record)
                 revisions.check_source(run,record)
-                self.state['pending'] = None
-                self.launch('Preparing revision',lambda:self.revise(run,plan['goal']))
+                project['pending'] = None
+                self.launch('Preparing revision',lambda:self.revise(project,run,plan['goal']),project['id'])
             else:
-                self.state['pending'] = None
-                self.launch('Preparing snapshot', lambda: self.review(plan))
+                project['pending'] = None
+                self.launch('Preparing snapshot',lambda:self.review(project,plan),project['id'])
             return {'started':True}
 
-    def selected_run(self, reference):
-        if not self.state['run_id'] or reference.get('run_id')!=self.state['run_id']:
+    def selected_run(self, project, reference):
+        if not project['run_id'] or reference.get('run_id')!=project['run_id']:
             raise ValueError('This run is stale or no longer selected.')
-        run=self.storage/'runs'/self.state['run_id']
-        record=runner.load(run)
+        run, record = self.owned_run(project,project['run_id'])
         revisions.validate_reference(record,reference)
-        if record['source_path']!=self.state['project_path']:
-            raise ValueError('The selected project changed; this action is stale.')
         return run,record
 
-    def launch(self, stage, action):
+    def launch(self, stage, action, project_id=None):
         self.cancel.clear()
         self.current_run = None
-        self.state.update(active=stage,error='')
+        self.state.update(active=stage,active_project_id=project_id,active_run_id=None,error='',error_project_id=project_id)
         self.publish()
         def execute():
             try:
@@ -184,7 +225,7 @@ class Application:
                         runner.verify(self.current_run)
             finally:
                 with self.lock:
-                    self.state['active'] = None
+                    self.state.update(active=None,active_project_id=None,active_run_id=None)
                     self.publish()
         self.worker = threading.Thread(target=execute,daemon=True)
         self.worker.start()
@@ -204,24 +245,31 @@ class Application:
         if self.cancel.is_set():
             raise ProviderError('Run cancelled before accepting results.')
         with self.lock:
-            entry={'role':role,'tokens':usage}
+            entry={'role':role,'tokens':usage,'project_id':self.state['active_project_id']}
             if self.current_run:
                 record=runner.load(self.current_run)
                 entry.update(run_id=record['id'],round=record.get('revision_round',0))
             self.state['usage'].append(entry)
         return result
 
-    def chat(self, scope, text):
-        context = 'Workspace scope: project details are unavailable here. Explain available capabilities; no project dispatch.'
-        if scope == 'project':
-            source = Path(self.state['project_path'])
+    def chat(self, project, text, run_id=None):
+        summaries = self.summaries() if not project else []
+        for summary in summaries:
+            if summary['latest_run']:
+                summary['latest_run'].pop('goal',None)
+        context = ('Workspace scope: registered project metadata only. Summarize priorities and suggest next actions. '
+                   'Do not dispatch work, propose project reviews/revisions, or change metadata. '
+                   'Project briefs are user supplied; latest run statuses are historical.\n'+json.dumps(summaries))
+        if project:
+            source = Path(project['source_path'])
             head = runner.git(source,'rev-parse','HEAD').decode().strip()
-            context = 'Project: '+source.name+'\nCommitted context:\n'+runner.git(source,'show',head+':docs/PROJECT_CONTEXT.md').decode()[:24000]
-            if self.state['run_id']:
-                previous = runner.load(self.storage/'runs'/self.state['run_id'])
+            context = 'Project: '+project['name']+'\nBrief: '+project['brief']+'\nCommitted context:\n'+runner.git(source,'show',head+':'+project['context_path']).decode()[:24000]
+            if run_id:
+                _, previous = self.owned_run(project,run_id)
                 context += '\nPrior review (historical revision '+previous['revision']+'):\n'+json.dumps(previous['results'])[:18000]
                 context += '\nRun stage: '+previous['stage']+'; revision rounds used: '+str(previous.get('revision_round',0))+'/'+str(revisions.MAX_REVISIONS)
-        history = self.state['threads'][scope][-12:]
+        thread = project['thread'] if project else self.state['threads']['workspace']
+        history = thread[-12:]
         prompt = ('Role: Orchestrator\nAnswer the user clearly. You control only a read-only repository review workflow. '
                   'Use action propose_review only if the user wants a review/report/experiment proposal in project scope. '
                   'For an existing report needing revision with an unused revision round, use propose_revision when the user asks to address reviewer feedback; do not propose it after the one-round limit. Otherwise answer. Keep the reply under 150 words in plain text; a proposed plan is not the full report. Never claim execution has occurred. Do not run tools, commands, search or access files. '
@@ -231,28 +279,30 @@ class Application:
         if result.get('action') not in ('answer','propose_review','propose_revision') or not isinstance(result.get('reply'),str) or not result['reply'].strip():
             raise ValueError('Unsupported Orchestrator response; no work dispatched.')
         revision_record=None
-        if result['action']=='propose_revision' and scope=='project':
-            if not self.state['run_id']:
+        if result['action']=='propose_revision' and project:
+            if not run_id:
                 raise ValueError('There is no selected report to revise.')
-            revision_record=runner.load(self.storage/'runs'/self.state['run_id'])
+            _, revision_record=self.owned_run(project,run_id)
             revisions.check_revision(revision_record)
         with self.lock:
-            self.state['threads'][scope].append({'role':'assistant','text':result['reply']})
-            self.state['threads'][scope] = self.state['threads'][scope][-100:]
-            if result['action'] in ('propose_review','propose_revision') and scope=='project':
-                self.state['pending'] = {'id':uuid.uuid4().hex,'goal':text,'project':Path(self.state['project_path']).name,
+            thread.append({'role':'assistant','text':result['reply']})
+            del thread[:-100]
+            if result['action'] in ('propose_review','propose_revision') and project:
+                project['pending'] = {'id':uuid.uuid4().hex,'project_id':project['id'],'goal':text,'project':project['name'],
                                          'source_path':str(source),'revision':head,
                                          'roles':['Researcher','Reviewer'],'limit':'Two sequential stages · 4 minutes each · no retries','kind':'review'}
                 if revision_record:
-                    self.state['pending'].update(kind='revision',run_id=revision_record['id'],artifact_id=revisions.artifact_id(revision_record))
+                    project['pending'].update(kind='revision',run_id=revision_record['id'],artifact_id=revisions.artifact_id(revision_record))
 
-    def review(self, plan):
+    def review(self, project, plan):
         if self.cancel.is_set():
             raise ProviderError('Run cancelled before snapshot.')
-        run = runner.prepare(Path(self.state['project_path']),self.storage/'runs')
+        run = runner.prepare(Path(project['source_path']),self.storage/'runs',required_paths=('README.md',project['context_path']),project_name=project['name'])
         with self.lock:
             self.current_run = run
-            self.state['run_id'] = run.name
+            project['run_id'] = run.name
+            project['run_ids'].append(run.name)
+            self.state['active_run_id'] = run.name
             self.publish()
         data = runner.load(run)
         data['goal'] = plan['goal']
@@ -261,18 +311,19 @@ class Application:
         runner.save(run/'run.json',data)
         if data['revision'] != plan['revision']:
             raise ValueError('The project revision changed during snapshot; the plan is stale.')
-        self.run_stages(run,plan['goal'])
+        self.run_stages(project,run,plan['goal'])
 
-    def revise(self, run, instructions=''):
+    def revise(self, project, run, instructions=''):
         if self.cancel.is_set():
             raise ProviderError('Run cancelled before revision reservation.')
         with self.lock:
             revisions.begin_revision(run,instructions)
             self.current_run = run
+            self.state['active_run_id'] = run.name
             self.publish()
-        self.run_stages(run,runner.load(run)['goal'])
+        self.run_stages(project,run,runner.load(run)['goal'])
 
-    def run_stages(self, run, goal):
+    def run_stages(self, project, run, goal):
         data = runner.load(run)
         corpus = '\n\n'.join('SOURCE '+name+'\n'+ '\n'.join(str(i+1)+' '+line for i,line in enumerate((run/'sources'/name).read_text().split('\n'))) for name in data['sources'])
         if len(corpus)>240000:
@@ -320,7 +371,7 @@ class Application:
             text = 'Review finished: '+report['stage']+'. '+report['results']['reviewer']['summary']
             if not verification['unchanged']:
                 text += ' Source integrity changed during the run; inspect the checkout before further work.'
-            self.state['threads']['project'].append({'role':'assistant','text':text})
+            project['thread'].append({'role':'assistant','text':text})
 
 
 def main():

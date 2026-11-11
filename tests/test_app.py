@@ -139,11 +139,11 @@ class AppTests(unittest.TestCase):
         app = self.app()
         app.handle('select_project', {'path': str(self.source)})
         baseline = self.git('status', '--porcelain')
-        app.handle('chat', {'scope':'project', 'text':'Review the evidence'})
+        app.handle('chat', {'project_id':app.public()['project_id'],'scope':'project', 'text':'Review the evidence'})
         app.wait()
         plan = app.public()['pending']
         self.assertIsNotNone(plan)
-        app.handle('start_review', {'plan_id':plan['id']})
+        app.handle('start_review', {'project_id':app.public()['project_id'],'plan_id':plan['id']})
         app.wait()
         state = app.public()
         self.assertEqual(state['run']['stage'], 'completed')
@@ -157,7 +157,7 @@ class AppTests(unittest.TestCase):
         app = self.app()
         app.handle('select_project', {'path':str(self.source)})
         with self.assertRaisesRegex(ValueError, 'plan'):
-            app.handle('start_review', {'plan_id':'stale'})
+            app.handle('start_review', {'project_id':app.public()['project_id'],'plan_id':'stale'})
         with self.assertRaisesRegex(ValueError, 'method'):
             app.handle('delete_project', {})
         app.handle('chat', {'scope':'workspace','text':'Help'})
@@ -167,14 +167,14 @@ class AppTests(unittest.TestCase):
     def test_plan_is_rejected_after_project_commit_changes(self):
         app = self.app()
         app.handle('select_project', {'path':str(self.source)})
-        app.handle('chat', {'scope':'project','text':'Review'})
+        app.handle('chat', {'project_id':app.public()['project_id'],'scope':'project','text':'Review'})
         app.wait()
         plan = app.public()['pending']
         (self.source/'README.md').write_text('Changed committed evidence\n')
         self.git('add','README.md')
         self.git('commit','-qm','new revision')
         with self.assertRaisesRegex(ValueError,'stale'):
-            app.handle('start_review',{'plan_id':plan['id']})
+            app.handle('start_review',{'project_id':app.public()['project_id'],'plan_id':plan['id']})
         self.assertIsNone(app.public()['run'])
 
     def test_busy_and_cancel_do_not_launch_reviewers(self):
@@ -205,9 +205,9 @@ class AppTests(unittest.TestCase):
                 raise ProviderError('provider failed')
         app = self.app(Broken())
         app.handle('select_project', {'path':str(self.source)})
-        app.handle('chat', {'scope':'project','text':'Review'})
+        app.handle('chat', {'project_id':app.public()['project_id'],'scope':'project','text':'Review'})
         app.wait()
-        app.handle('start_review', {'plan_id':app.public()['pending']['id']})
+        app.handle('start_review', {'project_id':app.public()['project_id'],'plan_id':app.public()['pending']['id']})
         app.wait()
         self.assertEqual(app.public()['run']['stage'], 'failed')
         self.assertTrue(app.public()['run']['verification']['unchanged'])
@@ -217,7 +217,9 @@ class AppTests(unittest.TestCase):
         app = self.app()
         app.handle('select_project', {'path':str(self.source)})
         run = runner.prepare(self.source, app.storage / 'runs')
-        app.state.update(active='Researcher', run_id=run.name)
+        project=app.state['projects'][app.public()['project_id']]
+        project.update(run_id=run.name,run_ids=[run.name])
+        app.state.update(active='Researcher',active_project_id=project['id'],active_run_id=run.name)
         app.persist()
         restored = self.app()
         self.assertIsNone(restored.public()['active'])

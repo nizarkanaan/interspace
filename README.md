@@ -61,3 +61,7 @@ git diff --check
 ```
 
 The preview build regenerates both the standalone preview and the bundled `design/preview.fragment.html`; the check fails if it has drifted from its source. These commands require Node.js and no packages. Opening the preview itself does not require Node.js.
+
+### Multi-project workspaces
+
+The native app now keeps a local project registry with separate conversations, proposals and review histories. Add a Git project, set its brief and priority, then use Workspace scope to compare next actions across projects. Detailed evidence stays project-scoped; one interaction runs at a time, even when browsing another project. Existing single-project state migrates with a backup. See [the Mac app guide](app/README.md#multiple-projects) for source-selection and runtime limits.

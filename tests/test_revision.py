@@ -44,12 +44,14 @@ class RevisionTests(unittest.TestCase):
         runner.complete(self.run,'researcher',result())
         runner.start(self.run,'reviewer')
         runner.complete(self.run,'reviewer',result('Define contact events precisely before acceptance.',verdict))
-        self.app.state.update(project_path=str(self.source),run_id=self.run.name)
+        self.app.handle('add_project',{'path':str(self.source)})
+        project=self.app.state['projects'][self.app.public()['project_id']]
+        project.update(run_id=self.run.name,run_ids=[self.run.name])
         self.app.persist()
         return self.app.public()['run']
 
     def reference(self, record):
-        return {'run_id':record['id'],'artifact_id':record.get('artifact_id','MISSING')}
+        return {'project_id':self.app.public()['project_id'],'run_id':record['id'],'artifact_id':record.get('artifact_id','MISSING')}
 
     def test_revision_preserves_previous_artifacts_and_transfers_feedback(self):
         original = self.seed()
@@ -81,7 +83,7 @@ class RevisionTests(unittest.TestCase):
     def test_acceptance_is_content_bound_and_not_an_experiment_approval(self):
         record=self.seed('accept')
         with self.assertRaisesRegex(ValueError,'stale'):
-            self.app.handle('accept_report',{'run_id':record['id'],'artifact_id':'wrong'})
+            self.app.handle('accept_report',dict(self.reference(record),artifact_id='wrong'))
         self.app.handle('accept_report',self.reference(record))
         current=self.app.public()['run']
         self.assertEqual(current['stage'],'accepted')
@@ -147,7 +149,7 @@ class RevisionTests(unittest.TestCase):
         import revisions
         self.seed()
         revisions.begin_revision(self.run)
-        self.app.state['active']='Researcher'
+        self.app.state.update(active='Researcher',active_project_id=self.app.public()['project_id'],active_run_id=self.run.name)
         self.app.persist()
         restored=Application(self.app.storage,provider=self.provider)
         current=restored.public()['run']
@@ -168,13 +170,13 @@ class RevisionTests(unittest.TestCase):
 
     def test_orchestrator_can_propose_version_bound_revision(self):
         record=self.seed()
-        self.app.handle('chat',{'scope':'project','text':'Address reviewer feedback and include a numbered correction log.'})
+        self.app.handle('chat',{'project_id':self.app.public()['project_id'],'scope':'project','text':'Address reviewer feedback and include a numbered correction log.'})
         self.app.wait()
         pending=self.app.public()['pending']
         self.assertIsNotNone(pending)
         self.assertEqual(pending['kind'],'revision')
         self.assertEqual(pending['artifact_id'],record.get('artifact_id'))
-        self.app.handle('start_review',{'plan_id':pending['id']});self.app.wait()
+        self.app.handle('start_review',{'project_id':self.app.public()['project_id'],'plan_id':pending['id']});self.app.wait()
         self.assertEqual(self.app.public()['run']['stage'],'completed')
         self.assertEqual(len(self.provider.prompts),3)
         self.assertIn('include a numbered correction log',self.provider.prompts[1])
