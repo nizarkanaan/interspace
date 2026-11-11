@@ -40,6 +40,20 @@ Existing project/source/team browser fixtures were updated to use Tasks, Setting
 
 The final-review regressions first failed on 15 malformed saved-field cases, the actual backend-to-UI `status.replaceAll` crash, and a general-team Observatory assignment returning to Tasks. The focused task-storage suite then passed 14 tests, and task/project/team browser suites passed. The final packaged journeys include both selected and nonselected malformed status/message records projected by a reopened backend, healthy task and project navigation, and assignment-button plus real scene pointer selection for task-owned, general-team and historical legacy reports. The original scene is loaded for source-only tests when its packaging copy is absent. These checks use temporary local state and an inert provider that rejects any provider access.
 
+## Review completion and implementation decisions
+
+The three scoped implementation reviews and final whole-branch review are complete. The final review identified malformed task presentation fields and general-project Observatory navigation; both were fixed with failing-then-passing regressions and accepted in the scoped re-review at implementation head `2428e4b`. No actionable findings remain open or deferred. The implementation stays on `interspace/task-desk`; no remote publication is included.
+
+Decisions made during implementation, retained here after temporary review-workspace cleanup:
+
+- Six is an editable default, as requested. Exact plan content/calls bind execution; large plans can still reach provider/context or machine limits. The cost of an excessive allowance is potential resource use, not automatic team expansion.
+- General project conversation and compatibility APIs remain separate from new task history. Their messages/results are never implicitly added to a task; older history requires its explicitly labelled navigation surface.
+- The already-authorized implementation used sequential implementation/review gates without another execution-method confirmation. The cost was engineering review time; no application model jobs were used.
+- Global connection/sign-in errors may appear across views; task errors stay scoped. An account-wide failure can therefore be visible while another task is selected.
+- Imported approval provenance is retained, with terminal revocation/consumption separate from it. Invalidated old work needs a fresh proposal rather than being restored for another execution; this adds lifecycle metadata and replacement-planning work when scope changes.
+- Explicit Create draft persists the complete goal using a compatible optional field. This stores more private goal text locally, without sending it to a model; later unsaved edits remain session-only until sent.
+- Imported unbound policy-1 plans retain their original digest and execute only under their bound imported task owner. New task plans require explicit task identity. This keeps a dedicated compatibility path instead of rewriting old approvals/artifacts.
+
 ## Visual evidence and limits
 
 The following generated screenshots are under ignored `workspace-data/` and were inspected: `task-desk-native-proposed-plan-light-1280.png`, `task-desk-native-tasks-light-1280.png`, `task-desk-native-settings-light-1280.png`, `task-desk-native-observatory-light-1280.png`, `task-desk-native-result-dark-320.png` and `task-desk-native-new-dark-320.png`. They show controlled fixture data, not real agent work. The runner regenerates them; they are not application data or Git artifacts.

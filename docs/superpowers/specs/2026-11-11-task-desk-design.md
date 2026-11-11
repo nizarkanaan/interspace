@@ -1,6 +1,6 @@
 # Task desk and repeated specialists
 
-Status: accepted for implementation on 2026-11-11, with the user amendment below.
+Status: implemented on `interspace/task-desk`, 2026-11-11, with the user amendment below. See [validation and acceptance limits](../../task-desk-validation.md).
 
 User amendment: replace the proposed fixed six-specialist maximum with a per-task editable specialist allowance. Six is only the initial default, not a product ceiling. The Orchestrator proposes the smallest useful team within that allowance; Start approves the exact assignments and derived call limit. Account usage and local resources still constrain practical team size. Execution remains sequential; no automatic team expansion or unlimited recursive spawning is added.
 
@@ -74,9 +74,9 @@ Proposed bounded policy:
 
 ## Scope and verification
 
-Production work has not begun. The visual proposal uses labelled synthetic tasks, public example briefs and local-only interactions. It does not call a model or change application state.
+The initial visual proposal used labelled synthetic tasks, public example briefs and local-only interactions. Production implementation subsequently completed under this accepted scope; its tests use disposable data and controlled provider responses. The proposal itself does not call a model or change application state.
 
-After acceptance, implementation stays in the existing Mac shell, Python backend and JavaScript UI; no new framework, HTTP service, hosted account or prototype promotion. Preserve role artwork and static departments. Keep changes on an `interspace/` branch.
+Implementation stays in the existing Mac shell, Python backend and JavaScript UI; no new framework, HTTP service, hosted account or prototype promotion. Preserve role artwork and static departments. Keep changes on an `interspace/` branch.
 
 Use test-first regression coverage for migration, task/project isolation and stale actions, repeated roles, evidence identity/ownership, multiple-reviewer verdict aggregation, exact call reservations, cancellation and source integrity. Use controlled providers and disposable projects; no real provider job, Sample Project write, simulation or experiment is authorized by this design discussion. Browser-test the task journey, error/empty/partial states, responsive sizes and both appearances. Build/sign the native bundle. Native interaction remains unavailable while the Mac is locked.
 
