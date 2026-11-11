@@ -1,6 +1,6 @@
 # Interspace project guidance
 
-This repository contains the design prototype, an offline pilot and a native Mac application in `app/`. The user authorized the launchable app and read-only Orchestrator workflow on the existing feature branch. The app runtime supports Orchestrator chat and Researcher/Reviewer dispatch; it does not execute all catalog roles.
+This repository contains the design prototype, an offline pilot and a native Mac application in `app/`. The user authorized the launchable app and read-only Orchestrator/task workflow. The runtime supports task conversations and Web searcher, Researcher and Reviewer dispatch, including repeated roles within a user-set allowance; it does not execute all catalog roles.
 
 The user authorized the first working workflow on a branch with Sample Project as read-only input. Keep snapshot/pilot helpers under `pilot/`, native/backend/UI code under `app/`, tests under `tests/`, and development run data under ignored `workspace-data/`. App user data belongs in its Application Support directory. See `app/README.md`. Never modify, checkout or run the sample project from the pilot. Preserve existing source edits; use committed snapshots and verify integrity. Do not merge the pilot branch into main without the user accepting it. Read `pilot/README.md` for the explicit current-session bridge and its limitations.
 
@@ -22,6 +22,8 @@ Read docs/design-direction.md before changing the UI. Preserve the observatory d
 The preview sources are design/observatory.fragment.html (UI/state), design/scene/lab-scene.js (original static character artwork and hit testing), and design/agents/ (role catalog and contract data). Generate design/index.html and design/preview.fragment.html with `node scripts/build-preview.mjs`; never edit the generated page independently. Run `node scripts/build-preview.mjs --check` and `node scripts/build-role-playbooks.mjs --check` before committing preview changes. Role contract changes regenerate docs/agent-playbooks.md. Template validation is structural; never claim agent accuracy without model-backed evaluation evidence. Do not promote this throwaway UI into the production app before agreeing on architecture and scope.
 
 ## Engineering conventions
+
+Use `interspace/` for new branch names, following the user's naming preference.
 
 Read docs/engineering.md before implementing or debugging. Keep changes focused and follow the dependency boundaries there. Reproduce bugs and trace their cause before editing; use meaningful regression coverage for behavioral fixes. Verify the affected behavior and report actual results, including anything untested. Do not create speculative framework layers, empty application directories, or shared utilities without a concrete use.
 

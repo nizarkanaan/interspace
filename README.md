@@ -2,11 +2,11 @@
 
 A personal observatory for projects, research, knowledge, and specialist AI agents.
 
-**Status: native Mac development app with a bounded read-only workflow.** Launch `dist/Interspace.app` after [building](app/README.md). It has an in-app Orchestrator conversation, persistent local state and automatic Codex Researcher/Reviewer dispatch. The design preview and earlier offline pilot remain separate. Other role execution and external-app integrations are not implemented.
+**Status: native Mac development app with a read-only task desk.** Launch `dist/Interspace.app` after [building](app/README.md). Tasks have separate conversations, plans and results. The Orchestrator can assign multiple Web searchers, Researchers and Reviewers within a user-set allowance, with the exact team and call limit approved before Start. The design preview and earlier offline pilot remain separate. Other catalog roles and external-app integrations do not execute.
 
 ## Mac app
 
-Double-click `dist/Interspace.app`. Choose Sample Project, check the Codex connection, and ask for an evidence review. Start its read-only plan to run the two specialists. See [app setup and limits](app/README.md).
+Double-click `dist/Interspace.app`. Add or select a Git project, save its committed source selection in **Settings**, then choose **New task**. Describe the outcome, adjust the specialist allowance if needed, inspect the proposed plan and Start it. Six is the initial allowance, not a fixed maximum; assignments execute sequentially. Project sources stay read-only. See [app setup and limits](app/README.md) and [task-desk verification](docs/task-desk-validation.md).
 
 ## Design preview
 
@@ -16,7 +16,7 @@ Try the project map, project tabs, agent roles, first-launch state, connection s
 
 The preview opens in **Agents → Tasks**. Switch to **Observatory** for the optional research-lab view. Both views share task selection and status. Characters stay at workstations grouped into departments as the team grows. Click a figure or its keyboard-accessible roster button to inspect its task, activity, output, blockers, and permissions. **Preview review stage** changes sample task status without moving characters. Choose Blueprint, Fieldwork, or Printshop to compare palettes. No real agents run.
 
-**Role library** contains 23 specialist templates across Discovery, Research, Engineering, Analysis, Review, Writing, and Operations. Read each role playbook, add multiple instances, assign separate sample tasks, or create a custom role. Department filters keep larger teams manageable. The 23 playbooks include 69 seed evaluation scenarios; model evaluations have **not** been run. Custom roles are user-written drafts without reviewed playbooks. The new Orchestrator playbook defines scoped conversation and bounded specialist dispatch; those runtime capabilities are not implemented.
+**Role library** contains 23 specialist templates across Discovery, Research, Engineering, Analysis, Review, Writing, and Operations. Read each role playbook, add multiple instances, assign separate sample tasks, or create a custom role. Department filters keep larger teams manageable. The 23 playbooks include 69 seed evaluation scenarios; model evaluations have **not** been run. Custom roles are user-written drafts without reviewed playbooks. This design preview does not execute agents; the separate native app executes only its supported bounded roles.
 
 Earlier conversation previews are preserved in [design/archive](design/archive/README.md). All Interspace project files now live within this repository; the archive is historical. Current sources are the UI in `design/observatory.fragment.html`, the scene in `design/scene/lab-scene.js`, and the role definitions in `design/agents/`.
 
