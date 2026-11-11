@@ -22,7 +22,7 @@ def playbook(role):
 def corpus(run, record):
     sections=[]
     for name, manifest in record['sources'].items():
-        lines=(run/'sources'/name).read_text().split('\n')[:manifest['lines']]
+        lines=(run/'sources'/name).read_bytes().decode('utf-8').split('\n')[:manifest['lines']]
         sections.append('SOURCE '+name+' ('+str(manifest['lines'])+' LF lines)\n'+
                         '\n'.join(str(i+1)+' '+line for i,line in enumerate(lines)))
     content='\n\n'.join(sections)

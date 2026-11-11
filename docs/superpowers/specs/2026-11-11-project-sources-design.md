@@ -11,10 +11,10 @@ The current hardcoded technical allowlist is useful for the original Sample Proj
 
 ## Approaches
 
-1. **Reusable project source set (recommended).** Save one bounded selection per project. Project chat and new plans use it; the exact file list is copied into every proposed plan. Convenient for continuing work and fits the existing project settings.
+1. **Reusable project source set (selected and approved).** Save one bounded selection per project. Project chat and new plans use it; the exact file list is copied into every proposed plan. Convenient for continuing work and fits the existing project settings.
 2. Per-plan source selection. More flexibility for unrelated tasks within one project, but adds a file-selection step to each plan and leaves project chat's prior context needing separate configuration. Defer unless the user prefers it.
 
-The draft below uses approach 1 as an assistant proposal. Approval of this document also confirms that approach, unless the user chooses otherwise.
+The approved design uses approach 1.
 
 ## User interaction
 
@@ -28,7 +28,7 @@ Changing the saved selection increments its version and invalidates the project'
 
 ## Bounds and exclusions
 
-Assistant-proposed initial limits: at least one and at most 16 selected files, each at most 250,000 bytes, and a combined numbered source corpus at most 240,000 characters. Selection save fails before changing state when these limits are exceeded; show which files or limit need attention. Empty text files may be listed but cannot be the only evidence. Committed file discovery is bounded at 5,000 entries; larger trees return a clear unsupported-size error without silently hiding selected files. These are deliberate first-release limits, not universal repository support.
+Approved initial limits: at least one and at most 16 selected files, each at most 250,000 bytes, and a combined numbered source corpus at most 240,000 characters. Selection save fails before changing state when these limits are exceeded; show which files or limit need attention. Empty text files may be listed but cannot be the only evidence. Committed file discovery is bounded at 5,000 entries; larger trees return a clear unsupported-size error without silently hiding selected files. These are deliberate first-release limits, not universal repository support.
 
 Accept UTF-8 text blobs without NUL bytes. Reject absolute/traversing paths, control characters, Git metadata paths, tracked symlinks, submodules and nonregular entries. Do not follow working-tree symlinks to obtain content: read the chosen blob from the pinned commit. Validate canonical project ownership again before save and Start.
 
@@ -64,4 +64,4 @@ Browser checks cover saved source inspection, committed previews/omission labels
 
 Keep implementation on its new feature branch for review. Do not push or integrate this source-selection milestone into main before acceptance.
 
-Builder check clarified two assistant-proposed decisions for approval: source selection controls model inputs while the existing local tracked-file integrity hashing remains, and newly registered projects require an explicit first Save before model access. Other implementation questions were sufficiently specified.
+Builder check clarified two decisions included in the approved scope: source selection controls model inputs while the existing local tracked-file integrity hashing remains, and newly registered projects require an explicit first Save before model access. Other implementation questions were sufficiently specified.

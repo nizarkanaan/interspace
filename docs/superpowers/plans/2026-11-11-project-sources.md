@@ -46,6 +46,8 @@ Read-only source repositories, no Sample Project work or paid model calls. Reuse
 
 ### Task 4: Verification and documentation
 **Files:** update app/README.md and docs/engineering.md; create docs/project-sources-validation.md.
-- [ ] Run full Python suites on both available interpreters, generated preview/role checks and diff check; build/signature verification. No further model calls.
-- [ ] Obtain independent whole-branch review; reproduce/fix important findings test-first and rerun relevant/full suites. Record exact outcomes, limits and unavailable locked-Mac native inspection.
-- [ ] Commit, keep branch unmerged, deliver built app and validation record.
+- [x] Run full Python suites on both available interpreters, generated preview/role checks and diff check; build/signature verification. No further model calls.
+- [x] Obtain independent whole-branch review; reproduce/fix important findings test-first and rerun relevant/full suites. Record exact outcomes, limits and unavailable locked-Mac native inspection.
+- [x] Commit, keep branch unmerged, deliver built app and validation record.
+
+Final evidence: `docs/project-sources-validation.md`. Both full suites pass 100/100; native interactive inspection remains unavailable while the Mac is locked. No model calls were used and the pilot is unchanged.

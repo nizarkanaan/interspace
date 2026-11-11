@@ -2,7 +2,7 @@
 
 Launch `dist/Interspace.app` with a double-click. It opens its own native window; no HTML file, browser tab or local web server is required. The backend starts and stops with the application.
 
-Add a Git repository folder, select its project conversation, and describe an outcome. The Orchestrator can answer directly or propose the smallest team from **Web searcher, Researcher and Reviewer**. Inspect objectives, expected outputs, dependencies, source revision and usage ceiling, then choose **Start this plan**. Tasks and the static Observatory show the same recorded assignments. The Combined result preserves evidence and unresolved questions; each specialist artifact remains inspectable. Other catalog roles and external-app writes remain unavailable.
+Add a Git repository folder, open its **Sources** section, inspect the committed files and **Save sources** before starting project chat. Then describe an outcome. The Orchestrator can answer directly or propose the smallest team from **Web searcher, Researcher and Reviewer**. Inspect objectives, expected outputs, dependencies, source revision and usage ceiling, then choose **Start this plan**. Tasks and the static Observatory show the same recorded assignments. The Combined result preserves evidence and unresolved questions; each specialist artifact remains inspectable. Other catalog roles and external-app writes remain unavailable.
 
 ## Connection
 
@@ -12,7 +12,7 @@ The CLI's configured authentication determines account usage. ChatGPT sign-in us
 
 ## Data and project protection
 
-Conversations, plans, usage records and source snapshots live in `~/Library/Application Support/Interspace`. The source checkout is never edited or executed. Selected technical evidence comes from its committed revision; uncommitted and private files are excluded. Approvals bind to a stable project ID, canonical project path, committed revision and (for report actions) artifact version. If HEAD changes, request a new plan.
+Conversations, plans, usage records and source snapshots live in `~/Library/Application Support/Interspace`. The source checkout is never edited or executed. Evidence comes only from the approved committed source set; working drafts are excluded. Known credential filenames are unavailable, but eligibility does not certify that a selected text file contains no secrets. Approvals bind to a stable project ID, canonical project path, committed revision, exact selected paths and selection version, and (for report actions) artifact version. If HEAD changes, request a new plan.
 
 One app backend may own a data directory at a time. One interaction runs at a time; a team uses one to three sequential specialist jobs and one synthesis job, each with a four-minute deadline and no retries. A proposal shows one already-used planning call and up to four calls after Start. Legacy reviews retain their original two-stage path. Stop terminates the owned provider process group. Quit closes the backend input pipe and guarantees cancellation cleanup. On restart, unfinished runs become interrupted rather than silently resuming. A stage deadline is not a monetary spending cap.
 
@@ -33,7 +33,8 @@ For isolated development state, the native executable supports `--data-root /abs
 ## Source ownership
 
 - `macos/main.swift`: native window, folder/path picker, restricted local UI bridge, process lifecycle.
-- `backend/projects.py`: versioned registry, v1 migration, project metadata validation.
+- `backend/projects.py`: versioned registry, v1 migration, project metadata and new-registration consent state.
+- `backend/sources.py`: committed tree/preview access, bounded source selection, selected snapshots and legacy snapshot loading.
 - `backend/service.py`: ownership-bound conversations, content-bound plans, legacy dispatch and protocol actions.
 - `backend/orchestration.py`: bounded team graph, evidence validation, versioned team records and report acceptance.
 - `backend/team.py`: dependency handoffs, durable call reservations, specialist dispatch, synthesis and partial failure.
@@ -65,9 +66,21 @@ For saved legacy two-stage reviews, when a Reviewer requests changes, **Revise f
 
 The one-round allowance is reserved before dispatch and survives cancellation, failure and restart. It cannot loop indefinitely. Old results remain available in **Artifact version**, and Run history identifies each round. Source changes or stale artifact references block actions. After the Reviewer accepts a report, **Accept this report** records your acceptance of that exact artifact without a model call. It does not authorize code changes or the proposed experiment.
 
+## Choose project sources
+
+**Sources** lists committed file names and sizes with a filter, checkboxes and read-only **Preview** actions. Previews show committed content, its revision and LF line numbers, at most 200 lines with an explicit omission label. Previewing a file does not select it for models. Save a reusable source set for each project; it is applied to subsequent project chats and new specialist plans without a model call.
+
+New projects show README and PROJECT_CONTEXT when available as suggestions, but project chat remains blocked until the first Save. Existing projects retain their previously authorized legacy defaults until an explicit source selection is saved. Updating the selection invalidates unstarted proposals and increments its version. A stale save or Start fails; source saves are blocked while work is active. A changed commit requires refreshing, inspecting and saving Sources again. Missing selected files are never silently replaced.
+
+Choose 1–16 UTF-8 regular committed files, at most 250,000 bytes each and 240,000 characters of numbered specialist context. Empty files cannot be the only evidence. Discovery is bounded to 5,000 tree entries. Symlinks, submodules, traversing/control-character paths, binary content and known credential/key filenames are rejected. Only selected committed bodies are model evidence. The existing separate integrity check hashes tracked working files locally, including unselected files, and keeps only the baseline hashes.
+
+Project chat receives at most 24,000 characters of explicitly labelled selected excerpts and the full path manifest; omitted context is identified. Specialists receive the complete bounded approved snapshot. Workspace and live Web searcher prompts receive no selected file bodies. Each new plan shows its exact source paths and selection version. Team-v2 snapshots store only those selected files; old legacy/team-v1 snapshots keep their original allowlist, evidence and acceptance behavior. An explicitly requested legacy report revision continues to use that report's original snapshot, rather than the current source set.
+
+Source drafts stay separate across project switches. Delayed previews and save responses cannot replace the currently selected project's panel or erase newer drafts. Source settings and snapshots are local application data, never copied into the Interspace repository.
+
 ## Multiple projects
 
-**Add project folder** registers another repository without clearing existing conversations or reviews. Choose its repository root, with a committed `README.md`. Project chat prefers committed `docs/PROJECT_CONTEXT.md` when present, otherwise README. Review snapshots still use the explicit technical allowlist in `pilot/runner.py`; registering a repository does not expose all its files. Source selection beyond that allowlist is future work. Re-adding the same canonical folder selects its existing record and refreshes its context choice.
+**Add project folder** registers another repository without clearing existing conversations or reviews. Choose its repository root, with a committed `README.md`. Project chat prefers committed `docs/PROJECT_CONTEXT.md` when present, otherwise README. New projects require an explicit source selection before model access. Existing reports retain their recorded source snapshots; registering a repository does not expose all its files. Re-adding the same canonical folder selects its existing record and refreshes its context choice.
 
 The project picker switches among separate conversations, pending plans and report histories. **Project brief & priority** saves a name, brief (1,200 characters), high/normal/low priority and next action locally, without a model call or source edits. **Project review history** restores a prior run; **Artifact version** selects rounds within that run. Unsent chat and metadata drafts survive switching in the current app session, but are not persisted across app restarts.
 

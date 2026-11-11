@@ -138,3 +138,33 @@ class SourceWorkflowTests(unittest.TestCase):
             with self.subTest(method=method),self.assertRaisesRegex(ValueError,'selected|stale'):
                 self.app.handle(method,dict(params,project_id=self.pid))
         self.assertEqual(self.provider.calls,[])
+
+    def test_standalone_cr_preserves_worker_evidence_and_source_view(self):
+        self.setup_app()
+        body='First\rMIDDLE_SELECTED_EVIDENCE\rLAST_SELECTED_EVIDENCE\n'
+        (self.source/'notes/selected.txt').write_bytes(body.encode())
+        self.git('add','notes/selected.txt');self.git('commit','-qm','CR source fixture')
+        self.save();run=self.start(self.chat())
+        research=next(p for p in self.provider.calls if 'Role: Researcher' in p)
+        with self.subTest(boundary='worker'):
+            self.assertIn('1 First\rMIDDLE_SELECTED_EVIDENCE\rLAST_SELECTED_EVIDENCE',research)
+        with self.subTest(boundary='source view'):
+            viewed=self.app.handle('source',{'project_id':self.pid,'run_id':run['id'],'source':'notes/selected.txt'})
+            self.assertEqual(viewed['text'],body)
+
+    def test_non_object_run_metadata_is_isolated_from_other_projects_and_restart(self):
+        import shutil
+        self.setup_app();self.save();run=self.start(self.chat())
+        other=self.base/'other';shutil.copytree(self.source,other)
+        other_id=self.app.handle('add_project',{'path':str(other)})['project_id']
+        path=self.app.storage/'runs'/run['id']/'run.json'
+        for value in ([],None,'broken',1):
+            with self.subTest(metadata=value):
+                path.write_text(json.dumps(value))
+                self.assertEqual(self.app.public()['project_id'],other_id)
+                restored=Application(self.app.storage,provider=self.provider)
+                self.assertEqual(restored.public()['project_id'],other_id)
+                restored.handle('switch_project',{'project_id':self.pid})
+                self.assertIsNone(restored.public()['run'])
+                self.assertIn('unavailable',restored.public()['error'])
+                restored.handle('switch_project',{'project_id':other_id})

@@ -185,7 +185,7 @@ class Application:
                 name = params.get('source')
                 if name not in record['sources']:
                     raise ValueError('Unknown source')
-                return {'project_id':project['id'],'run_id':record['id'],'source':name,'text':(run/'sources'/name).read_text()}
+                return {'project_id':project['id'],'run_id':record['id'],'source':name,'text':(run/'sources'/name).read_bytes().decode('utf-8')}
             if method not in ('add_project','select_project','update_project','chat','start_review','start_plan','save_sources','sign_in','revise_run','accept_report'):
                 raise ValueError('Unknown method')
             if self.state['active']:
@@ -434,7 +434,7 @@ class Application:
 
     def run_stages(self, project, run, goal):
         data = sources.load(run)
-        corpus = '\n\n'.join('SOURCE '+name+'\n'+ '\n'.join(str(i+1)+' '+line for i,line in enumerate((run/'sources'/name).read_text().split('\n'))) for name in data['sources'])
+        corpus = '\n\n'.join('SOURCE '+name+'\n'+ '\n'.join(str(i+1)+' '+line for i,line in enumerate((run/'sources'/name).read_bytes().decode('utf-8').split('\n'))) for name in data['sources'])
         if len(corpus)>240000:
             raise ValueError('Snapshot exceeds the bounded review context; narrow sources before retrying.')
         for role in ('researcher','reviewer'):
