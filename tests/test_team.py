@@ -277,3 +277,170 @@ class TeamTests(unittest.TestCase):
                 self.assertEqual(restored['run']['stage'], 'completed' if reviewed else 'completed_unreviewed')
                 self.assertEqual(restored['run']['combined'],run['combined'])
                 self.assertEqual(restored['error'],'')
+
+
+class ExpandedTeamTests(unittest.TestCase):
+    setUp=test_pilot.PilotTests.setUp
+    git=test_pilot.PilotTests.git
+
+    def setup_team(self,verdicts=('accept','accept'),limit=8):
+        from types import SimpleNamespace
+        from test_orchestration import named_assignment
+        self.provider=TeamProvider()
+        self.project={'id':'project-a','name':'Fixture','source_path':str(self.source),
+                      'context_path':'docs/PROJECT_CONTEXT.md','run_id':None,'run_ids':[],'thread':[]}
+        self.task={'id':'user-task-a','run_id':None,'run_ids':[],'thread':[]}
+        self.storage=self.base/'app-data';self.storage.mkdir()
+        self.app=SimpleNamespace(storage=self.storage,lock=threading.RLock(),cancel=threading.Event(),
+                                 state={'usage':[]},provider=self.provider,current_run=None,publish=lambda:None)
+        tasks=[named_assignment('search_a','web_searcher'),named_assignment('search_b','web_searcher'),
+               named_assignment('analysis_a','researcher',['search_a']),named_assignment('analysis_b','researcher',['search_b']),
+               named_assignment('review_a','reviewer',['analysis_a','analysis_b']),
+               named_assignment('review_b','reviewer',['analysis_a','analysis_b'])]
+        tasks[-1]['objective']='Review second branch'
+        self.plan=teams.make_plan(self.project,self.git('rev-parse','HEAD'),'Private fixture goal',tasks,
+                                  specialist_limit=limit,task_id=self.task['id'])
+        original_run=self.provider.run
+        def run(prompt,*args):
+            result,usage=original_run(prompt,*args)
+            if 'Role: Reviewer' in prompt:
+                # Objectives distinguish independent reviewers without relying on runtime call order.
+                identity='review_b' if 'Assignment: Review second branch' in prompt else 'review_a'
+                result.update(verdict=verdicts[1 if identity=='review_b' else 0],summary='Objection '+identity)
+                result['findings'][0]['claim']='Finding '+identity
+            return result,usage
+        self.provider.run=run
+        def search(prompt,schema,cwd,cancel,on_event):
+            self.provider.calls.append(prompt)
+            identity='search_b' if 'search_b' in prompt else 'search_a'
+            urls=['https://example.org/'+identity+'/'+str(i) for i in range(10)]
+            on_event({'query':'public fixture','action':'open_page','urls':urls})
+            return {'summary':identity,'sources':[{'url':u,'title':'Paper','excerpt':'Excerpt '+identity} for u in urls],
+                    'questions':[]},{'input_tokens':4}
+        self.provider.search=search
+
+    def execute(self):
+        import team
+        team.execute(self.app,self.project,self.plan,task=self.task)
+        return runner.load(self.app.current_run)
+
+    def test_repeated_roles_are_task_owned_durable_and_reloadable(self):
+        import team
+        self.setup_team();before=runner.fingerprint(self.source);record=self.execute()
+        self.assertEqual(record['stage'],'completed')
+        self.assertEqual(record['task_id'],'user-task-a')
+        self.assertEqual(len(record['evidence']),20)
+        self.assertEqual([j['id'] for j in record['jobs']],['search_a','search_b','analysis_a','analysis_b','review_a','review_b','synthesis'])
+        self.assertEqual(self.task['run_ids'],[record['id']]);self.assertEqual(self.project['run_ids'],[])
+        self.assertEqual(len(self.task['thread']),1);self.assertEqual(self.project['thread'],[])
+        self.assertTrue(all(u['task_id']=='user-task-a' for u in self.app.state['usage']))
+        self.assertEqual([u['assignment_id'] for u in self.app.state['usage']],['search_a','search_b','analysis_a','analysis_b','review_a','review_b','synthesis'])
+        analysis_a=next(p for p in self.provider.calls if 'Role: Researcher' in p and 'Inspect evidence for researcher' in p)
+        self.assertIn('Excerpt search_a',analysis_a);self.assertNotIn('Excerpt search_b',analysis_a)
+        teams.validate_record(runner.load(self.app.current_run))
+        with self.assertRaises(ValueError):team.invoke(self.app,self.project,self.app.current_run,'analysis_a','Researcher','duplicate',{})
+        self.assertEqual(before,runner.fingerprint(self.source))
+        self.assertTrue(teams.accept(self.app.current_run,{'run_id':record['id'],'artifact_id':teams.artifact_id(record)}))
+
+    def test_all_reviewers_aggregate_with_blocked_then_revise_precedence(self):
+        for verdicts,want in ((('blocked','accept'),'blocked'),(('revise','accept'),'needs_revision'),
+                              (('accept','blocked'),'blocked'),(('blocked','revise'),'blocked')):
+            with self.subTest(verdicts=verdicts):
+                self.setup_team(verdicts);record=self.execute()
+                self.assertEqual(record['stage'],want)
+                for index,verdict in enumerate(verdicts):
+                    if verdict!='accept':
+                        identity=('review_a','review_b')[index]
+                        self.assertIn('Objection '+identity,record['combined']['questions'])
+                        self.assertIn('Finding '+identity,record['combined']['questions'])
+                teams.validate_record(record)
+                # Next subcase gets separate disposable app storage.
+                self.storage.rename(self.base/('used-'+str(len(list(self.base.glob('used-*'))))))
+
+    def test_repeated_role_failure_and_cancellation_never_retry_or_reserve_later_jobs(self):
+        self.setup_team();original=self.provider.run
+        def fail_second(prompt,*args):
+            if 'Role: Researcher' in prompt and 'search_b' in prompt:raise ProviderError('Second researcher failed')
+            return original(prompt,*args)
+        self.provider.run=fail_second
+        with self.assertRaises(ProviderError):self.execute()
+        record=runner.load(self.app.current_run);teams.interrupt(record,'failed','Second researcher failed')
+        self.assertEqual([j['id'] for j in record['jobs']],['search_a','search_b','analysis_a','analysis_b'])
+        self.assertEqual(record['jobs'][-1]['status'],'failed')
+        self.assertEqual(set(record['results']),{'search_a','search_b','analysis_a'})
+        self.assertEqual([t['status'] for t in record['tasks']][-3:],['failed','blocked','blocked'])
+        runner.save(self.app.current_run/'run.json',record);teams.validate_record(record)
+        self.storage.rename(self.base/'failed-data');self.setup_team();original=self.provider.run
+        def cancel_second(prompt,*args):
+            result=original(prompt,*args)
+            if 'Role: Researcher' in prompt and 'search_b' in prompt:self.app.cancel.set()
+            return result
+        self.provider.run=cancel_second
+        with self.assertRaises(ProviderError):self.execute()
+        record=runner.load(self.app.current_run);teams.interrupt(record,'cancelled','User stopped')
+        self.assertEqual(record['jobs'][-1]['status'],'cancelled')
+        self.assertEqual(set(record['results']),{'search_a','search_b','analysis_a'})
+        self.assertEqual(len(record['jobs']),4)
+
+    def test_mismatched_task_identity_is_rejected_before_snapshot_or_dispatch(self):
+        import team
+        self.setup_team();self.task['id']='another-user-task'
+        with self.assertRaisesRegex(ValueError,'task'):
+            team.execute(self.app,self.project,self.plan,task=self.task)
+        self.assertEqual(self.provider.calls,[])
+        self.assertEqual(self.task['run_ids'],[])
+        self.assertFalse((self.storage/'runs').exists())
+
+    def test_raised_allowance_executes_eight_assignments_without_expanding_approved_calls(self):
+        from test_orchestration import named_assignment
+        self.setup_team()
+        tasks=[named_assignment('analysis_'+str(i),'researcher') for i in range(7)]
+        tasks.append(named_assignment('review','reviewer',[t['id'] for t in tasks]))
+        self.plan=teams.make_plan(self.project,self.git('rev-parse','HEAD'),'Expanded review',tasks,
+                                  specialist_limit=8,task_id=self.task['id'])
+        record=self.execute()
+        self.assertEqual(record['stage'],'completed')
+        self.assertEqual(len(record['tasks']),8)
+        self.assertEqual(len(record['jobs']),9)
+        self.assertEqual(len(self.provider.calls),9)
+        teams.validate_record(record)
+
+    def test_all_reviewer_objections_survive_more_than_legacy_question_ceiling(self):
+        from test_orchestration import named_assignment
+        self.setup_team()
+        tasks=[named_assignment('analysis','researcher')]+[
+            dict(named_assignment('review_'+str(i),'reviewer',['analysis']),objective='review_'+str(i)) for i in range(5)]
+        self.plan=teams.make_plan(self.project,self.git('rev-parse','HEAD'),'Preserve every objection',tasks,
+                                  specialist_limit=6,task_id=self.task['id'])
+        def extensive_review(prompt,schema,cwd,cancel):
+            self.provider.calls.append(prompt)
+            if 'Purpose: synthesis' in prompt:return report(),None
+            identity=prompt.split('\nAssignment: ',1)[1].split('\n',1)[0]
+            reviewer='Role: Reviewer' in prompt
+            result=report('revise' if reviewer else 'not_reviewed')
+            result['summary']='Objection '+identity
+            result['questions']=[identity+' question '+str(i) for i in range(20)]
+            result['findings']=[dict(copy.deepcopy(report()['findings'][0]),claim=identity+' finding '+str(i)) for i in range(20)]
+            return result,None
+        self.provider.run=extensive_review
+        record=self.execute()
+        self.assertEqual(record['stage'],'needs_revision')
+        self.assertEqual(len(record['combined']['questions']),226)
+        teams.validate_record(runner.load(self.app.current_run))
+
+    def test_imported_policy_one_plan_keeps_approval_while_running_under_task_owner(self):
+        self.setup_team()
+        self.plan=teams.make_plan(self.project,self.git('rev-parse','HEAD'),'Imported review',
+                                  [assignment('researcher'),assignment('reviewer',['researcher'])])
+        original=copy.deepcopy(self.plan)
+        record=self.execute()
+        self.assertEqual(record['stage'],'completed')
+        self.assertEqual(record['task_id'],'user-task-a')
+        self.assertEqual(record['plan'],original)
+        self.assertEqual(self.plan,original)
+        self.assertEqual(self.project['run_ids'],[])
+        self.assertEqual(self.task['run_ids'],[record['id']])
+        self.assertTrue(all(u['task_id']=='user-task-a' and 'assignment_id' in u for u in self.app.state['usage']))
+        teams.validate_record(record)
+        changed=copy.deepcopy(record);changed['task_id']='other-user-task'
+        self.assertNotEqual(teams.artifact_id(changed),teams.artifact_id(record))

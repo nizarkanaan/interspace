@@ -150,3 +150,95 @@ class ArtifactTests(unittest.TestCase):
         self.assertEqual(record['tasks'][1]['status'],'blocked')
         self.assertEqual(record['stage'],'cancelled')
         self.assertIsNone(record['jobs'][0]['tokens'])
+
+
+def named_assignment(identity, role, dependencies=()):
+    return dict(assignment(role, dependencies), id=identity)
+
+
+class ExpandedPolicyTests(unittest.TestCase):
+    def test_explicit_policy_allows_repeated_roles_and_independent_reviewers(self):
+        tasks=[named_assignment('search_a','web_searcher'),named_assignment('search_b','web_searcher'),
+               named_assignment('analysis','researcher',['search_a','search_b']),
+               named_assignment('review_a','reviewer',['analysis']),named_assignment('review_b','reviewer',['analysis'])]
+        self.assertEqual([t['id'] for t in teams.validate_tasks(tasks,policy_version=2,specialist_limit=6)],
+                         ['search_a','search_b','analysis','review_a','review_b'])
+        with self.assertRaises(ValueError):teams.validate_tasks(tasks)
+        with self.assertRaises(ValueError):teams.validate_tasks(tasks[:2])
+        with self.assertRaises(ValueError):teams.validate_tasks(tasks,policy_version=2,specialist_limit=4)
+
+    def test_raised_allowance_bounds_actual_dependencies_instead_of_six_roles(self):
+        tasks=[named_assignment('analysis_'+str(i),'researcher') for i in range(7)]
+        tasks.append(named_assignment('review','reviewer',[t['id'] for t in tasks]))
+        self.assertEqual(len(teams.validate_tasks(tasks,policy_version=2,specialist_limit=8)),8)
+        for changed in ([named_assignment('review','reviewer')],
+                        [named_assignment('a','researcher'),named_assignment('a','researcher')],
+                        [named_assignment('a','researcher',['b']),named_assignment('b','researcher',['a'])],
+                        [named_assignment('a','researcher'),named_assignment('b','researcher'),named_assignment('r','reviewer',['a'])],
+                        [named_assignment('synthesis','researcher')]):
+            with self.subTest(tasks=changed),self.assertRaises(ValueError):
+                teams.validate_tasks(changed,policy_version=2,specialist_limit=8)
+
+    def test_allowance_requires_positive_javascript_safe_integer_and_schema_is_copied(self):
+        for invalid in (True,False,0,-1,1.0,1.5,'6',None,9007199254740992):
+            with self.subTest(value=invalid),self.assertRaises(ValueError):teams.validate_specialist_limit(invalid)
+        self.assertEqual(teams.validate_specialist_limit(9007199254740991),9007199254740991)
+        schema=teams.chat_schema(8)
+        self.assertEqual(schema['properties']['tasks']['maxItems'],8)
+        self.assertEqual(schema['properties']['tasks']['items']['properties']['dependencies']['maxItems'],7)
+        schema['properties']['tasks']['items']['properties']['dependencies']['maxItems']=0
+        self.assertNotIn('maxItems',teams.TASK_SCHEMA['properties']['dependencies'])
+
+
+class ExpandedArtifactTests(unittest.TestCase):
+    setUp=test_pilot.PilotTests.setUp
+    git=test_pilot.PilotTests.git
+    def expanded(self,tasks,limit=6):
+        self.project={'id':'project-a','name':'Fixture','source_path':str(self.source),'context_path':'docs/PROJECT_CONTEXT.md'}
+        self.plan=teams.make_plan(self.project,self.git('rev-parse','HEAD'),'Review fixture',tasks,
+                                  specialist_limit=limit,task_id='user-task-a')
+        self.run=teams.prepare(self.project,self.plan,self.base/'runs')
+        return runner.load(self.run)
+
+    def test_exact_allowance_task_identity_and_policy_are_approval_bound(self):
+        record=self.expanded([named_assignment('analysis','researcher')],8)
+        self.assertEqual(self.plan['policy_version'],2)
+        self.assertEqual(record['task_id'],'user-task-a')
+        self.assertEqual(self.plan['limits']['specialist_limit'],8)
+        teams.validate_record(record)
+        for field,value in (('specialist_limit',9),('stage_seconds',241)):
+            changed=copy.deepcopy(self.plan);changed['limits'][field]=value
+            with self.assertRaises(ValueError):teams.validate_plan(changed)
+        changed=copy.deepcopy(self.plan);changed['task_id']='other'
+        with self.assertRaises(ValueError):teams.validate_plan(changed)
+        record['task_id']='other'
+        with self.assertRaises(ValueError):teams.validate_record(record)
+
+    def test_two_searchers_retain_twenty_sources_and_reject_cross_branch_citations(self):
+        record=self.expanded([named_assignment('search_a','web_searcher'),named_assignment('search_b','web_searcher'),
+                              named_assignment('analysis','researcher',['search_a'])])
+        for task in record['tasks'][:2]:
+            value={'summary':'Search result','sources':[{'url':'https://example.org/'+task['id']+'/'+str(i),
+                   'title':'Paper','excerpt':'Observed excerpt'} for i in range(10)],'questions':[]}
+            result=teams.validate_artifact(record,task,value,[s['url'] for s in value['sources']])
+            record['results'][task['id']]=result
+        self.assertEqual(len(record['evidence']),20)
+        teams.validate_record(record)
+        a=record['results']['search_a']['web_sources'][0];b=record['results']['search_b']['web_sources'][0]
+        self.assertIn(':search_a:0',a)
+        teams.validate_artifact(record,record['tasks'][2],report(source=a))
+        with self.assertRaisesRegex(ValueError,'dependency|ancestor|branch'):
+            teams.validate_artifact(record,record['tasks'][2],report(source=b))
+        record['evidence'][a]['task_id']='analysis'
+        with self.assertRaises(ValueError):teams.validate_record(record)
+
+    def test_acceptance_requires_all_reviewers_accept(self):
+        record=self.expanded([named_assignment('analysis','researcher'),named_assignment('review_a','reviewer',['analysis']),
+                              named_assignment('review_b','reviewer',['analysis'])])
+        record.update(stage='completed',results={'analysis':report(),'review_a':report('accept'),'review_b':report('revise')},combined=report())
+        runner.save(self.run/'run.json',record)
+        reference={'run_id':record['id'],'artifact_id':teams.artifact_id(record)}
+        with self.assertRaises(ValueError):teams.accept(self.run,reference)
+        record['results']['review_b']=report('accept');runner.save(self.run/'run.json',record)
+        reference['artifact_id']=teams.artifact_id(record)
+        self.assertTrue(teams.accept(self.run,reference))

@@ -79,16 +79,26 @@ def invoke(app, project, run, identity, role, prompt, schema, search=False):
             current=sources.load(run)
             job=next(j for j in current['jobs'] if j['id']==identity)
             job.update(status=outcome,tokens=usage)
-            app.state['usage'].append({'role':role,'project_id':project['id'],'run_id':current['id'],
-                                       'task_id':identity,'tokens':usage,'outcome':outcome})
+            entry={'role':role,'project_id':project['id'],'run_id':current['id'],
+                   'task_id':identity,'tokens':usage,'outcome':outcome}
+            if 'task_id' in current:entry.update(task_id=current['task_id'],assignment_id=identity)
+            app.state['usage'].append(entry)
             runner.save(run/'run.json',current);app.publish()
 
 
-def execute(app, project, plan):
+def execute(app, project, plan, task=None):
+    owner_id=policy.text(task.get('id'),'User task ID',80) if task is not None else None
+    if ('task_id' in plan and plan['task_id']!=owner_id) or (task is not None and plan.get('policy_version',1)==2 and plan.get('task_id')!=owner_id):
+        raise ValueError('Approved plan belongs to a different user task.')
+    owner=task if task is not None else project
     run=policy.prepare(project,plan,app.storage/'runs')
     with app.lock:
+        if owner_id is not None:
+            record=sources.load(run)
+            record['task_id']=owner_id
+            runner.save(run/'run.json',record)
         app.current_run=run
-        project['run_id']=run.name;project['run_ids'].append(run.name)
+        owner['run_id']=run.name;owner['run_ids'].append(run.name)
         app.state['active_run_id']=run.name;app.publish()
     record=sources.load(run)
     source_text=corpus(run,record)
@@ -146,22 +156,27 @@ def execute(app, project, plan):
         if app.cancel.is_set():raise ProviderError('Run cancelled before saving synthesis.')
         record=sources.load(run)
         combined=policy.validate_artifact(record,{'role':'synthesis'},result)
-        unresolved=list(combined['questions']);review=None
+        unresolved=list(combined['questions']);review=None;reviews=[]
         for task in record['tasks']:
             artifact=record['results'][task['id']]
             unresolved.extend(artifact['questions'])
             if task['role']=='reviewer':
-                review=artifact
+                review=artifact;reviews.append(review)
                 if review['verdict']!='accept':
                     unresolved.append(review['summary']);unresolved.extend(f['claim'] for f in review['findings'])
         combined['questions']=list(dict.fromkeys(unresolved))
         record['combined']=combined
-        record['stage']=({'accept':'completed','revise':'needs_revision','blocked':'blocked'}[review['verdict']] if review else 'completed_unreviewed')
+        if plan.get('policy_version',1)==2:
+            verdicts={r['verdict'] for r in reviews}
+            record['stage']=('blocked' if 'blocked' in verdicts else 'needs_revision' if 'revise' in verdicts else
+                             'completed' if reviews else 'completed_unreviewed')
+        else:
+            record['stage']=({'accept':'completed','revise':'needs_revision','blocked':'blocked'}[review['verdict']] if review else 'completed_unreviewed')
         runner.event(record,'Orchestrator','synthesized','Combined result saved; independent review verdict preserved.')
         runner.save(run/'run.json',record)
         if not policy.verify(run)['unchanged']:
             record=sources.load(run);record['stage']='integrity_failed'
             runner.event(record,'Orchestrator','integrity_failed','Source baseline changed; report cannot be accepted.')
             runner.save(run/'run.json',record)
-        project['thread'].append({'role':'assistant','text':'Team finished: '+sources.load(run)['stage']+'. '+combined['summary']})
+        owner['thread'].append({'role':'assistant','text':'Team finished: '+sources.load(run)['stage']+'. '+combined['summary']})
         app.publish()
