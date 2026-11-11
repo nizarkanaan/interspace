@@ -1,6 +1,8 @@
 # Task desk and repeated specialists
 
-Status: proposed design, awaiting user acceptance before production changes.
+Status: accepted for implementation on 2026-11-11, with the user amendment below.
+
+User amendment: replace the proposed fixed six-specialist maximum with a per-task editable specialist allowance. Six is only the initial default, not a product ceiling. The Orchestrator proposes the smallest useful team within that allowance; Start approves the exact assignments and derived call limit. Account usage and local resources still constrain practical team size. Execution remains sequential; no automatic team expansion or unlimited recursive spawning is added.
 
 ## Intent and confirmed direction
 
@@ -48,8 +50,8 @@ The current one-instance-per-role limit was a first-milestone implementation pol
 
 Proposed bounded policy:
 
-- Allow **1–6 specialist assignments total**, including repeated Web searchers, Researchers or Reviewers. Task IDs remain unique and stable; role IDs name templates, not instances. Each assignment has its own objective, expected output, dependencies, artifact and usage entry.
-- The Orchestrator chooses the complete team before Start and should use the smallest useful team. The plan displays the actual assignment count and exact call ceiling. Six specialists is a ceiling, not a default.
+- Allow **one or more specialist assignments within the task's user-set allowance**, including repeated Web searchers, Researchers or Reviewers. Task IDs remain unique and stable; role IDs name templates, not instances. Each assignment has its own objective, expected output, dependencies, artifact and usage entry.
+- The Orchestrator chooses the complete team before Start and should use the smallest useful team. The task composer/settings allow a positive whole-number allowance, initially six, which the user can raise. The plan displays actual assignment count and exact call ceiling. Changing the allowance invalidates an unstarted proposal; it cannot expand a running plan. Validate the allowance as a positive JavaScript-safe integer for exact UI/JSON representation, not silently clamped to six. Existing provider response/context size guards still apply.
 - Example: two Web searchers with distinct public briefs → Researcher → Reviewer → synthesis. This is **six calls total**: one planning, four specialist, one synthesis; five calls after Start.
 - Keep execution sequential for this milestone, including otherwise independent searches. Repeated instances do not imply simultaneous execution. Keep the four-minute stage deadline and no automatic retry or recursive delegation.
 - Each Web searcher still receives only its disclosed public assignment, in a fresh isolated directory, with no private sources or dependency artifacts. Namespace new web evidence by run and assignment and source index. Preserve old evidence IDs as recorded. Bound evidence to ten sources per search assignment and a bounded total derived from the approved team; reject cross-assignment ownership or collisions.
@@ -77,7 +79,7 @@ After acceptance, implementation stays in the existing Mac shell, Python backend
 
 Use test-first regression coverage for migration, task/project isolation and stale actions, repeated roles, evidence identity/ownership, multiple-reviewer verdict aggregation, exact call reservations, cancellation and source integrity. Use controlled providers and disposable projects; no real provider job, Sample Project write, simulation or experiment is authorized by this design discussion. Browser-test the task journey, error/empty/partial states, responsive sizes and both appearances. Build/sign the native bundle. Native interaction remains unavailable while the Mac is locked.
 
-Routine implementation decisions left to the builder: exact file decomposition, backed-up state-version encoding, spacing, icon choice and accessible token adjustments. The user has selected the visual direction; the task ownership model, six-assignment ceiling and repeated-reviewer policy above are assistant proposals for acceptance.
+Routine implementation decisions left to the builder: exact file decomposition, backed-up state-version encoding, spacing, icon choice and accessible token adjustments. The user accepted the visual direction, task ownership and repeated-specialist workflow. The fixed six-assignment ceiling is superseded by their editable-allowance amendment. The repeated-reviewer policy is included in the accepted design.
 
 ## Design review evidence
 
