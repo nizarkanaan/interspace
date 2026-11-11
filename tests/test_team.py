@@ -82,6 +82,40 @@ class TeamTests(unittest.TestCase):
         self.assertIsNone(self.app.public()['run'])
         self.assertEqual(len(self.provider.calls),1)
 
+    def test_cited_proposal_reaches_reviewer_and_synthesis(self):
+        self.setup_app()
+        original=self.provider.run
+        def propose(prompt,*args):
+            result,usage=original(prompt,*args)
+            if 'Role: Researcher' in prompt:
+                result['findings'][0].update(kind='proposal',claim='Proposed change motivated by the source')
+            return result,usage
+        self.provider.run=propose
+        self.propose();run=self.start()
+        self.assertEqual(run['stage'],'completed')
+        self.assertEqual(run['results']['researcher']['findings'][0]['kind'],'proposal')
+        reviewer=next(p for p in self.provider.calls if 'Role: Reviewer' in p)
+        self.assertIn('Proposed change motivated by the source',reviewer)
+        self.assertEqual([j['id'] for j in run['jobs']],['researcher','reviewer','synthesis'])
+
+    def test_uncited_proposal_stops_without_retry_or_dependent_calls(self):
+        self.setup_app();before=runner.fingerprint(self.source)
+        original=self.provider.run
+        def propose(prompt,*args):
+            result,usage=original(prompt,*args)
+            if 'Role: Researcher' in prompt:
+                result['findings'][0].update(kind='proposal',evidence=[])
+            return result,usage
+        self.provider.run=propose
+        self.propose();run=self.start()
+        self.assertEqual(run['stage'],'failed')
+        self.assertEqual([t['status'] for t in run['tasks']],['failed','blocked'])
+        self.assertEqual(len(self.provider.calls),2)
+        self.assertEqual(len(run['jobs']),1)
+        self.assertEqual(run['results'],{})
+        self.assertIsNone(run['combined'])
+        self.assertEqual(before,runner.fingerprint(self.source))
+
     def test_invalid_model_plan_cannot_be_started(self):
         self.setup_app([assignment('web_searcher'),assignment('researcher'),assignment('reviewer',['researcher'])])
         self.assertIsNone(self.propose())

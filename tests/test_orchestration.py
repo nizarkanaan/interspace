@@ -95,6 +95,25 @@ class ArtifactTests(unittest.TestCase):
         with self.assertRaises(ValueError): teams.validate_artifact(record,task,value)
         with self.assertRaises(ValueError): teams.validate_artifact(record,record['tasks'][1],report())
 
+    def test_provider_schema_and_runtime_agree_on_evidence_count_for_every_kind(self):
+        record=self.prepare()
+        evidence_schema=teams.RESULT_SCHEMA['properties']['findings']['items']['properties']['evidence']
+        for kind in ('fact','interpretation','proposal'):
+            for count,allowed in ((0,False),(1,True),(10,True),(11,False)):
+                with self.subTest(kind=kind,count=count):
+                    value=report();finding=value['findings'][0]
+                    finding.update(kind=kind,evidence=finding['evidence']*count)
+                    # Check the array limits advertised to the provider, independently
+                    # of the application validator which originally rejected its output.
+                    schema_allows=(evidence_schema.get('minItems',0)<=count<=
+                                   evidence_schema.get('maxItems',float('inf')))
+                    self.assertEqual(schema_allows,allowed)
+                    if allowed:
+                        self.assertEqual(teams.validate_artifact(record,record['tasks'][0],value),value)
+                    else:
+                        with self.assertRaises(ValueError):
+                            teams.validate_artifact(record,record['tasks'][0],value)
+
     def test_web_sources_need_observed_public_provenance_before_becoming_evidence(self):
         record=self.prepare([assignment('web_searcher')]);task=record['tasks'][0]
         value={'summary':'Search result','sources':[{'url':'https://example.org/paper','title':'Paper','excerpt':'Observed supporting excerpt'}],'questions':[]}

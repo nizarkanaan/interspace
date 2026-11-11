@@ -58,6 +58,8 @@ A proposed team is complete before Start. Changes requested in chat replace its 
 
 Combined results label facts, interpretations and proposals, cite committed source lines or retrieved web excerpts, and retain unresolved questions and Reviewer objections. A Reviewer checks supplied excerpts and artifacts without browsing independently; a retrieved excerpt is not a claim that a full paper was read. Tokens appear when returned; unknown consumption is shown as unavailable. Call/deadline limits do not cap tokens, money, search actions or remaining subscription allowance.
 
+Every finding requires 1–10 citations in both the provider response schema and runtime validation. Proposal citations identify the source context motivating a change; they do not establish that it is implemented or validated. Ideas without relevant supplied evidence belong in unresolved questions. Invalid output stops the run without a retry or dependent dispatch.
+
 **Accept this report** is available only after Reviewer acceptance, successful synthesis and unchanged source integrity. Acceptance binds the exact plan, evidence and result content and authorizes the report only. Runs without a Reviewer finish as **completed unreviewed** and cannot be accepted through the reviewed-report action. New team runs need a new approved plan for further work; they do not use the legacy revision loop.
 
 ## Revise and accept legacy reports

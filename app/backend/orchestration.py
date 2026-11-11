@@ -37,9 +37,14 @@ TASK_SCHEMA = object_schema({'id':TEXT,'role':{'type':'string','enum':list(ROLES
 CHAT_SCHEMA = object_schema({'reply':TEXT,'action':{'type':'string','enum':['answer','propose_plan','propose_revision']},
                              'tasks':{'type':'array','items':TASK_SCHEMA}})
 CITATION = object_schema({'source':TEXT,'start':{'type':'integer'},'end':{'type':'integer'}})
+EVIDENCE_GUIDANCE = (
+    'Every finding, including a proposal, requires 1–10 citations to supplied source IDs and LF line ranges. '
+    'For proposals, cite the source context motivating the change; this is not evidence the proposal is implemented or validated. '
+    'Put ideas without relevant supplied evidence in unresolved questions instead of findings. Never invent a citation. ')
 RESULT_SCHEMA = object_schema({'summary':TEXT,'findings':{'type':'array','items':object_schema({
     'claim':TEXT,'kind':{'type':'string','enum':['fact','interpretation','proposal']},
-    'evidence':{'type':'array','items':CITATION}})},'questions':{'type':'array','items':TEXT},
+    'evidence':{'type':'array','minItems':1,'maxItems':10,'items':CITATION,
+                'description':EVIDENCE_GUIDANCE}})},'questions':{'type':'array','items':TEXT},
     'verdict':{'type':'string','enum':['not_reviewed','accept','revise','blocked']}})
 SEARCH_SCHEMA = object_schema({'summary':TEXT,'sources':{'type':'array','items':object_schema({
     'url':TEXT,'title':TEXT,'excerpt':TEXT})},'questions':{'type':'array','items':TEXT}})
@@ -262,7 +267,7 @@ def validate_artifact(record, task, result, observed_urls=()):
     for finding in result['findings']:
         fields(finding,('claim','kind','evidence'),'finding');text(finding['claim'],'Finding',3000)
         if finding['kind'] not in ('fact','interpretation','proposal') or not isinstance(finding['evidence'],list) or not 1<=len(finding['evidence'])<=10:
-            raise ValueError('Each classified finding needs evidence.')
+            raise ValueError('Each fact, interpretation or proposal needs 1–10 citations. Put unsupported ideas in unresolved questions.')
         for citation in finding['evidence']:
             fields(citation,('source','start','end'),'citation')
             source=citation['source']
