@@ -229,8 +229,13 @@ def apply(run,record,cancel,hook=None):
     if cancel.is_set():raise ValueError('Application cancelled before reservation.')
     application=run/'application'
     # O_EXCL directory reservation consumes this approval even after a crash.
-    try:application.mkdir(mode=0o700)
-    except FileExistsError:raise ValueError('Application was already reserved; inspect its journal.')
+    run_fd=_open_directory(run)
+    try:
+        try:os.mkdir('application',0o700,dir_fd=run_fd)
+        except FileExistsError:raise ValueError('Application was already reserved; inspect its journal.')
+        # Persist the new entry in its parent before source writes can be durable.
+        _sync(run_fd)
+    finally:os.close(run_fd)
     journal_path=application/'journal.json'
     journal=dict(version=1,run_id=record['id'],approval=copy.deepcopy(record['application_approval']),status='preparing',files=[],directories=[])
     _durable(journal_path,journal)

@@ -46,6 +46,27 @@ class ChangeFixture:
 
 
 class ChangeTests(ChangeFixture,unittest.TestCase):
+    def test_diff_represents_missing_final_lf_and_lf_only_changes_exactly(self):
+        marker='\\ No newline at end of file\n'
+        cases=[('value = 1','value = 2','-value = 1\n'+marker+'+value = 2\n'+marker),
+               ('value = 1','value = 1\n','-value = 1\n'+marker+'+value = 1\n'),
+               ('value = 1\n','value = 1','-value = 1\n+value = 1\n'+marker)]
+        for old,new,expected in cases:
+            with self.subTest(original=old,candidate=new):
+                if (self.source/'main.py').read_bytes()!=old.encode():self.commit_files({'main.py':old})
+                self.head=self.git('rev-parse','HEAD');self.p['source_selection']['revision']=self.head
+                run,r=self.prepared()
+                changes.stage_candidate(run,r,r['tasks'][0],report([dict(path='main.py',content=new),dict(path='tests/test_main.py',content='assert True\n')]))
+                self.assertEqual(r['candidate']['diff'],'--- a/main.py\n+++ b/main.py\n@@ -1 +1 @@\n'+expected)
+                self.assertEqual((run/'candidate/main.py').read_bytes(),new.encode())
+                self.assertEqual(changes.load(run)['candidate']['digest'],r['candidate']['digest'])
+    def test_new_file_diff_preserves_unterminated_lf_line_and_unicode_separators(self):
+        tasks=self.team();tasks[0]['write_paths'].append('new.py')
+        run=changes.prepare(self.p,self.plan(tasks),self.base/'runs');r=changes.load(run)
+        body='value = "a\u2028b\rc"'
+        changes.stage_candidate(run,r,r['tasks'][0],report([dict(path='main.py',content='value = 1\n'),dict(path='tests/test_main.py',content='assert True\n'),dict(path='new.py',content=body)]))
+        self.assertEqual(r['candidate']['diff'],'--- /dev/null\n+++ b/new.py\n@@ -0,0 +1 @@\n+'+body+'\n\\ No newline at end of file\n')
+        self.assertEqual((run/'candidate/new.py').read_bytes(),body.encode())
     def test_repeated_roles_must_have_disjoint_scopes_and_full_handoffs(self):
         team=[assignment('a','implementer',['main.py']),assignment('b','implementer',['tests/test_main.py']),assignment('t','tester',deps=['a','b']),assignment('t2','tester',deps=['a','b']),assignment('r','reviewer',deps=['t','t2'])]
         self.assertEqual(len(self.plan(team)['tasks']),5)

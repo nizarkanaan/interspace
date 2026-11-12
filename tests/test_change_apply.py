@@ -36,6 +36,32 @@ class ApplyTests(test_changes.ChangeFixture,unittest.TestCase):
         r['combined']=test_changes.report();r['stage']='ready_to_apply'
         r['application_approval']=dict(artifact_id=changes.artifact_id(r),candidate_digest=r['candidate']['digest'],plan_digest=r['plan']['digest'])
         runner.save(run/'run.json',r);return run,r
+    def test_application_directory_is_persisted_before_first_source_replacement(self):
+        run,r=self.ready();run_identity=(run.stat().st_dev,run.stat().st_ino);order=[]
+        real_sync=change_apply._sync
+        def sync(fd):
+            meta=os.fstat(fd)
+            if (meta.st_dev,meta.st_ino)==run_identity:
+                self.assertTrue((run/'application').is_dir());order.append('reservation persisted')
+            return real_sync(fd)
+        def observe(event,path):
+            if event=='pre-replacement':order.append('replace '+path)
+        with patch.object(change_apply,'_sync',side_effect=sync):result=change_apply.apply(run,r,threading.Event(),observe)
+        self.assertEqual(result['status'],'applied');self.assertEqual((self.source/'main.py').read_text(),'value = 2\n')
+        self.assertTrue(order and order[0]=='reservation persisted',order)
+    def test_application_directory_persistence_failure_leaves_sources_unchanged(self):
+        run,r=self.ready();run_identity=(run.stat().st_dev,run.stat().st_ino);real_sync=change_apply._sync
+        before=runner.fingerprint(self.source)
+        def fail(fd):
+            meta=os.fstat(fd)
+            if (meta.st_dev,meta.st_ino)==run_identity:raise OSError('injected reservation persistence failure')
+            return real_sync(fd)
+        with patch.object(change_apply,'_sync',side_effect=fail),self.assertRaisesRegex(OSError,'reservation persistence failure'):
+            change_apply.apply(run,r,threading.Event())
+        self.assertEqual(runner.fingerprint(self.source),before)
+        self.assertEqual((self.source/'main.py').read_text(),'value = 1\n')
+        self.assertTrue((run/'application').is_dir())
+        with self.assertRaises(ValueError):change_apply.apply(run,r,threading.Event())
     def test_exact_atomic_swap_and_exclusive_creation_are_retained_and_not_replayed(self):
         run,r=self.ready(new=True);before=(self.source/'main.py').stat().st_ino
         result=change_apply.apply(run,r,threading.Event())

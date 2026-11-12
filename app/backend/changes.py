@@ -173,13 +173,20 @@ def _candidate_values(record):
     return hashes
 
 
+def _diff_lines(body):
+    # Only LF delimits source lines; CR and Unicode separators are literal bytes.
+    parts=body.split('\n')
+    return [line+'\n' for line in parts[:-1]]+([parts[-1]] if parts[-1] else [])
+
+
 def _refresh_candidate(record,run=None):
     candidate=record['candidate'];candidate['hashes']=_candidate_values(record)
     if run is not None:
         diffs=[]
         for name,body in sorted(candidate['replacements'].items()):
             old=(Path(run)/'sources'/name).read_bytes().decode('utf-8') if name in record['sources'] else ''
-            diffs.extend(difflib.unified_diff(old.splitlines(keepends=True),body.splitlines(keepends=True),fromfile='a/'+name if name in record['sources'] else '/dev/null',tofile='b/'+name))
+            for line in difflib.unified_diff(_diff_lines(old),_diff_lines(body),fromfile='a/'+name if name in record['sources'] else '/dev/null',tofile='b/'+name):
+                diffs.append(line if line.endswith('\n') else line+'\n\\ No newline at end of file\n')
         candidate['diff']=''.join(diffs)
     candidate['digest']=policy.digest({k:candidate[k] for k in ('replacements','hashes','diff')})
 
