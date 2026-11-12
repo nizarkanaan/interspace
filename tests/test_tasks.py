@@ -32,7 +32,7 @@ class TaskStorageTests(unittest.TestCase):
             with self.assertRaises(ValueError):app.handle('update_task',{'project_id':pid,'task_id':tid,'title':'Wrong','specialist_limit':invalid})
         self.assertEqual(app.public(),before)
         restored=Application(app.storage,provider=provider).public()
-        self.assertEqual(restored['task'],before['task']);self.assertEqual(restored['version'],3)
+        self.assertEqual(restored['task'],before['task']);self.assertEqual(restored['version'],4)
         test_pilot.legacy_project(app,self.source)
         self.assertEqual(app.public()['task_id'],tid)
 
@@ -76,7 +76,7 @@ class TaskStorageTests(unittest.TestCase):
         state=projects.empty_state();state.update(version=2,projects={project['id']:project},selected_project_id=project['id'])
         original=json.dumps(state).encode();(storage/'state.json').write_bytes(original)
         app=Application(storage,provider=TeamProvider());public=app.public()
-        self.assertEqual(public['version'],3);self.assertEqual(len(public['tasks']),2)
+        self.assertEqual(public['version'],4);self.assertEqual(len(public['tasks']),2)
         self.assertEqual(public['pending'],pending);self.assertEqual(public['run']['id'],runs[0].name)
         self.assertEqual(public['threads']['task'],[]);self.assertEqual(public['threads']['project'],project['thread'])
         saved=app.state['projects'][project['id']]

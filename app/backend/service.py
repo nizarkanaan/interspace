@@ -23,6 +23,7 @@ import changes
 import checks
 import change_apply
 import change_team
+import budget
 
 CHAT_SCHEMA = {'type':'object','additionalProperties':False,
                'properties':{'reply':{'type':'string'},'action':{'type':'string','enum':['answer','propose_review','propose_revision']}},
@@ -45,6 +46,7 @@ class Application:
         self.worker = None
         self.current_run = None
         self.state = projects.load(self.storage)
+        budget.recover(self.state)  # A reservation held at shutdown is charged its estimate, never released.
         if self.state['active']:
             owner = self.state['active_project_id']
             project = self.state['projects'].get(owner)
@@ -191,7 +193,8 @@ class Application:
             data = copy.deepcopy({key:self.state[key] for key in ('version','active','active_project_id','active_run_id','usage','connection')})
             data.update(active_task_id=self.state.get('active_task_id'),error_task_id=self.state.get('error_task_id'),
                         task_id=project.get('selected_task_id') if project and isinstance(project.get('selected_task_id'),str) else None,
-                        task=dict({k:task[k] for k in ('id','title','specialist_limit')},draft=task.get('draft',''),mode=task.get('mode','review')) if task else None,
+                        task=dict({k:task[k] for k in ('id','title','specialist_limit')},draft=task.get('draft',''),mode=task.get('mode','review'),
+                                  token_budget=task.get('token_budget'),tokens=self.token_summary(task)) if task else None,
                         tasks=self.task_summaries(project) if project else [],
                         project_id=project['id'] if project else None,project=project['name'] if project else None,
                         projects=self.summaries(),pending=copy.deepcopy(owner['pending']) if owner else None,
@@ -200,6 +203,7 @@ class Application:
                                  'task':copy.deepcopy(task['thread']) if task else []},
                         runs=[self.run_summary(project,r) for r in reversed(owner['run_ids'])] if owner else [],run=None)
             data['source_selection']=None
+            data['plan_budget']=None
             data['source_error']=''
             if project:
                 try:data['source_selection']=sources.selection(project)
@@ -224,6 +228,10 @@ class Application:
                 except SNAPSHOT_ERRORS:
                     data['run'] = None
                     data['error'] = 'Selected saved review is unavailable. Other projects remain usable; preserve app data before recovery.'
+            if data['pending'] and task is not None and data['pending'].get('kind') in ('team','change'):
+                try:projected=budget.projection(self.state,task,self.call_roles(owner['pending']))
+                except (ValueError,KeyError,TypeError):projected=None
+                data['plan_budget']=projected
             if data['pending'] and data['pending'].get('kind')=='change':
                 data['pending']['action_refs']={}
                 try:
@@ -235,7 +243,7 @@ class Application:
             return data
 
     def project_change_actions(self, public, project, task, run, record):
-        public.update(action_refs={},can_approve_checks=False,can_apply_changes=False,change_error='')
+        public.update(action_refs={},can_approve_checks=False,can_apply_changes=False,change_error='',budget_projection=None)
         if record['stage']=='applied':return  # Expected source changes are recorded by the application journal.
         try:
             change_team.require_task(task)
@@ -246,11 +254,20 @@ class Application:
             changes.check_current(project,run,record)
             available=record.get('check_availability',{})
             if not self.state['active'] and record['stage']=='awaiting_test_approval' and available.get('ready') is True:
-                public['action_refs']['approve_checks']=dict(ref,recipe=changes.RECIPE,runtime=copy.deepcopy(available['runtime']))
+                public['action_refs']['approve_checks']=dict(ref,recipe=changes.RECIPE,runtime=copy.deepcopy(available['runtime']),token_budget=task.get('token_budget'))
+                public['budget_projection']=budget.projection(self.state,task,self.remaining_change_roles(record))
                 public['can_approve_checks']=True
             if not self.state['active'] and record['stage']=='ready_to_apply' and record.get('application_approval') is None:
                 public['action_refs']['apply_changes']=ref;public['can_apply_changes']=True
         except (ValueError,KeyError,TypeError) as error:public['change_error']=str(error)
+
+    def token_summary(self, task):
+        totals=budget.ledger(self.state,task['id'],task.get('token_budget'))
+        return {k:v for k,v in totals.items() if k!='entries'}
+
+    def remaining_change_roles(self, record):
+        left=[t for t in record['tasks'] if t['id'] not in record['results']]
+        return self.call_roles(record['plan'],left)
 
     def selected_change(self, project, reference):
         task=tasks.owner(project,reference);change_team.require_task(task if task is not project else None)
@@ -331,7 +348,9 @@ class Application:
                 project=projects.selected(self.state,params)
                 if method=='create_task':
                     if not isinstance(project.get('tasks',{}),dict):raise ValueError('Saved tasks are unavailable; preserve app data before recovery.')
-                    task=tasks.create(params.get('title','New task'),params.get('specialist_limit',6),draft=params.get('draft',''),mode=params.get('mode','review'))
+                    token_budget=params.get('token_budget',budget.DEFAULT_BUDGET)
+                    if token_budget is None:raise ValueError('New tasks need a token budget.')
+                    task=tasks.create(params.get('title','New task'),params.get('specialist_limit',6),draft=params.get('draft',''),mode=params.get('mode','review'),token_budget=token_budget)
                     project.setdefault('tasks',{})[task['id']]=task
                     project['selected_task_id']=task['id']
                 else:
@@ -341,7 +360,10 @@ class Application:
                     updates={}
                     if 'title' in params:updates['title']=tasks.title(params['title'])
                     if 'specialist_limit' in params:updates['specialist_limit']=orchestration.validate_specialist_limit(params['specialist_limit'])
-                    if 'specialist_limit' in updates and updates['specialist_limit']!=task['specialist_limit']:
+                    if 'token_budget' in params:
+                        if params['token_budget'] is None:raise ValueError('Token budget must be a positive whole number of tokens.')
+                        updates['token_budget']=budget.validate(params['token_budget'])
+                    if any(key in updates and updates[key]!=task.get(key) for key in ('specialist_limit','token_budget')):
                         tasks.clear_pending(project,task)
                     task.update(updates)
                 self.publish()
@@ -378,7 +400,10 @@ class Application:
                     if not availability.get('ready'):raise ValueError(availability.get('message','Restricted checks are unavailable.'))
                     if params.get('recipe')!=changes.RECIPE or params.get('runtime')!=availability['runtime'] or params.get('runtime')!=record.get('check_availability',{}).get('runtime'):
                         raise ValueError('The exact runtime or recipe changed; candidate check approval is stale.')
-                    record['test_approval']=dict(candidate_digest=record['candidate']['digest'],plan_digest=record['plan']['digest'],recipe=changes.RECIPE,runtime=copy.deepcopy(availability['runtime']))
+                    if params.get('token_budget')!=task.get('token_budget'):
+                        raise ValueError('The task token budget changed; this check approval is stale.')
+                    self.require_first_call(task,self.remaining_change_roles(record))
+                    record['test_approval']=dict(candidate_digest=record['candidate']['digest'],plan_digest=record['plan']['digest'],recipe=changes.RECIPE,runtime=copy.deepcopy(availability['runtime']),token_budget=task.get('token_budget'))
                     record['stage']='checking';runner.save(run/'run.json',record)
                     self.launch('Checking frozen candidate',lambda:change_team.finish(self,project,run,task),project['id'],task['id'])
                 else:
@@ -456,6 +481,7 @@ class Application:
             elif method=='start_plan':
                 raise ValueError('This legacy plan requires its original review action.')
             self.check_plan_revision(project,owner,plan)
+            if task is not None and plan.get('kind') in ('team','change'):self.require_first_call(task,self.call_roles(plan))
             if plan.get('kind')=='team' and plan.get('source_scope'):
                 try:
                     sources.context(project)
@@ -528,7 +554,7 @@ class Application:
             except Exception as error:
                 with self.lock:
                     self.state['error'] = str(error) if isinstance(error,(ValueError,ProviderError)) else 'Interaction failed. Check the selected repository and Codex installation.'
-                    stage = 'cancelled' if self.cancel.is_set() else 'failed'
+                    stage = 'cancelled' if self.cancel.is_set() else 'budget_exhausted' if isinstance(error,budget.Exhausted) else 'failed'
                     if task:task.update(error=self.state['error'],error_status=stage)
                     if self.current_run:
                         try:
@@ -545,7 +571,7 @@ class Application:
                         elif orchestration.is_team(record):
                             orchestration.interrupt(record,stage,self.state['error'])
                         else:
-                            record['stage']=stage
+                            record['stage']='failed' if stage=='budget_exhausted' else stage  # Legacy reviews keep their stages.
                             runner.event(record, 'Orchestrator', record['stage'], self.state['error'])
                         if record is not None:
                             runner.save(self.current_run / 'run.json', record)
@@ -562,22 +588,53 @@ class Application:
         with self.lock:
             self.state['connection'] = self.provider.status()
 
+    @staticmethod
+    def call_roles(plan, tasks_left=None):
+        """Model calls an approved plan will make, as provider role names, ending with synthesis."""
+        names=[(orchestration.ROLES[t['role']]['name'] if plan.get('kind')=='team' else t['role'].title())
+               for t in (plan['tasks'] if tasks_left is None else tasks_left)]
+        return names+['Orchestrator']
+
+    def require_first_call(self, task, roles):
+        projected=budget.projection(self.state,task,roles)
+        if projected and not projected['first_fits']:
+            raise budget.Exhausted('Token budget exhausted: '+format(max(0,projected['remaining']),',')+' of '+format(projected['budget'],',')
+                                   +' tokens remain, which cannot fit even the smallest next call. Nothing was started. Raise the task budget, then request a new plan or approval.')
+
+    def active_task(self):
+        project=self.state['projects'].get(self.state['active_project_id'])
+        identity=self.state.get('active_task_id')
+        return next((t for t in tasks.available(project) if t['id']==identity),None) if project and identity else None
+
     def call(self, role, prompt, schema):
         with self.lock:
+            task=self.active_task()
+            # Task-owned calls pass the budget gate; project and workspace conversation are not budgeted.
+            reservation=budget.reserve(self.state,task,role=role,prompt=prompt,project_id=self.state['active_project_id']) if task else None
             self.state['active'] = role
             self.publish()
-        if self.cancel.is_set():
-            raise ProviderError('Run cancelled before dispatch.')
-        result, usage = self.provider.run(prompt,schema,self.storage/'provider',self.cancel)
-        if self.cancel.is_set():
-            raise ProviderError('Run cancelled before accepting results.')
-        with self.lock:
-            entry={'role':role,'tokens':usage,'project_id':self.state['active_project_id']}
-            if self.state.get('active_task_id'):entry['task_id']=self.state['active_task_id']
-            if self.current_run:
-                record=sources.load(self.current_run)
-                entry.update(run_id=record['id'],round=record.get('revision_round',0))
-            self.state['usage'].append(entry)
+        usage=None;outcome='failed'
+        try:
+            if self.cancel.is_set():
+                raise ProviderError('Run cancelled before dispatch.')
+            try:
+                result, usage = self.provider.run(prompt,schema,self.storage/'provider',self.cancel)
+            except ProviderError as error:
+                usage=error.usage;raise
+            if self.cancel.is_set():
+                raise ProviderError('Run cancelled before accepting results.')
+            outcome='completed'
+        finally:
+            with self.lock:
+                if self.cancel.is_set():outcome='cancelled'
+                entry=budget.settle(self.state,reservation,usage,outcome) if reservation else None
+                if entry is None and outcome=='completed':
+                    entry={'role':role,'tokens':usage,'project_id':self.state['active_project_id']}
+                    if self.state.get('active_task_id'):entry['task_id']=self.state['active_task_id']
+                    self.state['usage'].append(entry)
+                if entry is not None and self.current_run:
+                    record=sources.load(self.current_run)
+                    entry.update(run_id=record['id'],round=record.get('revision_round',0))
         return result
 
     def chat(self, project, text, run_id=None, prior_plan=None, task=None):
@@ -627,7 +684,7 @@ class Application:
             if not project:
                 raise ValueError('Specialist plans require a selected project conversation.')
             orchestration.fields(result,('reply','action','tasks'),'Orchestrator response')
-            proposed=orchestration.make_plan(project,head,text,result['tasks'],specialist_limit=task['specialist_limit'],task_id=task['id']) if task else orchestration.make_plan(project,head,text,result['tasks'])
+            proposed=orchestration.make_plan(project,head,text,result['tasks'],specialist_limit=task['specialist_limit'],task_id=task['id'],token_budget=task.get('token_budget')) if task else orchestration.make_plan(project,head,text,result['tasks'])
         revision_record=None
         if result['action']=='propose_revision' and project:
             if not run_id:

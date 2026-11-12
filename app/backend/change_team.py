@@ -62,7 +62,7 @@ def chat(app,project,text,task,prior_plan=None):
     policy.fields(result,('reply','action','tasks'),'editing planner response')
     policy.text(result['reply'],'Reply',6000)
     if result['action'] not in ('answer','propose_plan') or (result['action']=='answer' and result['tasks']!=[]):raise ValueError('Unsupported editing planner response.')
-    proposed=changes.make_plan(project,head,text,result['tasks'],task['specialist_limit'],task['id']) if result['action']=='propose_plan' else None
+    proposed=changes.make_plan(project,head,text,result['tasks'],task['specialist_limit'],task['id'],task.get('token_budget')) if result['action']=='propose_plan' else None
     with app.lock:
         if proposed:
             for identity in task['run_ids']:
@@ -306,4 +306,4 @@ def finish(app,project,run,task):
 def interrupt(record,stage,detail):
     changes.interrupt(record,stage,detail)
     for reservation in record['checks']['reservations']:
-        if reservation['status']=='reserved':reservation['status']=stage
+        if reservation['status']=='reserved':reservation['status']=stage if stage in ('cancelled','interrupted') else 'failed'

@@ -76,7 +76,7 @@ class WorkflowTests(unittest.TestCase):
         record=record or self.app.public()['run']
         return dict(project_id=self.pid,task_id=self.tid,run_id=record['id'],plan_digest=record['plan']['digest'],candidate_digest=record['candidate']['digest'],artifact_id=record['artifact_id'])
     def approve(self,record=None):
-        ref=self.ref(record);ref.update(recipe=changes.RECIPE,runtime=copy.deepcopy(RUNTIME))
+        ref=self.ref(record);ref.update(recipe=changes.RECIPE,runtime=copy.deepcopy(RUNTIME),token_budget=self.app.public()['task']['token_budget'])
         self.app.handle('approve_checks',ref);self.app.wait();return self.app.public()['run']
     def test_mode_defaults_and_is_immutable_without_rewriting_legacy_tasks(self):
         self.setup_app();self.assertEqual(self.app.public()['task'].get('mode'),'python_fix')
@@ -116,8 +116,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(len(self.provider.calls),2)
     def test_exact_resume_and_final_refs_reject_stale_or_missing_identity(self):
         self.setup_app();paused=self.start();before=len(self.provider.calls)
-        for key in ('project_id','task_id','run_id','plan_digest','candidate_digest','artifact_id','recipe','runtime'):
-            ref=dict(self.ref(paused),recipe=changes.RECIPE,runtime=copy.deepcopy(RUNTIME));ref.pop(key)
+        for key in ('project_id','task_id','run_id','plan_digest','candidate_digest','artifact_id','recipe','runtime','token_budget'):
+            ref=dict(self.ref(paused),recipe=changes.RECIPE,runtime=copy.deepcopy(RUNTIME),token_budget=self.app.public()['task']['token_budget']);ref.pop(key)
             with self.subTest(key=key),self.assertRaises(ValueError):self.app.handle('approve_checks',ref)
         self.assertEqual(len(self.provider.calls),before);self.assertEqual(self.processes,[])
         ready=self.approve(paused)
@@ -215,7 +215,7 @@ class WorkflowTests(unittest.TestCase):
             self.app.wait()
         self.assertFalse(self.app.public()['error']);self.assertEqual(self.app.public()['pending']['kind'],'team')
     def test_runtime_unavailable_or_changed_fails_closed_without_consuming_approval(self):
-        self.setup_app();paused=self.start();ref=dict(self.ref(paused),recipe=changes.RECIPE,runtime=copy.deepcopy(RUNTIME))
+        self.setup_app();paused=self.start();ref=dict(self.ref(paused),recipe=changes.RECIPE,runtime=copy.deepcopy(RUNTIME),token_budget=self.app.public()['task']['token_budget'])
         with patch.object(checks,'availability',return_value=dict(ready=False,message='Actual unavailable diagnostic',runtime=None)):
             with self.assertRaisesRegex(ValueError,'Actual unavailable diagnostic'):self.app.handle('approve_checks',ref)
         changed=dict(RUNTIME,preset='different-preset')

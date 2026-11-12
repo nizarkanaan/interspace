@@ -104,17 +104,21 @@ class BudgetPolicyTests(unittest.TestCase):
         self.assertEqual(totals['unknown'], 1)
         self.assertEqual(totals['remaining'], 35)
 
-    def test_projection_reports_fit_and_first_call_feasibility(self):
+    def test_projection_uses_typical_prompt_size_and_minimal_first_call(self):
         state, task = state_with(100000)
-        fits = budget.projection(state, task, [('Researcher', 'x' * 100), ('Orchestrator', 'x' * 100)])
+        entry = budget.reserve(state, task, role='Orchestrator', prompt='x' * 3000, project_id='p')
+        budget.settle(state, entry, {'input_tokens': 15000, 'output_tokens': 500}, 'completed')
+        self.assertEqual(budget.typical_prompt_chars(state, 'task-1'), 3000)
+        fits = budget.projection(state, task, ['Researcher', 'Orchestrator'])
+        self.assertEqual(fits['projected'], 2 * budget.estimate_chars(3000, 'Researcher'))
         self.assertTrue(fits['fits']);self.assertTrue(fits['first_fits'])
-        task['token_budget'] = budget.estimate('x' * 100, 'Researcher') + 1
-        tight = budget.projection(state, task, [('Researcher', 'x' * 100), ('Orchestrator', 'x' * 100)])
+        task['token_budget'] = 15500 + budget.estimate_chars(3000, 'Researcher')
+        tight = budget.projection(state, task, ['Researcher', 'Orchestrator'])
         self.assertFalse(tight['fits']);self.assertTrue(tight['first_fits'])
-        task['token_budget'] = 10
-        self.assertFalse(budget.projection(state, task, [('Researcher', 'x')])['first_fits'])
+        task['token_budget'] = 15500 + budget.estimate_chars(0, 'Researcher') - 1
+        self.assertFalse(budget.projection(state, task, ['Researcher'])['first_fits'])
         task['token_budget'] = None
-        self.assertIsNone(budget.projection(state, task, [('Researcher', 'x')]))
+        self.assertIsNone(budget.projection(state, task, ['Researcher']))
 
     def test_settle_rejects_unknown_or_settled_entries(self):
         state, task = state_with(100000)

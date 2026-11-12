@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import tempfile
 
+import budget
 import orchestration as policy
 import runner
 import sources
@@ -44,6 +45,9 @@ def invoke(app, project, run, identity, role, prompt, schema, search=False):
         record=sources.load(run)
         if len(record['jobs'])>=record['limits']['max_calls'] or any(j['id']==identity for j in record['jobs']):
             raise ValueError('Job already reserved or approved call ceiling reached.')
+        owner=project.get('tasks',{}).get(record.get('task_id')) if record.get('task_id') else None
+        # The budget gate runs before any job reservation, so a refusal consumes nothing.
+        entry=budget.reserve(app.state,owner,role=role,prompt=prompt,project_id=project['id'],run_id=record['id'],assignment_id=identity) if owner else None
         record['jobs'].append({'id':identity,'role':role,'status':'reserved','tokens':None})
         record['stage']='synthesizing' if identity=='synthesis' else 'running'
         for task in record['tasks']:
@@ -79,10 +83,12 @@ def invoke(app, project, run, identity, role, prompt, schema, search=False):
             current=sources.load(run)
             job=next(j for j in current['jobs'] if j['id']==identity)
             job.update(status=outcome,tokens=usage)
-            entry={'role':role,'project_id':project['id'],'run_id':current['id'],
-                   'task_id':identity,'tokens':usage,'outcome':outcome}
-            if 'task_id' in current:entry.update(task_id=current['task_id'],assignment_id=identity)
-            app.state['usage'].append(entry)
+            if entry:budget.settle(app.state,entry,usage,outcome)
+            else:
+                fallback={'role':role,'project_id':project['id'],'run_id':current['id'],
+                          'task_id':identity,'tokens':usage,'outcome':outcome}
+                if 'task_id' in current:fallback.update(task_id=current['task_id'],assignment_id=identity)
+                app.state['usage'].append(fallback)
             runner.save(run/'run.json',current);app.publish()
 
 

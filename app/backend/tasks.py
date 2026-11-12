@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import uuid
 
+import budget
 import orchestration
 
 
@@ -24,16 +25,16 @@ def validate_mode(value):
     return value
 
 
-def create(name='New task', specialist_limit=6, draft='', mode='review'):
+def create(name='New task', specialist_limit=6, draft='', mode='review', token_budget=budget.DEFAULT_BUDGET):
     return {'id':uuid.uuid4().hex,'title':title(name),'mode':validate_mode(mode),
             'specialist_limit':orchestration.validate_specialist_limit(specialist_limit),'draft':draft_text(draft),
-            'thread':[],'pending':None,'run_id':None,'run_ids':[],'error':'','error_status':None}
+            'token_budget':budget.validate(token_budget),'thread':[],'pending':None,'run_id':None,'run_ids':[],'error':'','error_status':None}
 
 
 def validate(task, identity):
     try:
         if not isinstance(task,dict) or task['id']!=identity:raise ValueError()
-        validate_mode(task.get('mode','review'));title(task['title']);orchestration.validate_specialist_limit(task['specialist_limit']);draft_text(task.get('draft',''))
+        validate_mode(task.get('mode','review'));title(task['title']);orchestration.validate_specialist_limit(task['specialist_limit']);budget.validate(task.get('token_budget'));draft_text(task.get('draft',''))
         if not isinstance(task['thread'],list) or not isinstance(task['run_ids'],list):raise ValueError()
         for message in task['thread']:
             if (not isinstance(message,dict) or message.get('role') not in ('user','assistant')
@@ -116,6 +117,8 @@ def validate_plan_owner(project, owner, plan):
         raise ValueError('Plan belongs to a different task.')
     elif (plan.get('policy_version')==2 or plan.get('kind')=='change') and plan.get('limits',{}).get('specialist_limit')!=owner['specialist_limit']:
         raise ValueError('Task allowance changed; request a new proposal.')
+    if owner is not project and (plan.get('policy_version')==2 or plan.get('kind')=='change') and plan.get('limits',{}).get('token_budget')!=owner.get('token_budget'):
+        raise ValueError('Task token budget changed; request a new proposal.')
 
 
 def migrate(state, storage):

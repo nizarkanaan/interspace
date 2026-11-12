@@ -9,6 +9,7 @@ import re
 import stat
 import unicodedata
 
+import budget
 import orchestration as policy
 import runner
 import sources
@@ -77,13 +78,15 @@ def write_paths(plan):
     return sorted(p for t in plan['tasks'] for p in t['write_paths'])
 
 
-def _limits(tasks,limit):
-    return dict(planning_calls=1,max_calls=len(tasks)+1,specialist_limit=limit,stage_seconds=240,retries=0,
+def _limits(tasks,limit,token_budget=None):
+    limits=dict(planning_calls=1,max_calls=len(tasks)+1,specialist_limit=limit,stage_seconds=240,retries=0,
                 max_test_processes=3,test_seconds=30,test_output_bytes=100000,max_write_paths=8,
                 file_bytes=100000,total_bytes=200000)
+    if budget.validate(token_budget) is not None:limits['token_budget']=token_budget
+    return limits
 
 
-def make_plan(project,revision,goal,assignments,specialist_limit,task_id):
+def make_plan(project,revision,goal,assignments,specialist_limit,task_id,token_budget=None):
     tasks=_tasks(assignments,specialist_limit);selected=sources.scope(project)
     if selected is None:raise ValueError('Editing requires an explicit saved source selection.')
     sources.revision(project,revision)
@@ -91,7 +94,7 @@ def make_plan(project,revision,goal,assignments,specialist_limit,task_id):
     import uuid
     plan=dict(id=uuid.uuid4().hex,kind='change',policy_version=1,mode='python_fix',project_id=project['id'],project=project['name'],
               source_path=str(sources.root(project)),revision=revision,goal=policy.text(goal,'Goal',6000),
-              task_id=policy.text(task_id,'User task ID',80),source_scope=selected,tasks=tasks,recipe=copy.deepcopy(RECIPE),limits=_limits(tasks,specialist_limit))
+              task_id=policy.text(task_id,'User task ID',80),source_scope=selected,tasks=tasks,recipe=copy.deepcopy(RECIPE),limits=_limits(tasks,specialist_limit,token_budget))
     entries=sources.tree(project,revision)
     for name in write_paths(plan):
         if name in entries and name not in selected['paths']:raise ValueError('Existing writes must be selected committed sources.')
@@ -111,7 +114,7 @@ def validate_plan(plan):
         selected=sources.validate_scope(plan['source_scope'])
         if selected['revision']!=plan['revision'] or plan['recipe']!=RECIPE:raise ValueError('Invalid source scope or recipe.')
         tasks=_tasks(plan['tasks'],plan['limits']['specialist_limit'])
-        if tasks!=plan['tasks'] or plan['limits']!=_limits(tasks,plan['limits']['specialist_limit']):raise ValueError('Invalid editing limits or task order.')
+        if tasks!=plan['tasks'] or plan['limits']!=_limits(tasks,plan['limits']['specialist_limit'],budget.validate(plan['limits'].get('token_budget'))):raise ValueError('Invalid editing limits or task order.')
     except (KeyError,TypeError,AttributeError) as error:raise ValueError('Malformed editing plan.') from error
 
 

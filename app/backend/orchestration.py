@@ -9,6 +9,7 @@ import re
 from urllib.parse import urlsplit
 import uuid
 
+import budget
 import runner
 import sources
 
@@ -23,7 +24,7 @@ RESERVED_TASK_IDS = {'synthesis','combined','sources','events'}
 ROLES = {'web_searcher':{'name':'Web searcher','capabilities':['public_web_search']},
          'researcher':{'name':'Researcher','capabilities':['committed_snapshot','dependency_artifacts']},
          'reviewer':{'name':'Reviewer','capabilities':['committed_snapshot','dependency_artifacts']}}
-TERMINAL = {'completed','completed_unreviewed','accepted','needs_revision','blocked','failed','cancelled','interrupted','integrity_failed'}
+TERMINAL = {'completed','completed_unreviewed','accepted','needs_revision','blocked','failed','cancelled','interrupted','integrity_failed','budget_exhausted'}
 
 
 def object_schema(properties):
@@ -135,7 +136,7 @@ def plan_digest(plan):
     return digest({k:v for k,v in plan.items() if k!='digest'})
 
 
-def make_plan(project, revision, goal, tasks, *, specialist_limit=None, task_id=None):
+def make_plan(project, revision, goal, tasks, *, specialist_limit=None, task_id=None, token_budget=None):
     version=2 if specialist_limit is not None else 1
     tasks=validate_tasks(tasks,policy_version=version,specialist_limit=specialist_limit if version==2 else 3)
     plan={'id':uuid.uuid4().hex,'kind':'team','project_id':project['id'],'project':project['name'],
@@ -145,6 +146,7 @@ def make_plan(project, revision, goal, tasks, *, specialist_limit=None, task_id=
     if version==2:
         plan['policy_version']=2
         plan['limits']['specialist_limit']=validate_specialist_limit(specialist_limit)
+        if budget.validate(token_budget) is not None:plan['limits']['token_budget']=token_budget
     if task_id is not None:plan['task_id']=text(task_id,'User task ID',80)
     selected=sources.scope(project)
     if selected is not None:plan['source_scope']=copy.deepcopy(selected)
@@ -164,6 +166,7 @@ def validate_plan(plan):
     raw=[{k:v for k,v in task.items() if k not in ('role_version','capabilities')} for task in plan['tasks']]
     limits={'planning_calls':1,'max_calls':len(raw)+1,'stage_seconds':240,'retries':0}
     if version==2:limits['specialist_limit']=validate_specialist_limit(limit)
+    if version==2 and 'token_budget' in plan.get('limits',{}):limits['token_budget']=budget.validate(plan['limits']['token_budget'])
     if validate_tasks(raw,policy_version=version,specialist_limit=limit)!=plan['tasks'] or plan['limits']!=limits:
         raise ValueError('Invalid plan capabilities or usage limits.')
 
@@ -380,5 +383,5 @@ def interrupt(record, stage, detail):
         elif task['status'] in ('queued','waiting'):
             task['status']='blocked'
     for job in record['jobs']:
-        if job['status']=='reserved': job['status']=stage
+        if job['status']=='reserved': job['status']=stage if stage in ('cancelled','interrupted') else 'failed'
     runner.event(record,'Orchestrator',stage,detail)

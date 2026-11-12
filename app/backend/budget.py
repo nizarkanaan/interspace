@@ -42,9 +42,12 @@ def charge(usage):
     return values[0] + values[1]
 
 
+def estimate_chars(chars, role):
+    return PROVIDER_OVERHEAD_TOKENS + -(-chars // CHARS_PER_TOKEN) + OUTPUT_RESERVE.get(role, DEFAULT_OUTPUT_RESERVE)
+
+
 def estimate(prompt, role):
-    return (PROVIDER_OVERHEAD_TOKENS + -(-len(prompt) // CHARS_PER_TOKEN)
-            + OUTPUT_RESERVE.get(role, DEFAULT_OUTPUT_RESERVE))
+    return estimate_chars(len(prompt), role)
 
 
 def _entry_charge(entry):
@@ -91,7 +94,8 @@ def reserve(state, task, *, role, prompt, project_id, run_id=None, assignment_id
                             + ' tokens, but only ' + format(left, ',') + ' of ' + format(limit, ',')
                             + ' remain. No call was started. Raise the task budget, then request a new plan or approval.')
     entry = {'id': uuid.uuid4().hex, 'role': role, 'project_id': project_id, 'task_id': task['id'],
-             'tokens': None, 'outcome': 'reserved', 'estimate': need, 'charge_kind': 'reserved', 'charge': None}
+             'tokens': None, 'outcome': 'reserved', 'estimate': need, 'charge_kind': 'reserved', 'charge': None,
+             'prompt_chars': len(prompt)}
     if run_id is not None:
         entry['run_id'] = run_id
     if assignment_id is not None:
@@ -125,13 +129,27 @@ def recover(state):
             entry.update(charge_kind='estimated', charge=entry['estimate'], outcome='interrupted')
 
 
-def projection(state, task, calls):
-    """Projected use for planned (role, prompt) calls; None when the task has no budget."""
+def typical_prompt_chars(state, task_id):
+    """The task's most recent recorded prompt size: a rough proxy before exact prompts exist."""
+    for entry in reversed(state.get('usage', [])):
+        if isinstance(entry, dict) and entry.get('task_id') == task_id and type(entry.get('prompt_chars')) is int:
+            return entry['prompt_chars']
+    return 0
+
+
+def projection(state, task, roles):
+    """Projected use for planned calls (role names); None when the task has no budget.
+
+    `fits` uses the task's typical prompt size and is advisory. `first_fits` uses the smallest
+    possible call, so it is False only when the next call certainly cannot fit.
+    """
     limit = validate(task.get('token_budget'))
     if limit is None:
         return None
     totals = ledger(state, task['id'], limit)
-    needs = [estimate(prompt, role) for role, prompt in calls]
+    chars = typical_prompt_chars(state, task['id'])
+    projected = sum(estimate_chars(chars, role) for role in roles)
     base = totals['used'] + totals['reserved']
-    return {'budget': limit, 'used': totals['used'], 'remaining': totals['remaining'], 'projected': sum(needs),
-            'fits': base + sum(needs) <= limit, 'first_fits': not needs or base + needs[0] <= limit}
+    return {'budget': limit, 'used': totals['used'], 'reserved': totals['reserved'], 'remaining': totals['remaining'],
+            'projected': projected, 'calls': len(roles), 'fits': base + projected <= limit,
+            'first_fits': not roles or base + estimate_chars(0, roles[0]) <= limit}
