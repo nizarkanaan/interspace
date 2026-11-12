@@ -18,7 +18,7 @@ Date: 2026-11-11. Roadmap: `docs/superpowers/plans/2026-11-11-agentic-spaces-roa
   - `probe_offline.py`, `probe_sandbox.py` and `probe_roots*.py`: zero-model-call probes.
   - `probe_live.py`: the live probe.
   - Transcripts are under `runs/`. The live run is `runs/live-235156/`.
-- **Real calls:** the user approved 4 model turns. All 4 ran, in a disposable git repo `testrepo/`, with a spike-only `CODEX_HOME` signed in through device auth. Turns 3 and 4 failed: the spike picked a model the account cannot use (see [Model selection](#model-selection)). No further calls were made. One rate-limit event during the run reported the weekly Codex window nearly used, so more live checks should wait for the user.
+- **Real calls:** the user approved 4 model turns. All 4 ran, in a disposable git repo `testrepo/`, with a spike-only `CODEX_HOME` signed in through device auth. Turns 3 and 4 failed: the spike picked a model the account cannot use (see [Model selection](#model-selection)). One rate-limit event during the run reported the weekly Codex window nearly used. On 2026-11-12 the user approved exactly 2 more parallel turns on `gpt-6.1-sol`. Both completed (see [Several sessions at once](#several-sessions-at-once)). No other calls were made.
 
 ## Facts
 
@@ -262,7 +262,14 @@ enabled = false
 ### Several sessions at once
 
 - One app-server process held 3 threads at once (`thread/loaded/list`). A second app-server process with its own home ran at the same time.
-- Live: two threads on one process sent `turn/start` within the same millisecond. Both were processed independently. Both failed for the model reason below, so **parallel completed turns are not yet shown live**.
+- First live attempt: two threads on one process sent `turn/start` within the same millisecond. Both were processed independently, but both failed for the model reason below.
+- **Re-run on 2026-11-12, verified** (2 turns, approved by the user; `runs/parallel-002203/`):
+  - Two threads on one app-server process, both on `gpt-6.1-sol` with low effort, no MCP server and no tools.
+  - The two `turn/start` calls were sent 14 ms apart.
+  - Both turns completed with the reply `OK`. They were active at the same time: the first ran from 14 to 2,784 ms after the first `turn/start`, and the second from 28 to 3,401 ms.
+  - First text arrived after 2.7 s and 3.2 s, and the whole run took 3.4 s.
+  - Each turn made one model request of 21,060 tokens (21,055 input, of which 12,288 cached, and 5 output). That is the fixed context cost of a minimal turn.
+  - No rate-limit or usage error occurred.
 - Approvals are per thread: a pending approval blocks only its thread.
 - Recommended shape: **one app-server process per task**. That gives clean cancellation, cwd confinement (pitfall 2), per-task MCP children and simple crash isolation. Processes start in about 0.4 s and use one shared `CODEX_HOME`. Sharing one process across tasks is possible, but loses the per-process cwd protection.
 
@@ -317,7 +324,6 @@ Adopt `codex app-server` for Wave 2A with these rules:
 
 ## Open items (not verified)
 
-- Parallel turns that complete successfully on two threads. Re-run turns 3 and 4 with a model from the signed-in list, after the usage window resets and with the user's approval.
 - `allow_login_shell=false`, `shell_environment_policy`, and a network-proxy approval with `networkApprovalContext`.
 - Behaviour when an MCP server hangs, and when the app-server crashes mid-approval (whether pending requests replay).
 - Version drift: app-server is experimental, and dynamic tools and profiles are experimental or beta. Each CLI update needs a schema diff in CI.
