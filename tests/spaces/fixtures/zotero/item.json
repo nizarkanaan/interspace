@@ -1,0 +1,67 @@
+{
+ "key": "ITEM2222",
+ "version": 1203,
+ "library": {
+  "type": "user",
+  "id": 123456,
+  "name": "example-user",
+  "links": {
+   "alternate": {
+    "href": "https://www.zotero.org/example-user",
+    "type": "text/html"
+   }
+  }
+ },
+ "links": {
+  "self": {
+   "href": "http://localhost:23119/api/users/123456/items/ITEM2222",
+   "type": "application/json"
+  },
+  "alternate": {
+   "href": "https://www.zotero.org/example-user/items/ITEM2222",
+   "type": "text/html"
+  }
+ },
+ "meta": {
+  "creatorSummary": "Vaswani et al.",
+  "parsedDate": "2017-06-12",
+  "numChildren": 2
+ },
+ "data": {
+  "key": "ITEM2222",
+  "version": 1203,
+  "itemType": "journalArticle",
+  "title": "Attention Is All You Need",
+  "creators": [
+   {
+    "creatorType": "author",
+    "firstName": "Ashish",
+    "lastName": "Vaswani"
+   },
+   {
+    "creatorType": "author",
+    "name": "Example Lab"
+   }
+  ],
+  "abstractNote": "We propose a new simple network architecture.",
+  "publicationTitle": "Example Proceedings",
+  "date": "2017-06-12",
+  "DOI": "10.0000/example.1",
+  "url": "https://example.org/paper",
+  "tags": [
+   {
+    "tag": "ml"
+   }
+  ],
+  "collections": [
+   "CL222222"
+  ],
+  "relations": {
+   "dc:replaces": [
+    "x"
+   ]
+  },
+  "dateAdded": "2026-11-01T09:00:00Z",
+  "dateModified": "2026-11-10T18:02:11Z"
+ }
+}

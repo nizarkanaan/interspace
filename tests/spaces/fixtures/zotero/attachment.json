@@ -1,0 +1,43 @@
+{
+ "key": "ATT22222",
+ "version": 1205,
+ "library": {
+  "type": "user",
+  "id": 123456,
+  "name": "example-user",
+  "links": {
+   "alternate": {
+    "href": "https://www.zotero.org/example-user",
+    "type": "text/html"
+   }
+  }
+ },
+ "links": {
+  "self": {
+   "href": "http://localhost:23119/api/users/123456/items/ATT22222",
+   "type": "application/json"
+  },
+  "alternate": {
+   "href": "https://www.zotero.org/example-user/items/ATT22222",
+   "type": "text/html"
+  }
+ },
+ "meta": {
+  "numChildren": 0
+ },
+ "data": {
+  "key": "ATT22222",
+  "version": 1205,
+  "itemType": "attachment",
+  "parentItem": "ITEM2222",
+  "linkMode": "imported_url",
+  "title": "Full Text PDF",
+  "contentType": "application/pdf",
+  "filename": "vaswani-2017.pdf",
+  "url": "https://example.org/paper.pdf",
+  "tags": [],
+  "relations": {},
+  "dateAdded": "2026-11-01T09:00:05Z",
+  "dateModified": "2026-11-01T09:00:05Z"
+ }
+}

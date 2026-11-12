@@ -1,0 +1,41 @@
+{
+ "successful": {
+  "0": {
+   "key": "ITEM4444",
+   "version": 1300,
+   "library": {
+    "type": "user",
+    "id": 123456,
+    "name": "example-user",
+    "links": {
+     "alternate": {
+      "href": "https://www.zotero.org/example-user",
+      "type": "text/html"
+     }
+    }
+   },
+   "links": {
+    "self": {
+     "href": "http://localhost:23119/api/users/123456/items/ITEM4444",
+     "type": "application/json"
+    },
+    "alternate": {
+     "href": "https://www.zotero.org/example-user/items/ITEM4444",
+     "type": "text/html"
+    }
+   },
+   "meta": {},
+   "data": {
+    "key": "ITEM4444",
+    "version": 1300,
+    "itemType": "book",
+    "title": "New paper"
+   }
+  }
+ },
+ "success": {
+  "0": "ITEM4444"
+ },
+ "unchanged": {},
+ "failed": {}
+}
