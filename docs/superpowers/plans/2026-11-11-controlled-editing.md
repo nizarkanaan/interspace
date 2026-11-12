@@ -75,9 +75,9 @@
 
 **Interfaces:** `window.interspaceChanges` exposes `isChange`, `renderPlan`, `items`, `renderResults`, mirroring existing team renderer dependencies. Add mode choice with plain labels, exact candidate approval and reviewed Apply actions, readable diff/check output, and evidence route through `change_evidence`. Native bridge remains enumerated; no local server.
 
-- [ ] Add a failing browser journey using actual editing public state: mode/default, plan scopes, generated candidate, checks pause, status transitions, revision/failure, reviewed Apply, stale owner/approval and untrusted text. Observe the failure before UI implementation.
-- [ ] Implement controls and static role mapping using existing builder/reviewer artwork. Keep result first, exact action consequences readable, and technical logs secondary. Preserve all existing task/source/project/legacy journeys and owner/draft protections.
-- [ ] Run backend suites on Python 3.14 and Apple 3.9 sequentially, source and packaged browser journeys (including light/dark and widths 320/390/760/1024/1280), syntax/generated checks, build and signature/resource checks. Expected: pass, with genuine unavailable checks reported explicitly.
+- [x] Add a failing browser journey using actual editing public state: mode/default, plan scopes, generated candidate, checks pause, status transitions, revision/failure, reviewed Apply, stale owner/approval and untrusted text. Observe the failure before UI implementation.
+- [x] Implement controls and static role mapping using existing builder/reviewer artwork. Keep result first, exact action consequences readable, and technical logs secondary. Preserve all existing task/source/project/legacy journeys and owner/draft protections.
+- [x] Run backend suites on Python 3.14 and Apple 3.9 sequentially, source and packaged browser journeys (including light/dark and widths 320/390/760/1024/1280), syntax/generated checks, build and signature/resource checks. Expected: pass, with genuine unavailable checks reported explicitly.
 ## Coordinator closeout after the four implementation gates
 
 These steps remain required, but are owned by the coordinator rather than the UI implementer. Complete the four scoped code gates before the whole-feature review; complete that review before any live generated-code execution or source application.
