@@ -287,6 +287,29 @@ def default(task, project_ids, *, access='write'):
     return validate(document)
 
 
+DRAFT_TASK_ID = 'draft'  # Placeholder until agent_create assigns the real task ID.
+
+
+def project_default(project_id, *, token_budget=None, project_ids=None):
+    """`scope_default {project_id}`: the scope the new agent task form starts from.
+
+    The project's workspace is readable and writable and workspace commands run without asking.
+    No apps, no command network and no web search: the user widens the scope in the editor.
+    `token_budget` is the project's budget, or budget.DEFAULT_BUDGET when it has none.
+    """
+    _check_id(project_id, 'Project ID')
+    document = {
+        'v': VERSION, 'task_id': DRAFT_TASK_ID, 'version': 1,
+        'projects': [{'project_id': project_id, 'access': 'write', 'read': ['**'], 'write': ['**'], 'deny': []}],
+        'commands': {'workspace': 'allow', 'allow': [], 'deny': []},
+        'network': {'default': 'deny', 'allow_hosts': [], 'deny_hosts': []},
+        'apps': [], 'web_search': 'deny',
+        'limits': {'token_budget': budget.DEFAULT_BUDGET if token_budget is None else token_budget,
+                   'time_limit_s': DEFAULT_TIME_LIMIT_S},
+    }
+    return validate(document, project_ids=project_ids)
+
+
 # ---------------------------------------------------------------- approval and edits
 
 def is_approved(document, approval):

@@ -8,6 +8,7 @@ import sys
 import tempfile
 import threading
 import time
+import types
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -466,6 +467,120 @@ class AgentModeTests(unittest.TestCase):
             tasks.validate_mode('chaos')
         legacy = tasks.create('B')
         self.assertNotIn('agent', legacy)
+
+
+class RuntimeWiringTests(ApplicationCase):
+    """Without an injected factory the service asks 2A's `runtime.make_factory(app)`, else fails closed."""
+
+    def open_default(self, module):
+        saved = sys.modules.get('runtime', 'missing')
+        sys.modules['runtime'] = module  # None makes `import runtime` raise ImportError.
+
+        def restore():
+            if saved == 'missing':
+                sys.modules.pop('runtime', None)
+            else:
+                sys.modules['runtime'] = saved
+        self.addCleanup(restore)
+        self.out = Output()
+        app = service.Application(self.root / 'data', provider=FakeProvider(), emit=self.out, scope_api=self.scope,
+                                  audit_api=self.audit, connector_factory=lambda name: FakeSpacesConnector(name),
+                                  interrupt_grace_s=0.2)
+        self.addCleanup(app.scheduler.shutdown, 5)
+        return app
+
+    def test_runtime_module_factory_is_used(self):
+        module = types.ModuleType('runtime')
+        made = []
+
+        def make_factory(app):
+            made.append(app)
+            return lambda task_id: self.runtime
+        module.make_factory = make_factory
+        app = self.open_default(module)
+        self.assertEqual(made, [app])
+        project_id = self.add_project(app)
+        task_id = self.create(app, project_id)
+        app.handle('agent_message', {'task_id': task_id, 'text': 'go', 'client_id': 'c1'})
+        wait_for(lambda: self.agent_state(app, task_id) == 'idle')
+        self.assertEqual(self.runtime.turns, [(task_id, 'go')])
+
+    def test_missing_module_falls_back_to_no_runtime(self):
+        for module in (None, types.ModuleType('runtime')):  # Absent, or present without make_factory.
+            app = self.open_default(module)
+            project_id = self.add_project(app)
+            task_id = self.create(app, project_id)
+            app.handle('agent_message', {'task_id': task_id, 'text': 'go', 'client_id': 'c1'})
+            wait_for(lambda: self.agent_state(app, task_id) == 'failed')
+            errors = [m['event']['data'] for m in self.out.of_type('event')
+                      if m['event']['task_id'] == task_id and m['event']['kind'] == 'error']
+            self.assertEqual([e['code'] for e in errors], ['runtime_unavailable'])
+            app.scheduler.shutdown(5)
+
+    def test_broken_factory_builder_fails_closed(self):
+        module = types.ModuleType('runtime')
+
+        def make_factory(app):
+            raise RuntimeError('codex binary missing')
+        module.make_factory = make_factory
+        app = self.open_default(module)
+        project_id = self.add_project(app)
+        task_id = self.create(app, project_id)
+        app.handle('agent_message', {'task_id': task_id, 'text': 'go', 'client_id': 'c1'})
+        wait_for(lambda: self.agent_state(app, task_id) == 'failed')
+
+
+class AgentProviderTests(ApplicationCase):
+    """The runtime choice (`provider`: codex or claude) and optional model are stored on the agent task row."""
+
+    def test_defaults_to_codex_without_a_model(self):
+        app = self.open()
+        project_id = self.add_project(app)
+        task_id = app.handle('agent_create', {'project_id': project_id, 'title': 'Fix it', 'scope': None})['task_id']
+        with app.lock:
+            task = app.store.task(task_id)
+        self.assertEqual((task['provider'], task['model']), ('codex', None))
+        public = app.handle('state', {})
+        self.assertEqual([t['provider'] for t in public['tasks'] if t['id'] == task_id], ['codex'])
+        self.assertEqual((public['task']['agent']['provider'], public['task']['agent']['model']), ('codex', None))
+
+    def test_claude_and_model_are_stored(self):
+        app = self.open()
+        project_id = self.add_project(app)
+        task_id = app.handle('agent_create', {'project_id': project_id, 'title': 'Fix it', 'scope': None,
+                                              'provider': 'claude', 'model': ' claude-opus-5-5 '})['task_id']
+        with app.lock:
+            task = app.store.task(task_id)
+        self.assertEqual((task['provider'], task['model']), ('claude', 'claude-opus-5-5'))
+        self.assertEqual([t['provider'] for t in app.handle('state', {})['tasks'] if t['id'] == task_id], ['claude'])
+
+    def test_invalid_provider_or_model_is_refused_before_anything_is_saved(self):
+        app = self.open()
+        project_id = self.add_project(app)
+        for extra in ({'provider': 'gpt'}, {'provider': None}, {'model': 7}, {'model': 'x' * 129},
+                      {'model': 'bad model'}, {'model': '--yolo'}):
+            with self.assertRaisesRegex(ValueError, 'runtime|model'):
+                app.handle('agent_create', dict({'project_id': project_id, 'title': 'Fix it', 'scope': None}, **extra))
+        with app.lock:
+            self.assertEqual(list(app.state['projects'][project_id].get('tasks', {})), [])
+        self.assertEqual(self.audit.records, [])
+        self.assertEqual(app.handle('agent_create', {'project_id': project_id, 'title': 'X', 'scope': None,
+                                                     'model': ''})['task_id'] != '', True, 'empty model means default')
+
+    def test_saved_rows_are_validated(self):
+        task = tasks.create('A', mode='agent', project_id='p1')
+        self.assertEqual((task['provider'], task['model']), ('codex', None))
+        del task['provider'], task['model']
+        tasks.validate(task, task['id'])  # Agent tasks saved before Wave 2 run on Codex.
+        self.assertEqual(tasks.provider(task), 'codex')
+        for bad in ({'provider': 'other'}, {'model': 5}):
+            broken = dict(task, **bad)
+            with self.assertRaises(ValueError):
+                tasks.validate(broken, task['id'])
+        legacy = tasks.create('B')
+        self.assertNotIn('provider', legacy)
+        with self.assertRaises(ValueError):
+            tasks.create('C', provider='claude')  # Only agent tasks choose a runtime.
 
 
 class ProviderBudgetTests(unittest.TestCase):

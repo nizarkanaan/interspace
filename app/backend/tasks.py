@@ -1,6 +1,7 @@
 """Task metadata and exact ownership, independent of the selected UI context."""
 import hashlib
 import json
+import re
 from pathlib import Path
 import uuid
 
@@ -11,6 +12,10 @@ MODES = ('review','python_fix','agent')
 # Agent task run states (events.md `status`); None means no turn has started yet.
 AGENT_STATES = ('queued','starting','running','waiting_lock','paused_ask','paused_scope','idle','cancelling',
                 'completed','failed','cancelled','budget_exhausted','time_limit','interrupted')
+# Agent runtimes (scheduler.md runtime adapter): Codex app-server (2A) or Claude Code (2B).
+PROVIDERS = ('codex','claude')
+DEFAULT_PROVIDER = 'codex'
+MODEL = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:/\[\]-]{0,127}$')
 
 
 def title(value):
@@ -30,14 +35,38 @@ def validate_mode(value):
     return value
 
 
-def create(name='New task', specialist_limit=6, draft='', mode='review', token_budget=budget.DEFAULT_BUDGET, project_id=None):
+def validate_provider(value):
+    if value not in PROVIDERS:raise ValueError('Choose the codex or claude runtime.')
+    return value
+
+
+def validate_model(value):
+    """An optional model name passed to the runtime; None (or blank) means the runtime's default."""
+    if value is None:return None
+    if not isinstance(value,str):raise ValueError('The model must be a model name.')
+    value=value.strip()
+    if not value:return None
+    if not MODEL.match(value):raise ValueError('The model must be a model name of at most 128 letters, digits and . _ : / - [ ].')
+    return value
+
+
+def provider(task):
+    """The runtime an agent task runs on; agent tasks saved before Wave 2 run on Codex."""
+    return task.get('provider',DEFAULT_PROVIDER)
+
+
+def create(name='New task', specialist_limit=6, draft='', mode='review', token_budget=budget.DEFAULT_BUDGET, project_id=None,
+           provider=None, model=None):
     task={'id':uuid.uuid4().hex,'title':title(name),'mode':validate_mode(mode),
           'specialist_limit':orchestration.validate_specialist_limit(specialist_limit),'draft':draft_text(draft),
           'token_budget':budget.validate(token_budget),'thread':[],'pending':None,'run_id':None,'run_ids':[],'error':'','error_status':None}
+    if mode!='agent' and (provider is not None or model is not None):
+        raise ValueError('Only agent tasks choose a runtime or model.')
     if mode=='agent':
         # The scope (scope.md) is attached by the caller, which needs the task ID to build it.
         if not isinstance(project_id,str) or not project_id:raise ValueError('An agent task needs a project.')
-        task.update(scope=None,scope_approval=None,
+        task.update(scope=None,scope_approval=None,provider=validate_provider(DEFAULT_PROVIDER if provider is None else provider),
+                    model=validate_model(model),
                     agent={'project_id':project_id,'state':None,'detail':'','reason':None,'turns':0,'active_s':0.0,'workspaces':{}})
     return task
 
@@ -49,6 +78,8 @@ def validate_agent(task):
     if agent.get('state') is not None and agent['state'] not in AGENT_STATES:raise ValueError()
     if type(agent.get('turns',0)) is not int or not isinstance(agent.get('workspaces',{}),dict):raise ValueError()
     if not isinstance(agent.get('active_s',0.0),(int,float)) or isinstance(agent.get('active_s'),bool):raise ValueError()
+    validate_provider(task.get('provider',DEFAULT_PROVIDER))
+    if validate_model(task.get('model'))!=task.get('model'):raise ValueError()
     if task.get('scope') is not None and not isinstance(task['scope'],dict):raise ValueError()
     if task.get('scope_approval') is not None and not isinstance(task['scope_approval'],dict):raise ValueError()
 

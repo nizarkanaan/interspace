@@ -58,11 +58,11 @@ function render(){if(!state)return;
  $('breadcrumb').textContent=view==='workspace'?'Your workspace':state.project||'Your workspace';
  $('project-name').textContent=state.project||'Add a project to choose sources.';
  $('connection').textContent=state.connection?.message||'Not checked';
- $('project-conversation').disabled=!state.project_id;$('new-task').hidden=view==='new';$('new-task').disabled=!state.project_id||!!state.active;
+ $('project-conversation').disabled=!state.project_id;$('new-task').hidden=view==='new';$('new-task').disabled=!state.project_id;
  $('task-desk').hidden=view!=='tasks';$('new-task-panel').hidden=view!=='new';$('settings').hidden=view!=='settings';$('task-detail').hidden=!detail;
  $('task-project').textContent=state.project||'No project selected';$('task-count').textContent=(state.tasks||[]).length+' tasks';$('desk-tasks').replaceChildren();
  $('desk-empty').hidden=!!state.tasks?.length;
- for(const t of state.tasks||[]){const row=node('button','',$('desk-tasks'));row.className='desk-task';row.dataset.openTask=t.id;row.disabled=t.status==='unavailable';const title=node('div','',row);node('strong',t.title,title);node('small',t.status==='unavailable'?'Saved data unavailable — other tasks remain usable':t.mode==='agent'?'Agent task · workspace branch':t.run_count+' runs · specialist allowance '+t.specialist_limit,title);node('span',t.status.replaceAll('_',' '),row);row.onclick=()=>openTask(t.id);}
+ for(const t of state.tasks||[]){const row=node('button','',$('desk-tasks'));row.className='desk-task';row.dataset.openTask=t.id;row.disabled=t.status==='unavailable';const title=node('div','',row);node('strong',t.title,title);node('small',t.status==='unavailable'?'Saved data unavailable — other tasks remain usable':t.mode==='agent'?'Agent task · '+window.interspaceAgentNew.runtimeName(t.provider||'codex')+(t.model?' · '+t.model:'')+' · own task branch':t.run_count+' runs · specialist allowance '+t.specialist_limit,title);node('span',t.status.replaceAll('_',' '),row);row.onclick=()=>openTask(t.id);}
  $('task-meta').textContent=task?(task.mode==='python_fix'?'Python fix':'Read-only review')+' · Specialist allowance '+task.specialist_limit+' · '+(state.tasks?.find(t=>t.id===task.id)?.status||'draft').replaceAll('_',' '):'';
  document.querySelectorAll('[data-task-tab]').forEach(b=>b.setAttribute('aria-pressed',String(taskTab===b.dataset.taskTab)));
  $('task-allowance').hidden=!detail||taskTab!=='plan';if(task&&document.activeElement!==$('task-limit'))$('task-limit').value=task.specialist_limit;
@@ -97,8 +97,18 @@ function render(){if(!state)return;
  window.interspaceAgent.render(state,view);window.interspaceSpaces.render(state,view);
 }
 function startRequest(method,params){const epoch=selectionEpoch,current={project_id:params.project_id,task_id:params.task_id??null};return request(method,params).then(result=>{if(epoch===selectionEpoch&&sameOwner(current)&&(method!=='start_change'||state.pending?.digest===params.plan_digest||state.run?.plan?.digest===params.plan_digest&&['queued','running'].includes(state.run.stage))){taskTab='activity';render();}return result;});}
-function renderNew(){const d=newDrafts.get(state.project_id)||{goal:'',limit:'6',mode:'review',budget:'250000'};$('new-project').textContent=state.project;$('new-goal').value=d.goal;$('new-limit').value=d.limit;$('new-budget').value=d.budget||'250000';$('new-mode').value=d.mode||'review';$('new-mode-note').textContent=d.mode==='python_fix'?'Propose bounded Python replacements in an app-owned copy. Running checks and applying to the original project each need your exact approval. Mode is fixed when the task is created.':'Review approved committed evidence. The source project is never edited or executed. Mode is fixed when the task is created.';$('new-sources').textContent=sourceBlocked()?'Save project sources in Settings before requesting a plan. You can create a local draft now.':'Uses this project’s saved committed sources. Planning uses one call from your connected account; drafts stay local.';$('propose-task').disabled=creating||!!state.active||sourceBlocked();$('create-draft').disabled=creating||!!state.active;}
-function saveNew(){if(state)newDrafts.set(state.project_id,{goal:$('new-goal').value,limit:$('new-limit').value,mode:$('new-mode').value,budget:$('new-budget').value});}
+function renderNew(){const d=newDrafts.get(state.project_id)||{goal:'',limit:'6',mode:'review',budget:'250000'};$('new-project').textContent=state.project;$('new-goal').value=d.goal;$('new-limit').value=d.limit;$('new-budget').value=d.budget||'250000';$('new-mode').value=d.mode||'review';
+ const agent=d.mode==='agent';$('new-agent-fields').hidden=!agent;$('new-legacy-fields').hidden=agent;$('create-draft').hidden=agent;$('new-source-settings').hidden=agent;$('new-goal').required=!agent;
+ $('new-goal-label').textContent=agent?'First message (optional: it waits in the task’s composer until you approve the scope)':'What would you like to work on?';$('propose-task').textContent=agent?'Review scope':'Propose a plan';
+ if(agent){$('new-mode-note').textContent='Runs Codex or Claude Code in its own copy of the project and commits to an interspace/task-… branch you merge. Next you review its scope; nothing runs until you approve it. Several agent tasks can run at once.';window.interspaceAgentNew.fill(d,state);window.interspaceAgentNew.render(state);return;}
+ $('new-task-form').hidden=false;$('new-agent-scope').hidden=true;$('new-sources').hidden=false;$('new-mode-note').textContent=d.mode==='python_fix'?'Propose bounded Python replacements in an app-owned copy. Running checks and applying to the original project each need your exact approval. Mode is fixed when the task is created.':'Review approved committed evidence. The source project is never edited or executed. Mode is fixed when the task is created.';$('new-sources').textContent=sourceBlocked()?'Save project sources in Settings before requesting a plan. You can create a local draft now.':'Uses this project’s saved committed sources. Planning uses one call from your connected account; drafts stay local.';$('propose-task').disabled=creating||!!state.active||sourceBlocked();$('create-draft').disabled=creating||!!state.active;}
+function saveNew(){if(state)newDrafts.set(state.project_id,{goal:$('new-goal').value,limit:$('new-limit').value,mode:$('new-mode').value,budget:$('new-budget').value,...window.interspaceAgentNew.read()});}
+async function agentCreated({task_id,project_id,desk,goal}){
+ newDrafts.delete(desk);if(goal)window.interspaceAgent.setDraft(task_id,goal);
+ if(view!=='new'||state?.project_id!==desk)return;
+ if(project_id!==state.project_id){const epoch=++selectionEpoch;try{await request('switch_project',{project_id});}catch{return;}if(epoch!==selectionEpoch)return;}
+ openAgent(task_id);
+}
 function tokens(n){return Number(n).toLocaleString('en-US');}
 function tokenLine(t){if(!t)return '';const head=t.budget==null?'Tokens '+tokens(t.used)+' used · No budget set (set one on the Plan tab)':'Tokens '+tokens(t.used)+' / '+tokens(t.budget);const extra=[];if(t.reserved)extra.push(tokens(t.reserved)+' reserved for a running call');if(t.estimated)extra.push(tokens(t.estimated)+' estimated');if(t.unknown)extra.push(t.unknown+' older call'+(t.unknown===1?'':'s')+' without counts');if(t.overshoot)extra.push('over budget by '+tokens(t.overshoot));return head+(extra.length?' · '+extra.join(' · '):'');}
 function projectionText(p,subject){let text=tokens(Math.max(0,p.remaining))+' of '+tokens(p.budget)+' tokens remain. '+subject+'\'s '+p.calls+' call'+(p.calls===1?' is':'s are')+' estimated at about '+tokens(p.projected)+' tokens.';if(!p.first_fits)text+=' Not even the smallest next call fits: raise the token budget before starting.';else if(!p.fits)text+=' This will likely stop early with budget exhausted; completed work would be kept.';return text;}
@@ -135,7 +145,10 @@ document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>navigate(b.dat
 document.querySelectorAll('[data-task-tab]').forEach(b=>b.onclick=()=>{taskTab=b.dataset.taskTab;render();});
 $('new-task').onclick=()=>navigate('new');$('back-tasks').onclick=()=>navigate('tasks');
 $('new-goal').oninput=saveNew;$('new-mode').onchange=()=>{saveNew();renderNew();};$('new-limit').oninput=()=>{$('new-limit').setCustomValidity('');saveNew();};$('new-budget').oninput=()=>{$('new-budget').setCustomValidity('');saveNew();};
-$('new-task-form').onsubmit=e=>{e.preventDefault();createTask(true);};$('create-draft').onclick=()=>createTask(false);
+$('new-task-form').onsubmit=e=>{e.preventDefault();if($('new-mode').value==='agent')window.interspaceAgentNew.review();else createTask(true);};
+for(const id of ['new-title','new-model'])$(id).oninput=()=>{$(id).setCustomValidity('');saveNew();};
+for(const id of ['new-agent-project','new-runtime'])$(id).onchange=saveNew;
+window.interspaceAgentNew.init({request,refresh:()=>{if(state&&view==='new')renderNew();},created:agentCreated});$('create-draft').onclick=()=>createTask(false);
 $('new-source-settings').onclick=()=>navigate('settings');
 document.querySelectorAll('[data-space]').forEach(b=>b.onclick=()=>{window.interspaceSpaces.select(b.dataset.space);navigate('space');});
 window.interspaceAgent.init({request,navigate,openAgent});

@@ -56,6 +56,7 @@ function head(container,id){
  container.replaceChildren();
  el('p','agent-status',S.statusText(status(id)),container).setAttribute('role','status');
  const b=S.budget(id),q=scheduled(id);el('p','agent-budget footnote',b?S.budgetText(b):q?.tokens?'Tokens '+tokens(q.tokens.used)+' / '+tokens(q.tokens.budget):'',container);
+ const r=row(id);if(r?.provider)el('p','footnote','Runtime '+window.interspaceAgentNew.runtimeName(r.provider)+(r.model?' · '+r.model:' · default model'),container);
  const w=S.workspace(id);if(w)el('p','footnote mono','Branch '+w.branch+' · base '+w.base_commit,container);
 }
 function scopeArea(id){
@@ -113,6 +114,7 @@ window.interspaceAgent={
   $('agent-stop').onclick=()=>cancel(current);$('agent-back').onclick=()=>host.navigate('tasks');
  },
  isAgent,title:()=>title(current),insertMention,
+ setDraft(id,text){drafts.set(id,text);if(current===id)shownDraftFor=null;},
  open(id){current=id;lastAgent=id;S.sync(id);if(!scopes.has(id)||!scopeInfo(id).scope)loadScope(id);},
  render(nextState,nextView){state=nextState;view=nextView;refresh();}
 };

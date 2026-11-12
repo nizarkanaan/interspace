@@ -43,7 +43,7 @@ RESULT_SCHEMA = {'type':'object','additionalProperties':False,'properties':{
 
 SPACES_APPS = ('notion', 'github', 'gdrive', 'zotero')
 AGENT_METHODS = ('agent_create', 'agent_message', 'agent_answer', 'agent_cancel', 'task_events', 'task_blob',
-                 'scope_get', 'scope_update', 'scope_approve', 'scheduler_settings')
+                 'scope_get', 'scope_update', 'scope_approve', 'scope_default', 'scheduler_settings')
 KEYCHAIN_TIMEOUT_S = 10  # PROVISIONAL(0C-1)
 STATE_PUBLISH_INTERVAL_S = 0.25  # At most 4 coarse state updates per second (scheduler.md).
 
@@ -577,11 +577,26 @@ class Application:
             max_running = scheduler.DEFAULT_MAX_RUNNING
         self.spaces = SpacesHub(self, connector_factory or default_connector_factory(self))
         self.scheduler = scheduler.Scheduler(
-            max_running=max_running, runtime_factory=runtime_factory or self.no_runtime, policy=self.scope,
+            max_running=max_running, runtime_factory=runtime_factory or self.default_runtime_factory(), policy=self.scope,
             audit=self.audit, events=self.events, budget_gate=scheduler.BudgetGate(self.store), locks=self.locks,
             clock=time.time, tasks=self.store, workspaces=scheduler.Workspaces(self.storage/'workspaces'),
             app_tools=self.agent_tool, legacy_active=lambda: bool(self.state['active']),
             interrupt_grace_s=interrupt_grace_s, decide_options={'app_data':str(self.storage)})
+
+    def default_runtime_factory(self):
+        """2A's `runtime.make_factory(app)` -> `runtime_factory(task_id)`; `no_runtime` while it is absent or broken.
+
+        The factory reads the task's `provider` (codex or claude) and `model` from `app.store.task(task_id)`.
+        """
+        module = optional_module('runtime')
+        make = getattr(module, 'make_factory', None)
+        if not callable(make):
+            return self.no_runtime
+        try:
+            factory = make(self)
+        except Exception:
+            return self.no_runtime  # Agent turns then fail closed with runtime_unavailable; the app still opens.
+        return factory if callable(factory) else self.no_runtime
 
     @staticmethod
     def no_runtime(task_id):
@@ -701,8 +716,10 @@ class Application:
                 if task.get('mode')=='agent':status=task['agent'].get('state') or 'draft'
                 if self.state['active_project_id']==project['id'] and self.state.get('active_task_id')==identity and self.state['active']:
                     status='active'
-                result.append(dict(id=identity,title=task['title'],specialist_limit=task['specialist_limit'],
-                                   mode=task.get('mode','review'),status=status,run_count=len(task['run_ids']),has_pending_plan=bool(task['pending'])))
+                row=dict(id=identity,title=task['title'],specialist_limit=task['specialist_limit'],
+                         mode=task.get('mode','review'),status=status,run_count=len(task['run_ids']),has_pending_plan=bool(task['pending']))
+                if row['mode']=='agent':row.update(provider=tasks.provider(task),model=task.get('model'))
+                result.append(row)
             except ValueError:
                 result.append(dict(id=identity,title='Unavailable saved task',specialist_limit=None,
                                    status='unavailable',run_count=0,has_pending_plan=False))
@@ -799,6 +816,7 @@ class Application:
         except (KeyError,TypeError,ValueError):approved=False
         agent=task['agent']
         return {'state':agent.get('state'),'detail':agent.get('detail',''),'reason':agent.get('reason'),
+                'provider':tasks.provider(task),'model':task.get('model'),
                 'scope_version':scope.get('version'),'scope_approved':approved,'project_id':agent['project_id'],
                 'last_seq':self.events.last_seq(task['id'])}
 
@@ -1113,6 +1131,8 @@ class Application:
             return {'max_running':self.scheduler.max_running}
         if method=='agent_create':
             return self.agent_create(params)
+        if method=='scope_default':
+            return self.scope_default(params)
         task_id=params.get('task_id')
         with self.lock:
             task=self.store.task(task_id)
@@ -1156,13 +1176,27 @@ class Application:
                            {'scope_version':task['scope']['version'],'scope_digest':self.scope.digest(task['scope']),
                             'change':change,'by':'user','summary':summary})
 
+    def scope_default(self, params):
+        """The starting scope for the new agent task form; creates nothing (README coordinator ruling)."""
+        with self.lock:
+            project_id=params.get('project_id')
+            project=self.state['projects'].get(project_id) if isinstance(project_id,str) else None
+            if project is None:raise ValueError('Unknown project.')
+            try:limit=budget.validate(project.get('token_budget'))
+            except ValueError:limit=None  # A damaged saved project budget falls back to the default.
+            builder=getattr(self.scope.module,'project_default',None) if self.scope.module is not None else None
+            if builder is None:raise ValueError('Agent tasks need the scope engine, which is not in this build yet.')
+            return {'scope':builder(project_id,token_budget=limit,project_ids=list(self.state['projects']))}
+
     def agent_create(self, params):
         with self.lock:
             project_id=params.get('project_id')
             project=self.state['projects'].get(project_id) if isinstance(project_id,str) else None
             if project is None:raise ValueError('Unknown project.')
             if not isinstance(project.get('tasks',{}),dict):raise ValueError('Saved tasks are unavailable; preserve app data before recovery.')
-            task=tasks.create(params.get('title','New agent task'),mode='agent',project_id=project_id)
+            runtime=tasks.validate_provider(params.get('provider',tasks.DEFAULT_PROVIDER))
+            task=tasks.create(params.get('title','New agent task'),mode='agent',project_id=project_id,
+                              provider=runtime,model=tasks.validate_model(params.get('model')))
             proposed=params.get('scope')
             document=self.scope.default(task,[project_id]) if proposed is None else copy.deepcopy(proposed)
             if not isinstance(document,dict):raise ValueError('Scope must be an object.')
