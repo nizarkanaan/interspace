@@ -198,10 +198,14 @@ class ProjectTests(unittest.TestCase):
         legacy={'version':1,'project_path':str(self.source),'threads':{'workspace':[{'role':'user','text':'Workspace history'}],'project':[{'role':'user','text':'Private history'}]},'pending':{'id':'kept','goal':'Review'},'run_id':run.name,'active':None,'error':'','usage':[{'role':'Researcher','run_id':run.name,'tokens':{}}],'connection':{'ready':True,'message':'Connected'}}
         original=json.dumps(legacy).encode(); (storage/'state.json').write_bytes(original)
         app=Application(storage,provider=RecordingProvider())
-        self.assertEqual(app.public()['version'],2)
-        self.assertEqual(app.public()['threads'],legacy['threads'])
+        self.assertEqual(app.public()['version'],4)
+        self.assertEqual(app.public()['threads'],dict(legacy['threads'],task=[]))
+        self.assertTrue(all(t['token_budget'] is None for t in app.state['projects'][app.public()['project_id']]['tasks'].values()))
         self.assertEqual(app.public()['pending']['id'],'kept')
-        self.assertEqual(app.public()['run']['id'],run.name)
+        self.assertIsNone(app.public()['run'])  # Pending proposal has its own imported task.
+        run_task=next(t for t in app.state['projects'][app.public()['project_id']]['tasks'].values() if run.name in t['run_ids'])
+        self.assertEqual(run_task['run_id'],run.name)
+        self.assertTrue((storage/'state.v2-backup.json').exists())
         self.assertEqual((storage/'state.v1-backup.json').read_bytes(),original)
         Application(storage,provider=RecordingProvider())
         self.assertEqual((storage/'state.v1-backup.json').read_bytes(),original)
@@ -249,6 +253,35 @@ class ProjectTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'version|schema'):
             Application(storage,provider=RecordingProvider())
         self.assertEqual((storage/'state.json').read_text(),original)
+
+    def test_v3_migration_adds_null_budgets_once_and_preserves_usage(self):
+        self.setup_app();self.switch(self.a)
+        project=self.app.state['projects'][self.a]
+        tid=self.app.handle('create_task',{'project_id':self.a,'title':'Existing task'})['task_id']
+        for task in project['tasks'].values():task.pop('token_budget')
+        self.app.state['version']=3
+        self.app.state['usage'].append({'role':'Orchestrator','task_id':tid,'project_id':self.a,'tokens':{'input_tokens':10,'output_tokens':2}})
+        self.app.persist();original=(self.app.storage/'state.json').read_bytes()
+        migrated=Application(self.app.storage,provider=RecordingProvider())
+        self.assertEqual(migrated.state['version'],4)
+        self.assertIsNone(migrated.state['projects'][self.a]['tasks'][tid]['token_budget'])
+        self.assertEqual((self.app.storage/'state.v3-backup.json').read_bytes(),original)
+        self.assertEqual(migrated.state['usage'][-1]['tokens'],{'input_tokens':10,'output_tokens':2})
+        migrated.handle('switch_project',{'project_id':self.a});migrated.handle('select_task',{'project_id':self.a,'task_id':tid})
+        self.assertEqual(migrated.public()['task']['tokens']['used'],12);self.assertIsNone(migrated.public()['task']['tokens']['budget'])
+        Application(self.app.storage,provider=RecordingProvider())
+        self.assertEqual((self.app.storage/'state.v3-backup.json').read_bytes(),original)
+
+    def test_malformed_budget_isolates_only_its_task(self):
+        self.setup_app();self.switch(self.a)
+        bad=self.app.handle('create_task',{'project_id':self.a,'title':'Bad budget'})['task_id']
+        good=self.app.handle('create_task',{'project_id':self.a,'title':'Good budget'})['task_id']
+        self.app.state['projects'][self.a]['tasks'][bad]['token_budget']='lots';self.app.persist()
+        reopened=Application(self.app.storage,provider=RecordingProvider())
+        reopened.handle('switch_project',{'project_id':self.a})
+        statuses={t['id']:t['status'] for t in reopened.public()['tasks']}
+        self.assertEqual(statuses[bad],'unavailable');self.assertNotEqual(statuses[good],'unavailable')
+        self.assertEqual(reopened.handle('select_task',{'project_id':self.a,'task_id':good})['task']['token_budget'],250000)
 
     def test_metadata_validation_is_atomic(self):
         self.setup_app()

@@ -3,6 +3,7 @@ export default async function check(page, url) {
   const errors=[];
   page.on('pageerror',error=>errors.push(error.message));
   await page.goto(url);
+  if(!await page.evaluate(()=>!!document.getElementById('ispace').interspaceLab))await page.addScriptTag({path:'design/scene/lab-scene.js'});
   await page.evaluate(()=>{
     const report=id=>({id,stage:'completed',goal:'Review '+id,revision:'abcdef123456',results:{researcher:{summary:'Report '+id,findings:[{claim:'Snapshot evidence',evidence:[{source:'README.md',start:1,end:1}]}],proposal:'Proposal only'},reviewer:{summary:'Checked',findings:[],proposal:'Accepted',verdict:'accept'}},events:[],sources:{'README.md':{lines:1}},artifact_id:'artifact-'+id,revision_round:0,revision_limit:1});
     const projects=[{id:'a',name:'Sample Project',brief:'A sample research project',priority:'high',next_action:'Review validation',latest_run:{stage:'completed'},has_pending_plan:false},{id:'b',name:'Lab notebook',brief:'Another research project',priority:'normal',next_action:'Compare methods',latest_run:null,has_pending_plan:false}];
@@ -25,17 +26,22 @@ export default async function check(page, url) {
     window.interspaceReceive({type:'state',state:state()});
   });
   const assert=(value, message)=>{if(!value)throw Error(message);};
+  await page.locator('[data-view=workspace]').click();
   await page.locator('#message').fill('Workspace draft');
-  await page.locator('#scope').selectOption('project');
+  await page.getByRole('button',{name:'Project conversation',exact:true}).click();
   await page.locator('#message').fill('A draft');
+  await page.getByRole('button',{name:'Settings',exact:true}).click();
   await page.locator('#project-settings summary').click();
   await page.locator('#project-brief').fill('Unsaved A brief');
   await page.locator('#project-picker').selectOption('b');
+  await page.getByRole('button',{name:'Project conversation',exact:true}).click();
   assert(await page.locator('#message').inputValue()==='', 'A draft leaked to B');
   await page.locator('#message').fill('B draft');
   assert(!(await page.locator('#transcript').textContent()).includes('A private conversation'),'A thread leaked to B');
   await page.locator('#project-picker').selectOption('a');
+  await page.getByRole('button',{name:'Project conversation',exact:true}).click();
   assert(await page.locator('#message').inputValue()==='A draft','A draft lost');
+  await page.getByRole('button',{name:'Settings',exact:true}).click();
   assert(await page.locator('#project-brief').inputValue()==='Unsaved A brief','A metadata draft lost');
   await page.locator('#project-form').evaluate(form=>form.requestSubmit());
   assert((await page.evaluate(()=>window.testBridge.requests.find(r=>r.method==='update_project'))).params.project_id==='a','Metadata not project bound');
@@ -48,22 +54,35 @@ export default async function check(page, url) {
   await page.locator('#project-picker').selectOption('a');
   assert(await page.locator('#project-brief').inputValue()==='Newer unsaved brief','Newer metadata edit lost after late save response');
   assert((await page.locator('#metadata-status').textContent()).includes('Unsaved'),'Newer metadata edit marked saved');
+  await page.getByRole('button',{name:'Project conversation',exact:true}).click();
+  await page.locator('#artifact-browser summary').click();
   await page.locator('#run-picker').selectOption('a-old');
   assert((await page.locator('#result-body').textContent()).includes('Report a-old'),'Old run not restored');
+  for(const selection of ['assignment','canvas']){
+    await page.locator('[data-view=lab]').click();
+    if(selection==='assignment')await page.locator('#task-list button').first().click();
+    else await page.locator('.lab-canvas').evaluate(canvas=>{const b=canvas.getBoundingClientRect(),h=Number(canvas.style.aspectRatio.split('/')[1]);canvas.dispatchEvent(new PointerEvent('pointerdown',{clientX:b.left+b.width*88/800,clientY:b.top+b.height*173/h}));});
+    assert(await page.getByRole('heading',{name:'Project conversation',exact:true}).isVisible(),'Legacy Observatory '+selection+' lost general owner surface');
+    assert(await page.locator('#results').isVisible()&&(await page.locator('#result-body').textContent()).includes('Report a-old'),'Legacy Observatory '+selection+' hid selected artifact');
+    assert(await page.locator('#result-tabs [data-result=researcher]').getAttribute('aria-pressed')==='true','Legacy Observatory selected wrong assignment');
+    assert(await page.locator('#run-picker').inputValue()==='a-old','Legacy Observatory changed selected historical run');
+  }
   await page.locator('#result-body .citation').click();
   await page.locator('#project-picker').selectOption('b');
   await page.evaluate(()=>window.interspaceReceive({id:window.testBridge.heldSource.id,result:{text:'A_PRIVATE_SOURCE'}}));
   assert(await page.locator('#source-box').isHidden(),'Delayed A source appeared in B');
-  await page.locator('#scope').selectOption('workspace');
+  await page.locator('[data-view=workspace]').click();
   assert(await page.locator('#message').inputValue()==='Workspace draft','Workspace draft lost');
   assert(await page.locator('.project-card').count()===2,'Overview missing project');
-  await page.locator('#scope').selectOption('project');
+  await page.getByRole('button',{name:'Project conversation',exact:true}).click();
   await page.locator('#message').fill('B submitted');
   await page.locator('#composer').evaluate(form=>form.requestSubmit());
   await page.locator('#project-picker').selectOption('a');
+  await page.getByRole('button',{name:'Project conversation',exact:true}).click();
   await page.evaluate(()=>window.interspaceReceive({id:window.testBridge.heldChat.id,result:{started:true}}));
   assert(await page.locator('#message').inputValue()==='A draft','Late B send erased A draft');
   await page.locator('#project-picker').selectOption('b');
+  await page.getByRole('button',{name:'Project conversation',exact:true}).click();
   assert(await page.locator('#message').inputValue()==='', 'Submitted B draft retained');
   const fits=[];
   for(const width of [320,390,760,1024,1280]){

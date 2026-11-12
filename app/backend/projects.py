@@ -5,12 +5,13 @@ from pathlib import Path
 import uuid
 
 import runner
+import tasks
 
 
 def empty_state():
-    return {'version':2, 'projects':{}, 'selected_project_id':None,
+    return {'version':4, 'projects':{}, 'selected_project_id':None,
             'threads':{'workspace':[]}, 'active':None, 'active_project_id':None,
-            'active_run_id':None, 'error':'', 'error_project_id':None, 'usage':[],
+            'active_run_id':None, 'active_task_id':None, 'error_task_id':None, 'error':'', 'error_project_id':None, 'usage':[],
             'connection':{'ready':False,'message':'Not checked yet'}}
 
 
@@ -19,7 +20,7 @@ def new_project(source):
     return {'id':identity,'name':Path(source).name,'source_path':str(source),
             'source_selection':{'mode':'unconfirmed','version':1,'selection_version':0,'revision':None,'paths':[]},
             'context_path':'docs/PROJECT_CONTEXT.md','thread':[], 'pending':None,
-            'run_id':None,'run_ids':[], 'brief':'','priority':'normal','next_action':''}
+            'run_id':None,'run_ids':[], 'tasks':{},'selected_task_id':None, 'brief':'','priority':'normal','next_action':''}
 
 
 def load(storage):
@@ -28,14 +29,20 @@ def load(storage):
         return empty_state()
     raw = path.read_bytes()
     old = json.loads(raw)
-    if old.get('version') == 2:
+    if old.get('version') == 4:
         return old
+    if old.get('version') == 3:
+        backup(storage,3,raw)
+        return add_token_budgets(old)
+    if old.get('version') == 2:
+        backup(storage,2,raw)
+        return add_token_budgets(tasks.migrate(old,storage))
     if old.get('version') != 1:
         raise ValueError('Unsupported state schema version. Saved data was not changed.')
     # Exclusive creation keeps the first original backup across interrupted migrations.
     try:
-        with (storage/'state.v1-backup.json').open('xb') as backup:
-            backup.write(raw)
+        with (storage/'state.v1-backup.json').open('xb') as original_backup:
+            original_backup.write(raw)
     except FileExistsError:
         pass
     state = empty_state()
@@ -60,7 +67,27 @@ def load(storage):
         for entry in state['usage']:
             if entry.get('run_id') in project['run_ids']:
                 entry['project_id'] = project['id']
+    state['version']=2
+    backup(storage,2,json.dumps(state,ensure_ascii=False).encode())
+    return add_token_budgets(tasks.migrate(state,storage))
+
+
+def add_token_budgets(state):
+    """Version 4: tasks that existed before budgets have none; usage history is kept as-is."""
+    for project in state.get('projects',{}).values():
+        saved=project.get('tasks') if isinstance(project,dict) else None
+        for task in (saved.values() if isinstance(saved,dict) else ()):
+            if isinstance(task,dict):task['token_budget']=None
+    state['version']=4
     return state
+
+
+def backup(storage, version, raw):
+    try:
+        with (storage/('state.v'+str(version)+'-backup.json')).open('xb') as output:
+            output.write(raw)
+    except FileExistsError:
+        pass
 
 
 def selected(state, reference=None):

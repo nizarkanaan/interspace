@@ -61,6 +61,7 @@ window.interspaceWorkspace = (() => {
         }).catch(() => {});
       };
     }
+    $('run-history-label').textContent = state.task_id ? 'Task run history' : 'General project run history';
     const history = $('run-picker');
     history.replaceChildren();
     $('run-history').hidden = !state.runs.length;
@@ -68,7 +69,7 @@ window.interspaceWorkspace = (() => {
       node('option', run.goal.slice(0,90)+' · '+run.stage.replaceAll('_',' ')+' · '+run.id.slice(-6), history).value = run.id;
     }
     history.value = state.run?.id || '';
-    history.onchange = () => request('select_run', {project_id:state.project_id, run_id:history.value}).catch(() => {});
+    history.onchange = () => request('select_run', {project_id:state.project_id, task_id:state.task_id??null, run_id:history.value}).catch(() => {});
   }
   return {render};
 })();

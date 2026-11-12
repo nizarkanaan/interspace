@@ -211,7 +211,7 @@ def load(run):
         raise ValueError('Symlink run is not allowed.')
     data=json.loads((run/'run.json').read_text())
     if not isinstance(data,dict):raise ValueError('Saved run metadata must be an object.')
-    if data.get('format')!=FORMAT:return runner.load(run)
+    if data.get('format') not in (FORMAT,'change-v1'):return runner.load(run)
     try:
         selected=validate_scope(data['source_scope'])
         if selected!=data['plan']['source_scope'] or data['revision']!=selected['revision'] or data['id']!=run.name:
