@@ -129,8 +129,14 @@ class ServerConfigTests(BridgeCase):
 class ProtocolTests(BridgeCase):
     def test_wrong_token_gets_no_service(self):
         client = self.client(self.start(), token='0' * 64)
-        client.request('tools/list')
-        self.assertIsNone(client.read())
+        # The bridge drops the connection on a wrong token. Whether the client's next send or read sees
+        # that as a closed stream or a broken pipe depends on timing; both mean no service.
+        try:
+            client.request('tools/list')
+            reply = client.read()
+        except (BrokenPipeError, ConnectionResetError):
+            reply = None
+        self.assertIsNone(reply)
 
     def test_initialize_ping_and_tools_list(self):
         client = self.client(self.start())
