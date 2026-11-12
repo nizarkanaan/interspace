@@ -1,6 +1,6 @@
 # Controlled editing and Python test execution
 
-Date: 2026-11-11. Status: proposed for approval; no production implementation yet.
+Date: 2026-11-11. Status: approved by the user on 2026-11-11; implementation in progress.
 Branch: `interspace/controlled-editing`, based on the completed task desk at `c1a08ce`.
 
 ## Intent and accepted context
