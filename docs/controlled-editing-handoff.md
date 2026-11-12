@@ -8,7 +8,7 @@ Paused at the user's explicit request on 2026-11-11. Do not automatically resume
 - Implementation, all reviews, the I1 fix (`bae3ab1`) and its clean re-review are complete.
 - The live Snack Picker acceptance run is complete: 5 model calls, 3 restricted checks (pass / assertion-fail / pass), Reviewer accept, exact diff applied and verified byte-identical, native reopen confirmed. Details in `docs/controlled-editing-validation.md`.
 - Snack Picker now has two uncommitted modified files (`snack_picker.py`, `tests/test_snack_picker.py`). No commit was made there.
-- Open: an unexplained ~45-second gap between **Propose a plan** and the planner job starting (no error). Not investigated.
+- Open: an unexplained ~45-second gap between **Propose a plan** and the planner job starting (no error). Investigated but not reproduced; see the validation doc.
 - The steps below are kept for history; all are done.
 
 ## Resume in order

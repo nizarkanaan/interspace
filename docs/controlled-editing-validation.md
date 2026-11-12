@@ -70,7 +70,14 @@ Run on 2026-11-11 in the sole rebuilt `dist/Interspace.app` (with the I1 fix), d
 | Apply | `applied`. Both files replaced via atomic exchange with originals retained. Independent byte comparison: the applied files are identical to the tested candidate (`e035e00f…`, `b733936b…`). HEAD, `README.md` and `docs/PROJECT_CONTEXT.md` unchanged; no other project changes. Changes left uncommitted. No fourth test process and no execution in the original project. |
 | Reopen | Quit and relaunched the app. The task lists as Applied; the original evidence still shows the original bytes; no check or Apply actions are offered; no provider job or process was dispatched. |
 
-Observed but not investigated: after **Propose a plan**, the task showed as a draft with an empty conversation for roughly 45 seconds before the planning job started. No error appeared and the plan completed normally.
+Observed: after **Propose a plan**, the task showed as a draft with an empty conversation for roughly 45 seconds before the planning job started. No error appeared and the plan completed normally. Saved state, which persists `active` and the thread, shows the backend had not yet accepted the `chat` request during that gap.
+
+Investigated afterwards without model calls; not reproduced:
+- Building the state projection (0.01 s), the selected-source context (0.23 s) and `codex login status` (0.03 s) were all fast.
+- The UI sends `chat` straight after `create_task`, with no intervening request. The native bridge writes each request directly to the backend pipe.
+- Probe: the same bundle, running in the background on a copy of the app data, against a clone whose extra commit makes `chat` fail at the source check before any call. **Propose a plan** reached the backend in under a second.
+
+The cause remains unknown. A one-off cold start of the first external `git` call in a new backend session is plausible but unverified. No code was changed. Request-duration logging in the backend would identify it if it recurs.
 
 The Snack Picker changes remain uncommitted in that disposable repository. No commit, merge or push was made there or here. Sample Project was not accessed. One successful live run does not certify agent accuracy or hostile-code containment.
 
