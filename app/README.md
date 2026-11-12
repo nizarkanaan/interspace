@@ -16,6 +16,20 @@ The application discovers `codex` on PATH or the official ChatGPT/Codex Mac appl
 
 The CLI's configured authentication determines account usage. ChatGPT sign-in uses the supported Codex path and its account limits; API-key sign-in is separately billed. Returned token counts are displayed. Monetary cost and remaining subscription allowance are not inferred.
 
+## Token budgets
+
+Each task has a **token budget**: 250,000 by default, set on **New task** and editable on the Plan tab. It counts the tokens Codex reports for every model call the task owns: planning and conversation, specialists, synthesis and legacy revisions. A call's charge is `input_tokens + output_tokens`. In Codex's usage report, cached input is part of `input_tokens` and reasoning is part of `output_tokens`, so each token counts once. Project conversation and Workspace advice are not budgeted.
+
+Counts only arrive when a call finishes, so the budget is checked **before** each call:
+- The app estimates the call from its prompt size, plus fixed allowances for the provider's own instructions and the reply, and refuses the call if the estimate does not fit what remains.
+- A refused call starts nothing and consumes no reservation. A run that hits the limit stops as **Budget exhausted** and keeps its completed artifacts and check results, with no retry.
+- A call that started may finish slightly over the budget; any overshoot is shown.
+- A call that returns no counts, because it failed, was cancelled or the app quit mid-call, is charged its estimate and labelled as estimated.
+
+The task header shows `Tokens used / budget`. Plan and check-approval screens show the remaining budget and a projected total; Start and Run checks warn when the plan likely will not fit, and are blocked only when no next call can fit at all. The budget in force is part of each plan and check approval: editing it clears unstarted plans, makes an earlier check approval stale, and never resumes a stopped run.
+
+Tasks created before budgets show **No budget set** and are not limited until you set one. Budgets are tokens only: Interspace does not know money, prices or your account's remaining allowance.
+
 ## Data and project protection
 
 Conversations, plans, usage records and source snapshots live in `~/Library/Application Support/Interspace`. Read-only tasks never edit or execute the source checkout. Python editing tasks generate and check app-owned copies; only the separate exact **Apply reviewed changes** action writes the approved paths to the original checkout. Evidence comes only from the approved committed source set; working drafts are excluded. Known credential filenames are unavailable, but eligibility does not certify that a selected text file contains no secrets. Approvals bind to a stable project ID, canonical project path, committed revision, exact selected paths and selection version, and (for report actions) artifact version. If HEAD changes, request a new plan.

@@ -8,6 +8,10 @@ The user authorized the first working workflow on a branch with Sample Project a
 
 Read `docs/controlled-editing-validation.md` and `app/README.md` for the current implementation and actual acceptance limits. Task mode defaults to review and is immutable. Change plans/runs use dedicated identities; never reinterpret a saved read-only approval as permission to write. Generation, fixed candidate checks and final reviewed application require distinct exact approvals. UI write/check intentions must use backend-projected action references without dropping fields; only read-only post-Apply evidence may derive the documented immutable reference. No automatic repair/resume/retry or source writes after restart. Sample Project stays read-only and is not accessed for the editing pilot; Snack Picker is the sole authorized live write-test target, with coordinator-owned exact approvals. Routine tests use disposable repositories and fake providers, never personal app data or real source projects.
 
+## Token budgets
+
+Every task-owned model call passes the per-task budget gate (`app/backend/budget.py`) in `Application.call` or `team.invoke` before any provider launch or job reservation. Budgets are tokens only; never show or imply money or remaining account allowance. Budgets bind into plans and check approvals like the specialist allowance. See `app/README.md#token-budgets` and `docs/token-budgets-validation.md`.
+
 ## Product boundaries
 
 - Each installation belongs to one person and runs on their own machine.

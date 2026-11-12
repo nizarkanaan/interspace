@@ -2,7 +2,7 @@
 
 A personal observatory for projects, research, knowledge, and specialist AI agents.
 
-**Status: native Mac development app with a task desk and controlled Python editing.** Launch `dist/Interspace.app` after [building](app/README.md). Tasks have separate conversations, plans and results. The Orchestrator can assign multiple Web searchers, Researchers and Reviewers within a user-set allowance, with the exact team and call limit approved before Start. The design preview and earlier offline pilot remain separate. Fix & test tasks add bounded Implementer/Tester/Reviewer work behind separate generation, check and application approvals. Other catalog roles and external-app integrations do not execute.
+**Status: native Mac development app with a task desk, controlled Python editing and per-task token budgets.** Launch `dist/Interspace.app` after [building](app/README.md). Tasks have separate conversations, plans and results. The Orchestrator can assign multiple Web searchers, Researchers and Reviewers within a user-set allowance, with the exact team and call limit approved before Start. The design preview and earlier offline pilot remain separate. Fix & test tasks add bounded Implementer/Tester/Reviewer work behind separate generation, check and application approvals. Other catalog roles and external-app integrations do not execute.
 
 ## Mac app
 

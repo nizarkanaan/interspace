@@ -95,7 +95,7 @@ window.interspaceTeam=(()=>{
     }
     const artifact=selected==='combined'?run.combined:run.results[selected];
     if(!artifact){
-      node('p',['failed','cancelled','interrupted','integrity_failed'].includes(run.stage)?'The run stopped. Saved partial artifacts remain available in the specialist tabs.':'No artifact received yet. Work and dependencies are recorded above.',out);return;
+      node('p',run.stage==='budget_exhausted'?'Stopped: the token budget could not fit the next call, so it was not started. Completed artifacts and check results are kept. Raise the token budget on the Plan tab, then request a new plan or approval.':['failed','cancelled','interrupted','integrity_failed'].includes(run.stage)?'The run stopped. Saved partial artifacts remain available in the specialist tabs.':'No artifact received yet. Work and dependencies are recorded above.',out);return;
     }
     if(selected!=='combined')node('h2','Specialist result',out);node('p',artifact.summary,out);
     if(artifact.verdict&&artifact.verdict!=='not_reviewed')node('p','Reviewer verdict: '+artifact.verdict,out).className='notice';
