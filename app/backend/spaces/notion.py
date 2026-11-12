@@ -696,7 +696,7 @@ class Connector:
                 raise InvalidRequest('That page position is not valid. Start again from the first page.')
             block = self._call(token, 'GET', '/blocks/' + ident)
             return self._content(ref, _field(block, 'type', str), 'markdown', _block_markdown(block), None,
-                                 _time(block, 'last_edited_time'), None, {})
+                                 _time(block, 'last_edited_time'), None, {}, _parent_ref(block.get('parent')))
         page = self._call(token, 'GET', '/pages/' + ident)
         title = _page_title(page)
         version = _time(page, 'last_edited_time')
@@ -725,7 +725,8 @@ class Connector:
             notion_cursor, skip, offset = next_cursor, 0, 0
         else:
             following = {'m': 'read', 'r': ref, 'c': notion_cursor, 's': 0, 'o': 0, 'l': previous_list}
-        return self._content(ref, title, 'markdown', text, following, version, _url(page), _meta(page))
+        return self._content(ref, title, 'markdown', text, following, version, _url(page), _meta(page),
+                             _parent_ref(page.get('parent')))
 
     def _read_database(self, token, ref, ident):
         database = self._call(token, 'GET', '/databases/' + ident)
@@ -745,10 +746,12 @@ class Connector:
         text = json.dumps({'title': title, 'data_sources': sources, 'properties': properties},
                           ensure_ascii=False, sort_keys=True, indent=1)
         return self._content(ref, title, 'json', text[:self.max_read_chars], None,
-                             _time(database, 'last_edited_time'), _url(database), {})
+                             _time(database, 'last_edited_time'), _url(database), {},
+                             _parent_ref(database.get('parent')))
 
-    def _content(self, ref, title, fmt, text, following, version, url, meta):
-        return {'v': 1, 'ref': ref, 'title': _truncate(title, MAX_TITLE), 'format': fmt, 'text': text,
+    def _content(self, ref, title, fmt, text, following, version, url, meta, parent):
+        # `parent` (nearest parent ref or None) is the coordinator's additive field for scope `parents` chains.
+        return {'parent': parent, 'v': 1, 'ref': ref, 'title': _truncate(title, MAX_TITLE), 'format': fmt, 'text': text,
                 'truncated': following is not None, 'next_cursor': _encode_cursor(following) if following else None,
                 'version': version, 'url': url, 'meta': meta}
 

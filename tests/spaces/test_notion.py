@@ -235,6 +235,7 @@ class ReadTests(NotionTestCase):
         self.assertEqual((content['format'], content['truncated'], content['next_cursor']), ('markdown', False, None))
         self.assertEqual(content['version'], '2026-11-10T18:02:00.000Z')
         self.assertEqual((content['ref'], content['title'], content['url']), ('notion:page:' + U(1), 'Reading notes', load('page')['url']))
+        self.assertIsNone(content['parent'])   # a workspace-level page
 
     def test_read_with_truncation_and_continuation(self):
         self.connector.max_read_chars = 60
@@ -296,18 +297,21 @@ class ReadTests(NotionTestCase):
                            'Status': {'type': 'status', 'options': ['Draft', 'Done']},
                            'Tags': {'type': 'multi_select', 'options': ['ml']}}})
         self.assertEqual(content['version'], '2026-11-09T12:00:00.000Z')
+        self.assertEqual(content['parent'], 'notion:page:' + U(2))
 
     def test_read_database_row_has_property_meta(self):
         self.http.expect('GET', API + '/pages/' + U(21), json=load('row_page'))
         self.http.expect('GET', API + '/blocks/%s/children' % U(21), json={'object': 'list', 'results': [], 'next_cursor': None, 'has_more': False})
         content = self.connector.read('notion:page:' + U(21))
         self.assertEqual(content['meta'], {'Status': 'Draft', 'Pages': 15, 'Tags': 'ml'})
+        self.assertEqual(content['parent'], 'notion:database:' + U(10))
         self.assertEqual(content['text'], '# Attention is all you need\n\n')
 
     def test_read_block(self):
         self.http.expect('GET', API + '/blocks/' + U(41), json=load('block'))
         content = self.connector.read('notion:block:' + U(41))
         self.assertEqual(content['text'], '# Summary\n\n')
+        self.assertEqual(content['parent'], 'notion:page:' + U(1))
 
     def test_remote_shape_is_validated(self):
         broken = load('page')
