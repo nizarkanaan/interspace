@@ -75,4 +75,6 @@ Other ownership, in addition to the roadmap table:
 - **1E** owns `app/backend/scope.py`, `app/backend/audit.py` and the durable write journal in `audit.py`.
 - **`app/macos/main.swift`** (Keychain bridge, `open_url`, the `bridge_hello` handshake, new allowed methods) has no Wave 1 owner in the roadmap. The coordinator must assign it before Wave 1 starts; the recommendation is a small Wave 1 stream, or 1F, built from the 0C spike's findings. Until it merges, the backend never sends a Keychain message (connectors.md handshake), so an old shell cannot leak a secret to the WebView.
 
+**Coordinator ruling (2026-11-12, Wave 1 start).** The user chose to start Wave 1 with four streams (1A, 1E, 1F, 1G); 1B–1D start after 1A merges. So `app/backend/spaces/__init__.py`, `app/backend/spaces/base.py` and `tests/spaces/fakehttp.py` are owned by **1A** for this round. 1A writes them exactly as connectors.md specifies, with their own tests. 1B–1D then reuse them unchanged. The coordinator created `tests/fixtures/events/basic-task.jsonl`. `app/macos/main.swift` (Keychain bridge, `open_url`, `bridge_hello`, new allowed methods) is owned by **1F**.
+
 A stream that needs a change to a contract asks the coordinator. It never changes the shape locally.
