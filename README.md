@@ -2,11 +2,11 @@
 
 A personal observatory for projects, research, knowledge, and specialist AI agents.
 
-**Status: native Mac development app with a read-only task desk.** Launch `dist/Interspace.app` after [building](app/README.md). Tasks have separate conversations, plans and results. The Orchestrator can assign multiple Web searchers, Researchers and Reviewers within a user-set allowance, with the exact team and call limit approved before Start. The design preview and earlier offline pilot remain separate. Other catalog roles and external-app integrations do not execute.
+**Status: native Mac development app with a task desk and controlled Python editing.** Launch `dist/Interspace.app` after [building](app/README.md). Tasks have separate conversations, plans and results. The Orchestrator can assign multiple Web searchers, Researchers and Reviewers within a user-set allowance, with the exact team and call limit approved before Start. The design preview and earlier offline pilot remain separate. Fix & test tasks add bounded Implementer/Tester/Reviewer work behind separate generation, check and application approvals. Other catalog roles and external-app integrations do not execute.
 
 ## Mac app
 
-Double-click `dist/Interspace.app`. Add or select a Git project, save its committed source selection in **Settings**, then choose **New task**. Describe the outcome, adjust the specialist allowance if needed, inspect the proposed plan and Start it. Six is the initial allowance, not a fixed maximum; assignments execute sequentially. Project sources stay read-only. See [app setup and limits](app/README.md) and [task-desk verification](docs/task-desk-validation.md).
+Double-click `dist/Interspace.app`. Add or select a Git project, save its committed source selection in **Settings**, then choose **New task**. Describe the outcome, adjust the specialist allowance if needed, inspect the proposed plan and Start it. Six is the initial allowance, not a fixed maximum; assignments execute sequentially. Read-only review is the default. Choose **Fix & test (Python)** for bounded replacement proposals: inspect the candidate, separately approve fixed checks, then separately apply the exact reviewed changes. Only that final action writes the displayed paths, uncommitted. See [app setup and limits](app/README.md), [task-desk verification](docs/task-desk-validation.md) and [controlled-editing validation](docs/controlled-editing-validation.md).
 
 ## Design preview
 
@@ -46,7 +46,7 @@ Each person installs Interspace on their own machine and uses their own files, p
 - [Engineering and debugging conventions](docs/engineering.md)
 - [Standalone prototype](design/index.html)
 
-The Mac app implements a bounded read-only runtime and Codex connection. Broader role execution, external integrations, notarized distribution and additional-platform packaging remain future work.
+The Mac app implements bounded read-only review, controlled Python editing and a Codex connection. Broader role execution, external integrations, notarized distribution and additional-platform packaging remain future work.
 
 ## Maintaining the preview
 

@@ -1,8 +1,12 @@
 # Interspace project guidance
 
-This repository contains the design prototype, an offline pilot and a native Mac application in `app/`. The user authorized the launchable app and read-only Orchestrator/task workflow. The runtime supports task conversations and Web searcher, Researcher and Reviewer dispatch, including repeated roles within a user-set allowance; it does not execute all catalog roles.
+This repository contains the design prototype, an offline pilot and a native Mac application in `app/`. The user authorized the launchable app, read-only Orchestrator/task workflow and the controlled Python editing preset. Read-only tasks support Web searcher, Researcher and Reviewer; editing tasks support Researcher, Implementer, Tester and Reviewer, including repeated roles within a user-set allowance. The runtime does not execute all catalog roles.
 
 The user authorized the first working workflow on a branch with Sample Project as read-only input. Keep snapshot/pilot helpers under `pilot/`, native/backend/UI code under `app/`, tests under `tests/`, and development run data under ignored `workspace-data/`. App user data belongs in its Application Support directory. See `app/README.md`. Never modify, checkout or run the sample project from the pilot. Preserve existing source edits; use committed snapshots and verify integrity. Do not merge the pilot branch into main without the user accepting it. Read `pilot/README.md` for the explicit current-session bridge and its limitations.
+
+## Controlled editing
+
+Read `docs/controlled-editing-validation.md` and `app/README.md` for the current implementation and actual acceptance limits. Task mode defaults to review and is immutable. Change plans/runs use dedicated identities; never reinterpret a saved read-only approval as permission to write. Generation, fixed candidate checks and final reviewed application require distinct exact approvals. UI write/check intentions must use backend-projected action references without dropping fields; only read-only post-Apply evidence may derive the documented immutable reference. No automatic repair/resume/retry or source writes after restart. Sample Project stays read-only and is not accessed for the editing pilot; Snack Picker is the sole authorized live write-test target, with coordinator-owned exact approvals. Routine tests use disposable repositories and fake providers, never personal app data or real source projects.
 
 ## Product boundaries
 

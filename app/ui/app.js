@@ -9,8 +9,8 @@ const sameOwner=p=>p.project_id===state?.project_id&&(p.task_id??null)===(state?
 const draftKey=()=>scope==='workspace'?'workspace':scope==='task'?'task:'+state?.project_id+':'+state?.task_id:'project:'+state?.project_id;
 const saveDraft=()=>{if(state)drafts.set(draftKey(),$('message').value);};
 const restoreDraft=()=>{const key=draftKey();$('message').value=drafts.has(key)?drafts.get(key):scope==='task'?state?.task?.draft||'':'';};
-const roleDefinitions=[{id:'web_searcher',name:'Web searcher',department:'discovery',code:'WS',look:'Scout',prop:'scanner'},{id:'researcher',name:'Researcher',department:'research',code:'RS',look:'Researcher',prop:'book'},{id:'reviewer',name:'Reviewer',department:'review',code:'RV',look:'Reviewer',prop:'clipboard'}];
-root.interspaceRoles={byName:name=>roleDefinitions.find(r=>r.name===name),departments:[{id:'discovery',name:'Web scouts'},{id:'research',name:'Research'},{id:'review',name:'Review'}]};
+const roleDefinitions=[{id:'web_searcher',name:'Web searcher',department:'discovery',code:'WS',look:'Scout',prop:'scanner'},{id:'researcher',name:'Researcher',department:'research',code:'RS',look:'Researcher',prop:'book'},{id:'reviewer',name:'Reviewer',department:'review',code:'RV',look:'Reviewer',prop:'clipboard'},{id:'implementer',name:'Implementer',department:'engineering',code:'IM',look:'Builder',prop:'wrench'},{id:'tester',name:'Tester',department:'engineering',code:'TS',look:'Builder',prop:'test'}];
+root.interspaceRoles={byName:name=>roleDefinitions.find(r=>r.name===name),departments:[{id:'discovery',name:'Web scouts'},{id:'research',name:'Research'},{id:'engineering',name:'Engineering'},{id:'review',name:'Review'}]};
 function error(text){$('error').hidden=!text;$('error').textContent=text||'';}
 function request(method,params={},options={}){return new Promise((resolve,reject)=>{
  const id=String(++sequence);if(!window.webkit?.messageHandlers?.interspace){reject(Error('Open Interspace.app to use the local backend.'));return;}
@@ -24,13 +24,15 @@ window.interspaceReceive=message=>{
  const projectMethod=['list_sources','preview_source','save_sources','update_project'].includes(call.method);
  const scoped=call.params.project_id!==undefined;
  const navigation=['switch_project','select_task','choose_project'].includes(call.method);
- const stale=call.manual||call.epoch!==selectionEpoch||(scoped&&!navigation&&(call.params.project_id!==state?.project_id||(!projectMethod&&Object.hasOwn(call.params,'task_id')&&!sameOwner(call.params))));
+ const changeReply=['approve_checks','apply_changes','change_evidence'].includes(call.method);
+ const staleChange=changeReply&&(call.params.run_id!==state?.run?.id||call.params.plan_digest!==state?.run?.plan?.digest||call.params.candidate_digest!==state?.run?.candidate?.digest||call.params.artifact_id!==state?.run?.artifact_id);
+ const stale=staleChange||call.manual||call.epoch!==selectionEpoch||(scoped&&!navigation&&(call.params.project_id!==state?.project_id||(!projectMethod&&Object.hasOwn(call.params,'task_id')&&!sameOwner(call.params))));
  if(message.error){if(!stale)error(message.error);call.reject(Error(message.error));}
  else{if(message.result?.threads&&!stale){if(!state||navigation||sameOwner(message.result))apply(message.result);}call.resolve(message.result);}
 };
 function apply(next){
  const changed=!state||state.project_id!==next.project_id||state.task_id!==next.task_id||state.run?.id!==next.run?.id;
- saveDraft();state=next;if(changed){attempt='current';resultTab=window.interspaceTeam.isTeam(next.run)?'combined':'researcher';$('source-box').hidden=true;$('artifact-browser').open=false;}
+ saveDraft();state=next;if(changed){attempt='current';resultTab=window.interspaceTeam.isTeam(next.run)||window.interspaceChanges.isChange(next.run)?'combined':'researcher';$('source-box').hidden=true;$('artifact-browser').open=false;}
  restoreDraft();error(state.error);render();
 }
 function navigate(next){saveDraft();selectionEpoch++;view=next;scope=next==='workspace'?'workspace':next==='project'?'project':'task';restoreDraft();render();}
@@ -40,6 +42,7 @@ function openTask(id){saveDraft();const epoch=++selectionEpoch;return request('s
 const sourceBlocked=()=>!!state.source_error||state.source_selection?.mode==='unconfirmed';
 const resultVisible=()=>view==='detail'&&taskTab==='result'||view==='project';
 function render(){if(!state)return;
+ window.interspaceChanges.setContext(state,selectionEpoch);
  window.interspaceWorkspace.render(state,request,openProject);
  $('project-settings').hidden=view!=='settings'||!state.project_id;
  window.interspaceSources.render(state,request,view==='settings');
@@ -57,7 +60,7 @@ function render(){if(!state)return;
  $('task-project').textContent=state.project||'No project selected';$('task-count').textContent=(state.tasks||[]).length+' tasks';$('desk-tasks').replaceChildren();
  $('desk-empty').hidden=!!state.tasks?.length;
  for(const t of state.tasks||[]){const row=node('button','',$('desk-tasks'));row.className='desk-task';row.dataset.openTask=t.id;row.disabled=t.status==='unavailable';const title=node('div','',row);node('strong',t.title,title);node('small',t.status==='unavailable'?'Saved data unavailable — other tasks remain usable':t.run_count+' runs · specialist allowance '+t.specialist_limit,title);node('span',t.status.replaceAll('_',' '),row);row.onclick=()=>openTask(t.id);}
- $('task-meta').textContent=task?'Specialist allowance '+task.specialist_limit+' · '+(state.tasks?.find(t=>t.id===task.id)?.status||'draft').replaceAll('_',' '):'';
+ $('task-meta').textContent=task?(task.mode==='python_fix'?'Python fix':'Read-only review')+' · Specialist allowance '+task.specialist_limit+' · '+(state.tasks?.find(t=>t.id===task.id)?.status||'draft').replaceAll('_',' '):'';
  document.querySelectorAll('[data-task-tab]').forEach(b=>b.setAttribute('aria-pressed',String(taskTab===b.dataset.taskTab)));
  $('task-allowance').hidden=!detail||taskTab!=='plan';if(task&&document.activeElement!==$('task-limit'))$('task-limit').value=task.specialist_limit;
  for(const control of $('task-allowance').elements)control.disabled=!!state.active;
@@ -72,12 +75,13 @@ function render(){if(!state)return;
  if(!messages.length){const empty=node('div','',$('transcript'));empty.className='empty';node('p',scope==='workspace'?'Ask for advice on project priorities and next actions.':scope==='project'?'This conversation is separate from individual tasks.':'Describe the outcome, refine a plan, or ask about this task’s evidence.',empty);}
  for(const message of messages){const item=node('div','',$('transcript'));item.className='message '+(message.role==='user'?'user':'assistant');node('small',message.role==='user'?'You':'Orchestrator',item);node('div',message.text,item);}
  $('plan').replaceChildren();const plan=state.pending,showPlan=detail&&taskTab==='plan'||view==='project';$('plan').hidden=!showPlan||!plan;$('plan-empty').hidden=!detail||taskTab!=='plan'||!!plan;
- if(plan?.kind==='team'&&showPlan)window.interspaceTeam.renderPlan($('plan'),plan,state,startRequest,node);
+ if(plan?.kind==='change'&&showPlan)window.interspaceChanges.renderPlan($('plan'),plan,state,startRequest,node);
+ else if(plan?.kind==='team'&&showPlan)window.interspaceTeam.renderPlan($('plan'),plan,state,startRequest,node);
  else if(plan&&showPlan){const box=node('div','',$('plan'));box.className='plan';node('h3',plan.kind==='revision'?'Proposed read-only revision':'Proposed read-only review',box);node('p',plan.goal,box);node('p',(plan.roles||[]).join(' → ')+' · '+plan.limit+' · revision '+plan.revision.slice(0,12),box);const b=node('button',plan.kind==='revision'?'Start read-only revision':'Start read-only review',box);b.className='primary';b.disabled=!!state.active;b.onclick=()=>startRequest('start_review',{project_id:plan.project_id,task_id:state.task_id,plan_id:plan.id}).catch(()=>{});}
  // General project plans are visible in their own conversation surface.
  if(view==='project')$('conversation').after($('plan'));else $('task-allowance').after($('plan'));
  const showWork=detail&&taskTab==='activity'||view==='lab';$('work').hidden=!showWork;$('work-heading').textContent=view==='lab'?'Recorded specialists':'Task activity';
- const run=state.run;let items=[];if(run){if(window.interspaceTeam.isTeam(run))items=window.interspaceTeam.items(run);else for(const role of roleDefinitions.filter(r=>r.id!=='web_searcher')){const result=run.results[role.id],started=run.events.some(e=>e.role===role.id&&e.status==='started'&&(e.round||0)===(run.revision_round||0));const label=result?'Done':state.active===role.name&&state.active_project_id===state.project_id&&state.active_task_id===state.task_id&&state.active_run_id===run.id?'Working':started?'Stopped':'Queued';items.push({id:role.id,role:role.name,assignment:role.name,department:role.department,instance:role.name+' 1',state:label,label,title:role.id==='researcher'?'Review selected evidence':'Check claims and proposal'});}}
+ const run=state.run;let items=[];if(run){if(window.interspaceChanges.isChange(run))items=window.interspaceChanges.items(run);else if(window.interspaceTeam.isTeam(run))items=window.interspaceTeam.items(run);else for(const role of roleDefinitions.filter(r=>['researcher','reviewer'].includes(r.id))){const result=run.results[role.id],started=run.events.some(e=>e.role===role.id&&e.status==='started'&&(e.round||0)===(run.revision_round||0));const label=result?'Done':state.active===role.name&&state.active_project_id===state.project_id&&state.active_task_id===state.task_id&&state.active_run_id===run.id?'Working':started?'Stopped':'Queued';items.push({id:role.id,role:role.name,assignment:role.name,department:role.department,instance:role.name+' 1',state:label,label,title:role.id==='researcher'?'Review selected evidence':'Check claims and proposal'});}}
  $('no-run').hidden=!!run;$('task-list').replaceChildren();for(const task of items){const item=node('div','',$('task-list'));item.className='task';const portrait=node('canvas','',item);portrait.dataset.characterRole=task.role;portrait.setAttribute('aria-hidden','true');const b=node('button','',item);b.setAttribute('aria-pressed',String(resultTab===task.id));node('strong',task.assignment||task.instance,b);node('small',task.title+' · '+task.label,b);b.onclick=()=>selectArtifact(task.id);}
  $('activity-events').replaceChildren();for(const event of run?.events||[]){const item=node('div','',$('activity-events'));item.className='event';node('small',event.time,item);node('h3',event.role+' · '+event.status.replaceAll('_',' '),item);node('p',event.detail,item);}
  $('usage').replaceChildren();for(const entry of state.usage||[]){if(scope!=='workspace'&&(entry.project_id!==state.project_id||(state.task_id&&entry.task_id!==state.task_id)))continue;const u=entry.tokens||{};node('p',entry.role+': '+(Object.keys(u).length?Object.entries(u).map(([k,v])=>k.replaceAll('_',' ')+' '+v).join(' · '):'usage unavailable'),$('usage'));}
@@ -85,18 +89,18 @@ function render(){if(!state)return;
  renderResults();$('results').hidden=!run||!resultVisible();$('result-empty').hidden=!detail||taskTab!=='result'||!!run;
  if(view==='new')renderNew();
 }
-function startRequest(method,params){const current={project_id:params.project_id,task_id:params.task_id??null};return request(method,params).then(result=>{if(sameOwner(current)){taskTab='activity';render();}return result;});}
-function renderNew(){const d=newDrafts.get(state.project_id)||{goal:'',limit:'6'};$('new-project').textContent=state.project;$('new-goal').value=d.goal;$('new-limit').value=d.limit;$('new-sources').textContent=sourceBlocked()?'Save project sources in Settings before requesting a plan. You can create a local draft now.':'Uses this project’s saved committed sources. Planning uses one call from your connected account; drafts stay local.';$('propose-task').disabled=creating||!!state.active||sourceBlocked();$('create-draft').disabled=creating||!!state.active;}
-function saveNew(){if(state)newDrafts.set(state.project_id,{goal:$('new-goal').value,limit:$('new-limit').value});}
+function startRequest(method,params){const epoch=selectionEpoch,current={project_id:params.project_id,task_id:params.task_id??null};return request(method,params).then(result=>{if(epoch===selectionEpoch&&sameOwner(current)&&(method!=='start_change'||state.pending?.digest===params.plan_digest||state.run?.plan?.digest===params.plan_digest&&['queued','running'].includes(state.run.stage))){taskTab='activity';render();}return result;});}
+function renderNew(){const d=newDrafts.get(state.project_id)||{goal:'',limit:'6',mode:'review'};$('new-project').textContent=state.project;$('new-goal').value=d.goal;$('new-limit').value=d.limit;$('new-mode').value=d.mode||'review';$('new-mode-note').textContent=d.mode==='python_fix'?'Propose bounded Python replacements in an app-owned copy. Running checks and applying to the original project each need your exact approval. Mode is fixed when the task is created.':'Review approved committed evidence. The source project is never edited or executed. Mode is fixed when the task is created.';$('new-sources').textContent=sourceBlocked()?'Save project sources in Settings before requesting a plan. You can create a local draft now.':'Uses this project’s saved committed sources. Planning uses one call from your connected account; drafts stay local.';$('propose-task').disabled=creating||!!state.active||sourceBlocked();$('create-draft').disabled=creating||!!state.active;}
+function saveNew(){if(state)newDrafts.set(state.project_id,{goal:$('new-goal').value,limit:$('new-limit').value,mode:$('new-mode').value});}
 function allowance(input){const value=Number(input.value);if(!Number.isSafeInteger(value)||value<1){input.setCustomValidity('Enter a positive whole number within the safe integer range.');input.reportValidity();return null;}input.setCustomValidity('');return value;}
 async function createTask(propose){
  const goal=$('new-goal').value.trim(),limit=allowance($('new-limit'));if(!goal||limit===null)return;
  const project_id=state.project_id,epoch=selectionEpoch,draft={...newDrafts.get(project_id)},rawGoal=$('new-goal').value;
  creating=true;renderNew();try{
-  const result=await request('create_task',{project_id,title:Array.from(goal).slice(0,160).join(''),specialist_limit:limit,draft:rawGoal},{manual:true});
+  const result=await request('create_task',{project_id,title:Array.from(goal).slice(0,160).join(''),specialist_limit:limit,draft:rawGoal,mode:$('new-mode').value},{manual:true});
   const task_id=result.task_id;if(!task_id)throw Error('The local task could not be created.');
   const key='task:'+project_id+':'+task_id;drafts.set(key,rawGoal);
-  const current=newDrafts.get(project_id);if(current?.goal===rawGoal&&current?.limit===draft.limit)newDrafts.delete(project_id);
+  const current=newDrafts.get(project_id);if(current?.goal===rawGoal&&current?.limit===draft.limit&&current?.mode===draft.mode)newDrafts.delete(project_id);
   if(selectionEpoch!==epoch||state.project_id!==project_id||view!=='new')return;
   apply(result);taskTab='conversation';navigate('detail');
   if(propose){await request('chat',{scope:'task',project_id,task_id,text:goal});if(drafts.get(key)===rawGoal)drafts.set(key,'');if(draftKey()===key)restoreDraft();if(sameOwner({project_id,task_id})&&view==='detail'){taskTab=state.pending?'plan':'conversation';render();}}
@@ -104,7 +108,7 @@ async function createTask(propose){
  finally{creating=false;if(view==='new')renderNew();}
 }
 async function source(c){const reference={...owner(),run_id:state.run?.id};try{const result=await request('source',{...reference,source:c.source});if(!sameOwner(reference)||state.run?.id!==reference.run_id||result.task_id!==undefined&&result.task_id!==reference.task_id)return;$('source-box').hidden=false;$('source-title').textContent=c.source+':'+c.start+'–'+c.end;$('source-text').textContent=result.text.split('\n').slice(c.start-1,c.end).map((line,i)=>(c.start+i)+'  '+line).join('\n');$('source-title').scrollIntoView({block:'nearest'});}catch{}}
-function renderResults(){const run=state?.run;$('results').hidden=!(run&&resultVisible());if(!run)return;const select=id=>{resultTab=id;renderResults();};if(window.interspaceTeam.isTeam(run)){window.interspaceTeam.renderResults(state,resultTab,select,request,source,node);return;}window.interspaceTeam.legacyTabs(resultTab,select,node);$('run-status').textContent=run.stage.replaceAll('_',' ');$('source-box').hidden=true;
+function renderResults(){const run=state?.run;$('results').hidden=!(run&&resultVisible());if(!run)return;const select=id=>{resultTab=id;renderResults();};if(window.interspaceChanges.isChange(run)){window.interspaceChanges.renderResults(state,resultTab,select,request,source,node);return;}if(window.interspaceTeam.isTeam(run)){window.interspaceTeam.renderResults(state,resultTab,select,request,source,node);return;}window.interspaceTeam.legacyTabs(resultTab,select,node);$('run-status').textContent=run.stage.replaceAll('_',' ');$('source-box').hidden=true;
 const versionSelect=$('attempt');versionSelect.replaceChildren();const currentOption=node('option','Current report · round '+(run.revision_round||0),versionSelect);currentOption.value='current';for(const previous of run.previous_attempts||[]){const option=node('option','Previous report · round '+previous.round,versionSelect);option.value=String(previous.round);}if(attempt!=='current'&&!(run.previous_attempts||[]).some(a=>String(a.round)===attempt))attempt='current';versionSelect.value=attempt;
 const controls=$('revision-controls');controls.replaceChildren();$('report-usage').replaceChildren();const used=run.revision_round||0,limit=run.revision_limit??1;node('p','Revision rounds used: '+used+'/'+limit+'. One round adds Researcher and Reviewer sessions; no automatic repeat.',$('report-usage'));
 if(run.revision_instructions)node('p','Revision request: '+run.revision_instructions,controls);
@@ -118,7 +122,7 @@ $('message').oninput=saveDraft;
 document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>navigate(b.dataset.view));
 document.querySelectorAll('[data-task-tab]').forEach(b=>b.onclick=()=>{taskTab=b.dataset.taskTab;render();});
 $('new-task').onclick=()=>navigate('new');$('back-tasks').onclick=()=>navigate('tasks');
-$('new-goal').oninput=saveNew;$('new-limit').oninput=()=>{$('new-limit').setCustomValidity('');saveNew();};
+$('new-goal').oninput=saveNew;$('new-mode').onchange=()=>{saveNew();renderNew();};$('new-limit').oninput=()=>{$('new-limit').setCustomValidity('');saveNew();};
 $('new-task-form').onsubmit=e=>{e.preventDefault();createTask(true);};$('create-draft').onclick=()=>createTask(false);
 $('new-source-settings').onclick=()=>navigate('settings');
 $('task-allowance').onsubmit=e=>{e.preventDefault();const value=allowance($('task-limit'));if(value!==null)request('update_task',{...owner(),specialist_limit:value}).catch(()=>{});};

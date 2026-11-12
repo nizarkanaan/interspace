@@ -1,6 +1,6 @@
 # Controlled Editing Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Generate bounded Python fixes, approve actual isolated checks, review and explicitly apply an exact tested diff, then exercise it with Snack Picker.
 
@@ -40,11 +40,11 @@
 
 **Records:** Change runs retain common snapshot fields plus tasks/jobs/results/combined/limits/events, `candidate` (canonical replacements, hashes, diff, digest), `checks` (reservations/results), `test_approval`, and `application`. Assignment fields add `write_paths` (empty except Implementer); normalized roles are researcher/implementer/tester/reviewer. Implementer result uses ordinary report fields plus `files:[{path,content}]`; other roles return empty `files`. Evidence IDs are `original:<path>`, `candidate:<path>`, `check:baseline`, `check:regression`, `check:candidate`. Original source paths may be aliases only when unambiguous; never remap old IDs to candidate content.
 
-- [ ] Write focused failing tests for role ordering/repeated disjoint roles, paths/byte bounds, candidate immutability/digests, evidence ranges, saved-record validation, selected/untracked target rejection and scope changes. Observe failures before implementation.
-- [ ] Implement policy and materialization, extending `sources.load` to validate the existing source manifest for `change-v1` without changing read-only formats.
-- [ ] Write failing real-filesystem application tests for exact swap/exclusive creation, duplicate apply, symlink/hardlink/changed/new-file targets, unsupported devices, rollback, competing edits at exchange, and unfinished journal inspection. macOS-specific primitives may be unavailable elsewhere, with explicit unsupported results rather than an unsafe fallback.
-- [ ] Implement descriptor-relative `renameatx_np` (`RENAME_SWAP=2`, `RENAME_EXCL=4`, confirmed in system headers), same-device gating and retained displaced files. Journal before writes; recover only by inspection. Inject tests through `hook(event, path)` at pre-replacement/after-replacement boundaries; production passes no hook.
-- [ ] Run `python3 -m unittest discover -s tests -p 'test_change*.py' -v` and existing source/orchestration tests. Expected: pass with no model calls or real project access. Commit the tested unit.
+- [x] Write focused failing tests for role ordering/repeated disjoint roles, paths/byte bounds, candidate immutability/digests, evidence ranges, saved-record validation, selected/untracked target rejection and scope changes. Observe failures before implementation.
+- [x] Implement policy and materialization, extending `sources.load` to validate the existing source manifest for `change-v1` without changing read-only formats.
+- [x] Write failing real-filesystem application tests for exact swap/exclusive creation, duplicate apply, symlink/hardlink/changed/new-file targets, unsupported devices, rollback, competing edits at exchange, and unfinished journal inspection. macOS-specific primitives may be unavailable elsewhere, with explicit unsupported results rather than an unsafe fallback.
+- [x] Implement descriptor-relative `renameatx_np` (`RENAME_SWAP=2`, `RENAME_EXCL=4`, confirmed in system headers), same-device gating and retained displaced files. Journal before writes; recover only by inspection. Inject tests through `hook(event, path)` at pre-replacement/after-replacement boundaries; production passes no hook.
+- [x] Run `python3 -m unittest discover -s tests -p 'test_change*.py' -v` and existing source/orchestration tests. Expected: pass with no model calls or real project access. Commit the tested unit.
 
 ### Task 2: Restricted Python check adapter
 
@@ -52,10 +52,10 @@
 
 **Interfaces:** `checks.availability() -> {ready, message, runtime}`; `checks.run(tree, scratch, cancel, *, runtime=None, timeout=30, output_limit=100000) -> dict`. `runtime` identifies the actual Apple Python executable and digest, preset version and required runtime roots. `run` returns `status`, `exit_code`, `stdout`, `stderr`, `tests`, `failures`, `errors`, `duration`, `runtime` and limit/cancellation details. No model-selected arguments. `checks.qualifies(results) -> bool` requires baseline pass, assertion-only regression failure and candidate pass with positive test counts.
 
-- [ ] Add failing tests for no-test discovery, real passing/failing unittest cases, clean environment, baseline error versus assertion failure, candidate write denial, missing restrictions, output/deadline/cancellation and process cleanup.
-- [ ] Implement signed Apple runtime resolution, isolated/site-disabled/bytecode-disabled trusted unittest harness, fixed arguments, parameterized deny-default macOS policy, read-only tree and writable scratch. Minimal runtime grants can follow the inspected probe under `/private/tmp/interspace-editing-probe-9bfvcvmr`; do not copy broad system/service grants. Resource ceilings include CPU, file size, descriptors and child processes.
-- [ ] Add actual canaries for unrelated reads/writes, `/System/Volumes/Data` aliases, sockets, ordinary commands and Python children. Use synthetic files only. Execute with OS enforcement outside the development process's nested restriction where necessary; a nested restriction failure is not a passing canary.
-- [ ] Run `python3 -m unittest discover -s tests -p 'test_checks.py' -v`, with explicit environment limitations. Expected: deterministic parser/policy tests and actual macOS checks pass; no unrestricted fallback. Commit.
+- [x] Add failing tests for no-test discovery, real passing/failing unittest cases, clean environment, baseline error versus assertion failure, candidate write denial, missing restrictions, output/deadline/cancellation and process cleanup.
+- [x] Implement signed Apple runtime resolution, isolated/site-disabled/bytecode-disabled trusted unittest harness, fixed arguments, parameterized deny-default macOS policy, read-only tree and writable scratch. Minimal runtime grants can follow the inspected probe under `/private/tmp/interspace-editing-probe-9bfvcvmr`; do not copy broad system/service grants. Resource ceilings include CPU, file size, descriptors and child processes.
+- [x] Add actual canaries for unrelated reads/writes, `/System/Volumes/Data` aliases, sockets, ordinary commands and Python children. Use synthetic files only. Execute with OS enforcement outside the development process's nested restriction where necessary; a nested restriction failure is not a passing canary.
+- [x] Run `python3 -m unittest discover -s tests -p 'test_checks.py' -v`, with explicit environment limitations. Expected: deterministic parser/policy tests and actual macOS checks pass; no unrestricted fallback. Commit.
 
 ### Task 3: Durable workflow and native bridge
 
@@ -63,11 +63,11 @@
 
 **Interfaces:** `change_team.chat(app, project, text, task, prior_plan=None)` plans via existing `app.call`; `change_team.execute(app, project, plan, task)` generates candidate and pauses; `change_team.finish(app, project, run, task)` executes approved checks, Tester/Reviewer jobs and synthesis. Reuse durable text-only reservations through `team.invoke`; record validation must precede every invocation. New bridge methods `start_change`, `approve_checks`, `apply_changes`, `change_evidence` carry explicit project/task/run and relevant plan/candidate/artifact digests.
 
-- [ ] Add failing lifecycle tests: create python_fix task, plan/Start, candidate pause with released active slot, exact resume, three durable process reservations, Tester handoff of real records, Reviewer/synthesis, ready-to-apply gating and exact final apply. Use fake providers/process adapters in ordinary tests.
-- [ ] Implement optional immutable task mode, capability/ownership checks, new format dispatch/load/public projection and all action gates. Missing mode stays review; read-only APIs cannot execute a change plan. Preserve existing general conversation and migration behavior.
-- [ ] Materialize the three check trees from the same snapshot/candidate tests, reserve before launch, store each result before continuing. Freeze candidate at approval and verify before every phase. All Testers consume the same check bundle. Stop/check failures preserve partial artifacts; no retries or automatic revision.
-- [ ] Implement restart recovery of active runs and journals; paused runs remain paused. Test malformed editing metadata, stale selection/source/candidate/report, duplicate actions, interrupts at reservation/result/application boundaries, and old read-only source instructions as evidence rather than runtime authority.
-- [ ] Run focused workflow suites plus the full backend suite. Expected: all pass; existing read-only semantics intact. Commit.
+- [x] Add failing lifecycle tests: create python_fix task, plan/Start, candidate pause with released active slot, exact resume, three durable process reservations, Tester handoff of real records, Reviewer/synthesis, ready-to-apply gating and exact final apply. Use fake providers/process adapters in ordinary tests.
+- [x] Implement optional immutable task mode, capability/ownership checks, new format dispatch/load/public projection and all action gates. Missing mode stays review; read-only APIs cannot execute a change plan. Preserve existing general conversation and migration behavior.
+- [x] Materialize the three check trees from the same snapshot/candidate tests, reserve before launch, store each result before continuing. Freeze candidate at approval and verify before every phase. All Testers consume the same check bundle. Stop/check failures preserve partial artifacts; no retries or automatic revision.
+- [x] Implement restart recovery of active runs and journals; paused runs remain paused. Test malformed editing metadata, stale selection/source/candidate/report, duplicate actions, interrupts at reservation/result/application boundaries, and old read-only source instructions as evidence rather than runtime authority.
+- [x] Run focused workflow suites plus the full backend suite. Expected: all pass; existing read-only semantics intact. Commit.
 
 ### Task 4: Task desk controls, packaging and live acceptance
 
@@ -78,6 +78,10 @@
 - [ ] Add a failing browser journey using actual editing public state: mode/default, plan scopes, generated candidate, checks pause, status transitions, revision/failure, reviewed Apply, stale owner/approval and untrusted text. Observe the failure before UI implementation.
 - [ ] Implement controls and static role mapping using existing builder/reviewer artwork. Keep result first, exact action consequences readable, and technical logs secondary. Preserve all existing task/source/project/legacy journeys and owner/draft protections.
 - [ ] Run backend suites on Python 3.14 and Apple 3.9 sequentially, source and packaged browser journeys (including light/dark and widths 320/390/760/1024/1280), syntax/generated checks, build and signature/resource checks. Expected: pass, with genuine unavailable checks reported explicitly.
+## Coordinator closeout after the four implementation gates
+
+These steps remain required, but are owned by the coordinator rather than the UI implementer. Complete the four scoped code gates before the whole-feature review; complete that review before any live generated-code execution or source application.
+
 - [ ] Perform one fresh whole-feature review after implementation; address Critical/Important findings with regression tests and a green suite. Retain decisions/actual results in validation documentation. No merge/push.
 - [ ] In the native app, create a new Snack Picker python_fix task at c6c48d3, request Implementer/Tester/Reviewer, inspect exact two-file proposal and five-call ceiling. Obtain the exact live call approval if needed. Start generation, present the candidate/test approval to the user, run only the three approved processes and remaining calls, inspect review, then obtain exact final diff approval and apply only Snack Picker. No automatic extra calls on failure.
 - [ ] Verify actual original-pass/regression-fail/candidate-pass records, Reviewer/synthesis, original only changed by explicit application, persisted history and final diff. Write the acceptance record and stop with any real unresolved failures honestly reported. Commit documentation; keep only the sole rebuilt app.
