@@ -105,6 +105,6 @@ Steps:
 ## Closeout
 
 - [x] One independent whole-feature review. Fix Critical and Important findings test-first.
-- [ ] Live check, only with the user's exact approval at the time: a small task with a deliberately tight budget, showing a call refused before launch and the exhausted state in the native app.
+- [x] Live check, only with the user's exact approval at the time: a small task with a deliberately tight budget, showing a call refused before launch and the exhausted state in the native app.
 
 Execution: sequential tasks, each committed when its tests pass.

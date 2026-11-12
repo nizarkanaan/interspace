@@ -66,9 +66,21 @@ The reviewer also noted, as a non-defect, that the gate enforces the task's curr
 
 After the fixes, both full suites passed again with the OS checks required: Python 3.14.6 and Apple 3.9.6, 244 tests each, zero skips. The rebuilt bundle passed the signature check, the byte-for-byte resource match and all six packaged browser suites. Logs: `/private/tmp/interspace-budgets-review-*.log`.
 
+## Live native check
+
+Run on 2026-11-11 in the rebuilt `dist/Interspace.app`, with the user's approval of exactly one real model call. Opening the app migrated the user's app data from v3 to v4, writing `state.v3-backup.json` first; existing tasks loaded normally.
+
+- **Sizing:** offline, against a copy of the app data with a fake provider, the planner prompt for the chosen goal measured 7,811 characters. That gives an estimate of 18,604 tokens, against a 16,000-token minimum for any next call. A budget of 20,000 was chosen so that the planner call fits but no later call can.
+- **The call:** a new **Read-only review** task on Snack Picker, budget 20,000, then **Propose a plan**. The one planner call launched, then hit its four-minute deadline: "Stage deadline reached; Codex process stopped. No automatic retry." With no counts returned, the ledger charged the estimate, 18,604, labelled estimated. The header read `Tokens 18,604 / 20,000 · 18,604 estimated`. No plan was produced, so Start refusal could not be exercised.
+- **Refusal:** a follow-up message was refused before launch with "Token budget exhausted: the next Orchestrator call needs about 18,589 tokens, but only 1,396 of 20,000 remain. No call was started…". No `codex` process started. The message was kept in the conversation, and the task status became **budget exhausted**.
+- **Total:** one real model call, which timed out. No Snack Picker files were read beyond the saved committed selection, and none were written.
+
+The planner timeout is unexplained. Together with the earlier ~45-second delay before a first planning call, it suggests the first Codex call in a freshly started app can stall. It was not investigated here, and nothing was retried.
+
 ## Limits and pending
 
 - No real model calls, native launch, personal app data or source projects were used for these checks.
 - Estimates are heuristics, so a real call can be refused early or overshoot slightly. Both outcomes are shown and never hidden.
-- The live native check with a deliberately tight budget is pending. It needs the user's exact approval of its calls.
+- Start refusal was verified only in automated tests, not live, because the live planner timed out without a plan.
+- When this branch rejoins `main`, rebase it. `main` now carries the graphify setup as `51bbf6b` and `fdbaca0`, while this branch carries the older copy `57eaa4f`. In a merge instead, keep `main`'s `.claude/settings.json`.
 - No merge or push.
