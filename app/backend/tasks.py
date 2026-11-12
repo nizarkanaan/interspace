@@ -7,6 +7,11 @@ import uuid
 import budget
 import orchestration
 
+MODES = ('review','python_fix','agent')
+# Agent task run states (events.md `status`); None means no turn has started yet.
+AGENT_STATES = ('queued','starting','running','waiting_lock','paused_ask','paused_scope','idle','cancelling',
+                'completed','failed','cancelled','budget_exhausted','time_limit','interrupted')
+
 
 def title(value):
     if not isinstance(value,str) or not value.strip() or len(value)>160:
@@ -21,20 +26,38 @@ def draft_text(value):
 
 
 def validate_mode(value):
-    if value not in ('review','python_fix'):raise ValueError('Choose review or python_fix task mode.')
+    if value not in MODES:raise ValueError('Choose review, python_fix or agent task mode.')
     return value
 
 
-def create(name='New task', specialist_limit=6, draft='', mode='review', token_budget=budget.DEFAULT_BUDGET):
-    return {'id':uuid.uuid4().hex,'title':title(name),'mode':validate_mode(mode),
-            'specialist_limit':orchestration.validate_specialist_limit(specialist_limit),'draft':draft_text(draft),
-            'token_budget':budget.validate(token_budget),'thread':[],'pending':None,'run_id':None,'run_ids':[],'error':'','error_status':None}
+def create(name='New task', specialist_limit=6, draft='', mode='review', token_budget=budget.DEFAULT_BUDGET, project_id=None):
+    task={'id':uuid.uuid4().hex,'title':title(name),'mode':validate_mode(mode),
+          'specialist_limit':orchestration.validate_specialist_limit(specialist_limit),'draft':draft_text(draft),
+          'token_budget':budget.validate(token_budget),'thread':[],'pending':None,'run_id':None,'run_ids':[],'error':'','error_status':None}
+    if mode=='agent':
+        # The scope (scope.md) is attached by the caller, which needs the task ID to build it.
+        if not isinstance(project_id,str) or not project_id:raise ValueError('An agent task needs a project.')
+        task.update(scope=None,scope_approval=None,
+                    agent={'project_id':project_id,'state':None,'detail':'','reason':None,'turns':0,'active_s':0.0,'workspaces':{}})
+    return task
+
+
+def validate_agent(task):
+    """Shape checks for the agent fields; scope contents are validated by scope.validate at the boundary."""
+    agent=task.get('agent')
+    if not isinstance(agent,dict) or not isinstance(agent.get('project_id'),str):raise ValueError()
+    if agent.get('state') is not None and agent['state'] not in AGENT_STATES:raise ValueError()
+    if type(agent.get('turns',0)) is not int or not isinstance(agent.get('workspaces',{}),dict):raise ValueError()
+    if not isinstance(agent.get('active_s',0.0),(int,float)) or isinstance(agent.get('active_s'),bool):raise ValueError()
+    if task.get('scope') is not None and not isinstance(task['scope'],dict):raise ValueError()
+    if task.get('scope_approval') is not None and not isinstance(task['scope_approval'],dict):raise ValueError()
 
 
 def validate(task, identity):
     try:
         if not isinstance(task,dict) or task['id']!=identity:raise ValueError()
-        validate_mode(task.get('mode','review'));title(task['title']);orchestration.validate_specialist_limit(task['specialist_limit']);budget.validate(task.get('token_budget'));draft_text(task.get('draft',''))
+        if validate_mode(task.get('mode','review'))=='agent':validate_agent(task)
+        title(task['title']);orchestration.validate_specialist_limit(task['specialist_limit']);budget.validate(task.get('token_budget'));draft_text(task.get('draft',''))
         if not isinstance(task['thread'],list) or not isinstance(task['run_ids'],list):raise ValueError()
         for message in task['thread']:
             if (not isinstance(message,dict) or message.get('role') not in ('user','assistant')
