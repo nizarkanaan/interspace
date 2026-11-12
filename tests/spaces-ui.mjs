@@ -33,7 +33,10 @@ export default async function check(page,url){
   await nav.getByRole('button',{name:new RegExp('^'+name)}).click();
   assert(await page.locator('#spaces-view').isVisible(),'Spaces view hidden for '+name);
   assert((await text(page.locator('#heading'))).includes(name),'Heading wrong for '+name);
-  assert((await text(page.locator('#space-panel'))).includes('Not available yet'),'Missing panel not reported for '+name);
+  // Panels merged so far register themselves; the rest still show the placeholder.
+  const placeholder=(await text(page.locator('#space-panel'))).includes('Not available yet');
+  if(name==='Notion')assert(!placeholder,'Merged Notion panel did not register');
+  else assert(placeholder,'Missing panel not reported for '+name);
  }
 
  // A registered panel renders with a scoped api; the frame disposes it on leaving.
@@ -50,9 +53,10 @@ export default async function check(page,url){
  assert(browse.items[0].title==='<b>octo/notes</b>','Browse result not passed through');
  const sent=await page.evaluate(()=>window.spacesFixture.requests.filter(r=>r.method==='spaces_browse'));
  assert(sent.length===1&&JSON.stringify(sent[0].params)===JSON.stringify({limit:5,app:'github'}),'Request not scoped to the panel app: '+JSON.stringify(sent));
+ const before=await page.evaluate(()=>window.spacesFixture.requests.length);
  const refused=await page.evaluate(async()=>{const out=[];for(const [m,p] of [['agent_cancel',{task_id:'t1'}],['spaces_browse',{app:'notion'}],['scope_get',{}]]){try{await window.githubApi.request(m,p);out.push('sent '+m);}catch(e){out.push('refused');}}return out;});
  assert(refused.every(x=>x==='refused'),'Out-of-scope panel request allowed: '+refused);
- assert(await page.evaluate(()=>window.spacesFixture.requests.filter(r=>r.method!=='spaces_browse'&&r.method!=='state').length)===0,'Refused request reached the bridge');
+ assert(await page.evaluate(n=>window.spacesFixture.requests.length-n,before)===0,'Refused request reached the bridge');
 
  // Shared destructive-action dialog: literal text, keyboard-accessible, both answers.
  let answer=page.evaluate(()=>window.githubApi.confirm('Close <i>issue</i> #38?'));
