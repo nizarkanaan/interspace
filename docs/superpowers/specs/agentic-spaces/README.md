@@ -83,4 +83,11 @@ Other ownership, in addition to the roadmap table:
 - `scope.validate(document, *, project_ids=None)` checks registered projects when `project_ids` is given.
 - `Journal.begin` returns the stored record, or `None` after durably recording `started`, and never raises. `spaces.base.journaled_write` (1A) alone decides replay, `OutcomeUnknown` and `InvalidRequest` from that record. `FileJournal` (1E) and `MemoryJournal` (1A) both behave this way.
 
+**Coordinator rulings (2026-11-12, after the first four Wave 1 streams merged).**
+- **Task rows** carry `mode` (`review`, `python_fix` or `agent`), as `task_summaries` already does. The UI identifies agent tasks by `mode == "agent"`.
+- **Default scope.** A new method `scope_default {project_id}` returns a validated default scope document for a new agent task, without creating anything. The new agent task form calls it, lets the user edit the scope, then calls `agent_create` with that scope. This is built in Wave 2C: backend and UI together.
+- **Mentions.** For v1, `@mentions` are plain text in the message, as `@<ref>` for app resources and `@<path>` for workspace files. The runtime passes them through unchanged; no structured encoding.
+- **Opening an agent task** loads history with `task_events` and the scope with `scope_get`; it does not need `select_task`.
+- **Answer path.** `scheduler._amend` repeats the checks in `scope.apply_answer` instead of calling it. They are equivalent today. Wave 2 should make the scheduler call `scope.apply_answer`, so the checks live in one place.
+
 A stream that needs a change to a contract asks the coordinator. It never changes the shape locally.
