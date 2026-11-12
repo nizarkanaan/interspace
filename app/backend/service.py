@@ -240,9 +240,10 @@ class Application:
         try:
             change_team.require_task(task)
             if record['task_id']!=task['id']:raise ValueError('Editing owner changed.')
-            changes.check_current(project,run,record)
             ref=dict(project_id=project['id'],task_id=task['id'],run_id=record['id'],plan_digest=record['plan']['digest'],candidate_digest=record['candidate']['digest'],artifact_id=changes.artifact_id(record))
+            # owned_run validated the saved artifacts; history reads survive a changed checkout/scope.
             public['action_refs']['change_evidence']=ref
+            changes.check_current(project,run,record)
             available=record.get('check_availability',{})
             if not self.state['active'] and record['stage']=='awaiting_test_approval' and available.get('ready') is True:
                 public['action_refs']['approve_checks']=dict(ref,recipe=changes.RECIPE,runtime=copy.deepcopy(available['runtime']))

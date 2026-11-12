@@ -146,6 +146,35 @@ class WorkflowTests(unittest.TestCase):
                 with self.assertRaises(ValueError):self.app.handle('approve_checks',dict(self.ref(paused),recipe=changes.RECIPE,runtime=RUNTIME))
                 self.assertEqual(len(self.provider.calls),2);self.assertEqual(self.processes,[])
                 if mutation=='source':(self.source/'main.py').write_text('value = 1\n')
+    def test_stale_checkout_or_refreshed_selection_preserves_exact_evidence_without_mutation_actions(self):
+        for stage in ('paused','ready'):
+            for mutation in ('source','selection'):
+                with self.subTest(stage=stage,mutation=mutation):
+                    self.setup_app();saved=self.start()
+                    if stage=='ready':saved=self.approve(saved)
+                    reference=copy.deepcopy(saved['action_refs']['change_evidence'])
+                    calls=len(self.provider.calls);processes=len(self.processes)
+                    if mutation=='source':(self.source/'main.py').write_text('competing user edit\n')
+                    else:
+                        selection=self.app.public()['source_selection']
+                        self.app.handle('save_sources',dict(project_id=self.pid,selection_version=selection['selection_version'],revision=selection['revision'],paths=selection['paths']))
+                    public=self.app.public()['run']
+                    self.assertTrue(public['change_error'])
+                    self.assertEqual(public['action_refs'],{'change_evidence':reference})
+                    self.assertFalse(public['can_approve_checks']);self.assertFalse(public['can_apply_changes'])
+                    evidence={'original:main.py':'value = 1\n','candidate:main.py':'value = 2\n'}
+                    if stage=='ready':evidence['check:regression']='ACTUAL_FIXTURE_regression'
+                    for source,text in evidence.items():
+                        result=self.app.handle('change_evidence',dict(reference,source=source))
+                        self.assertIn(text,result['text'])
+                        for key,value in reference.items():self.assertEqual(result[key],value)
+                    for key in ('project_id','task_id','run_id','plan_digest','candidate_digest','artifact_id'):
+                        with self.subTest(stale=key),self.assertRaises(ValueError):
+                            self.app.handle('change_evidence',dict(reference,source='original:main.py',**{key:'stale'}))
+                    for method in ('approve_checks','apply_changes'):
+                        with self.assertRaises(ValueError):self.app.handle(method,dict(reference,recipe=changes.RECIPE,runtime=copy.deepcopy(RUNTIME)))
+                    self.assertEqual(len(self.provider.calls),calls);self.assertEqual(len(self.processes),processes)
+                    self.assertEqual((self.source/'main.py').read_text(),'competing user edit\n' if mutation=='source' else 'value = 1\n')
     def test_repeated_roles_share_three_processes_and_enforce_all_model_reservations(self):
         assignments=[assignment('code','implementer',['main.py']),assignment('tests','implementer',['tests/test_main.py']),assignment('test1','tester',deps=['code','tests']),assignment('test2','tester',deps=['code','tests']),assignment('review1','reviewer',deps=['test1','test2']),assignment('review2','reviewer',deps=['test1','test2'])]
         self.setup_app(assignments);paused=self.start();ready=self.approve(paused)

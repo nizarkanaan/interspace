@@ -31,6 +31,10 @@ def fixtures():
         result['evidence'] = {}
         for source in ['original:main.py', 'candidate:main.py', 'check:baseline', 'check:regression', 'check:candidate']:
             result['evidence'][source] = app.handle('change_evidence', dict(case.ref(ready), source=source))
+        (case.source/'main.py').write_text('competing user edit\n')
+        result['stale_ready'] = copy.deepcopy(app.public())
+        result['stale_ready_evidence'] = {source:app.handle('change_evidence',dict(case.ref(ready),source=source)) for source in result['evidence']}
+        (case.source/'main.py').write_text('value = 1\n')
         app.handle('apply_changes', case.ref(ready));app.wait()
         result['applied'] = copy.deepcopy(app.public())
         reopened = Application(app.storage, provider=case.provider)
@@ -38,6 +42,10 @@ def fixtures():
         result['reopened_evidence'] = {source:reopened.handle('change_evidence',dict(case.ref(ready),source=source)) for source in result['evidence']}
         result['source_after_apply'] = (case.source/'main.py').read_text()
         result['default'] = reopened.handle('create_task',dict(project_id=case.pid,title='Other read-only task'))
+        case.setup_app();refreshed_ready=case.approve(case.start())
+        selection=case.app.public()['source_selection']
+        result['refreshed'] = case.app.handle('save_sources',dict(project_id=case.pid,selection_version=selection['selection_version'],revision=selection['revision'],paths=selection['paths']))
+        result['refreshed_evidence'] = {source:case.app.handle('change_evidence',dict(case.ref(refreshed_ready),source=source)) for source in result['evidence']}
         case.setup_app();case.provider.verdict='revise';case.approve(case.start())
         result['revision'] = copy.deepcopy(case.app.public())
         case.setup_app();case.provider.fail='Role: Implementer';case.start()

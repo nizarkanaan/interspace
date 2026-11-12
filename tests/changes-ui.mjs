@@ -24,7 +24,7 @@ export default async function check(page,url){
     if(r.method==='change_evidence'){
      const exact={project_id:s.project_id,task_id:s.task_id,run_id:s.run.id,plan_digest:s.run.plan.digest,candidate_digest:s.run.candidate.digest,artifact_id:s.run.artifact_id,source:r.params.source};
      if(Object.keys(exact).some(k=>r.params[k]!==exact[k])){queueMicrotask(()=>window.interspaceReceive({id:r.id,error:'Stale evidence'}));return;}
-     next=fixture.evidence[r.params.source];
+     next=(fixture[f.current+'_evidence']||fixture.evidence)[r.params.source];
     }
     if(f.hold&&['change_evidence','approve_checks','apply_changes'].includes(r.method)){f.held={r,next};return;}
     queueMicrotask(()=>window.interspaceReceive({id:r.id,result:next}));
@@ -80,6 +80,20 @@ export default async function check(page,url){
   assert(await page.getByRole('button',{name:'Apply reviewed changes',exact:true}).count()===0,'Unsafe Apply at '+name);
   assert(await page.getByRole('button',{name:'Run candidate checks',exact:true}).count()===0,'Unsafe checks at '+name);
   assert((await page.locator('#revision-controls').textContent()).length>15,'Terminal/stale explanation absent '+name);
+ }
+ // Actual stale public projections retain immutable original/candidate/check evidence.
+ for(const name of ['stale_ready','refreshed']){
+  await install(name);await page.locator('[data-open-task="'+fixture[name].task_id+'"]').click();await page.locator('[data-task-tab=result]').click();
+  assert(await page.getByRole('button',{name:'Apply reviewed changes',exact:true}).count()===0,'Stale Apply offered '+name);
+  assert(await page.getByRole('button',{name:'Run candidate checks',exact:true}).count()===0,'Stale checks offered '+name);
+  assert(!!fixture[name].run.change_error,'Fixture must actually fail source freshness '+name);
+  for(const [button,body] of [['Original · main.py','value = 1'],['Candidate · main.py','value = 2'],['Regression output','ACTUAL_FIXTURE_regression']]){
+   if(button==='Regression output')await page.locator('.check-row').filter({hasText:'Regression'}).locator('summary').click();
+   const evidence=page.getByRole('button',{name:button,exact:true});assert(await evidence.isEnabled(),'Preserved evidence disabled '+name+' '+button);
+   await evidence.click();assert((await page.locator('#source-text').textContent()).includes(body),'Stale evidence missing '+name+' '+button);
+   const request=await page.evaluate(()=>window.changeFixture.requests.filter(r=>r.method==='change_evidence').at(-1));
+   assert(JSON.stringify(request.params)===JSON.stringify({...fixture[name].run.action_refs.change_evidence,source:request.params.source}),'Stale evidence lost exact reference '+name);
+  }
  }
  // A late check-approval reply cannot restore an older artifact over the reviewed result.
  await install('paused');await page.locator('[data-open-task="'+fixture.paused.task_id+'"]').click();await page.locator('[data-task-tab=result]').click();
