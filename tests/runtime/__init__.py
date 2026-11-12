@@ -11,9 +11,11 @@ from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[2]
 _BACKEND = _ROOT / 'app' / 'backend'
-for _path in (_BACKEND, _ROOT / 'tests'):
+# Appended, never prepended: under discovery `tests` must stay ahead of app/backend, or a later
+# `import spaces` would load app/backend/spaces and hide the tests/spaces package.
+for _path in (_ROOT / 'tests', _BACKEND):
     if str(_path) not in sys.path:
-        sys.path.insert(0, str(_path))
+        sys.path.append(str(_path))
 
 if __name__ == 'runtime':
     _REAL_INIT = _BACKEND / 'runtime' / '__init__.py'
