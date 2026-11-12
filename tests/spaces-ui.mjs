@@ -37,6 +37,7 @@ export default async function check(page,url){
   const placeholder=(await text(page.locator('#space-panel'))).includes('Not available yet');
   if(name==='Notion')assert(!placeholder,'Merged Notion panel did not register');
   else if(name==='GitHub')assert(!placeholder&&(await text(page.locator('#space-panel'))).includes('Connect GitHub'),'GitHub panel did not register');
+  else if(name==='Google Drive')assert(!placeholder,'Merged Google Drive panel did not register');
   else if(name==='Zotero')assert(!placeholder,'Zotero panel did not register');
   else assert(placeholder,'Missing panel not reported for '+name);
  }

@@ -1,0 +1,32 @@
+{
+ "kind": "drive#fileList",
+ "files": [
+  {
+   "kind": "drive#file",
+   "id": "docOutline0000001",
+   "name": "Outline",
+   "mimeType": "application/vnd.google-apps.document",
+   "parents": [
+    "folderReading0001"
+   ],
+   "modifiedTime": "2026-11-10T18:02:11.123Z",
+   "version": "17",
+   "trashed": false,
+   "webViewLink": "https://docs.google.com/document/d/docOutline0000001/edit"
+  },
+  {
+   "kind": "drive#file",
+   "id": "filePaper00000001",
+   "name": "paper.pdf",
+   "mimeType": "application/pdf",
+   "parents": [
+    "folderReading0001"
+   ],
+   "modifiedTime": "2026-11-10T18:02:11.123Z",
+   "version": "17",
+   "trashed": false,
+   "webViewLink": "https://drive.google.com/file/d/filePaper00000001/view",
+   "size": "204800"
+  }
+ ]
+}

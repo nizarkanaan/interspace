@@ -1,0 +1,13 @@
+{
+ "kind": "drive#file",
+ "id": "docNew00000000001",
+ "name": "Meeting notes",
+ "mimeType": "application/vnd.google-apps.document",
+ "parents": [
+  "folderReading0001"
+ ],
+ "modifiedTime": "2026-11-11T10:00:31.000Z",
+ "version": "2",
+ "trashed": false,
+ "webViewLink": "https://docs.google.com/document/d/docNew00000000001/edit"
+}
