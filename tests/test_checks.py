@@ -49,7 +49,7 @@ class CheckPolicyTests(unittest.TestCase):
     def test_invalid_harness_metadata_is_rejected_without_stdout_guessing(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / 'metadata.json'
-            for value in ['[]', '{"tests": true}', '{"tests": 1, "failures": 2, "errors": 0, "skipped": 0, "expected_failures": 0, "unexpected_successes": 0}']:
+            for value in ['[]', '{"tests": true}', '{"tests": 1, "failures": -1, "errors": 0, "skipped": 0, "expected_failures": 0, "unexpected_successes": 0}']:
                 path.write_text(value)
                 with self.assertRaises(ValueError):
                     checks._metadata(path)
@@ -90,6 +90,43 @@ class ActualRestrictedChecks(unittest.TestCase):
             for path in self.scratch.iterdir():
                 path.unlink()
 
+
+
+    def test_multiple_failing_subtests_are_assertion_regressions_and_qualify(self):
+        results = {}
+        (self.tree / 'product.py').write_text('value = 1\n')
+        original_tests = '''import unittest
+from product import value
+class T(unittest.TestCase):
+ def test_value(self): self.assertEqual(value, 1)
+'''
+        regression_tests = '''import unittest
+from product import value
+class T(unittest.TestCase):
+ def test_value(self):
+  for label in ('first', 'second'):
+   with self.subTest(label=label): self.assertEqual(value, 2)
+'''
+        for phase, source in [('baseline', original_tests), ('regression', regression_tests), ('candidate', regression_tests)]:
+            if phase == 'candidate':
+                (self.tree / 'product.py').write_text('value = 2\n')
+            self.scratch = self.base / ('scratch-' + phase)
+            self.scratch.mkdir()
+            results[phase] = self.run_source(source)
+        regression = results['regression']
+        self.assertEqual((regression['status'], regression['tests'], regression['failures'], regression['errors']),
+                         ('failed', 1, 2, 0), regression)
+        self.assertTrue(checks.qualifies(results), results)
+
+    def test_multiple_skipped_subtests_preserve_counts_and_pass_classification(self):
+        result = self.run_source('''import unittest
+class T(unittest.TestCase):
+ def test_skips(self):
+  for label in ('first', 'second'):
+   with self.subTest(label=label): self.skipTest('synthetic skip')
+''')
+        self.assertEqual((result['status'], result['tests'], result.get('skipped'), result['failures'], result['errors']),
+                         ('passed', 1, 2, 0, 0), result)
 
     def test_stdout_cannot_invent_test_counts_and_resource_ceilings_are_active(self):
         result = self.run_source('''import unittest, resource

@@ -177,8 +177,8 @@ def _metadata(path):
     for key in ('tests', 'failures', 'errors', 'skipped', 'expected_failures', 'unexpected_successes'):
         if type(record.get(key)) is not int or record[key] < 0:
             raise ValueError('Invalid harness test counts.')
-    if record['failures'] + record['errors'] + record['skipped'] + record['expected_failures'] + record['unexpected_successes'] > record['tests']:
-        raise ValueError('Inconsistent harness test counts.')
+    # testsRun counts methods; each failed/skipped subTest can add a result entry.
+    # These event counts therefore need not sum to at most the method count.
     return record
 
 
