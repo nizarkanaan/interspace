@@ -131,7 +131,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             }
             return
         }
-        guard ["state", "create_task", "select_task", "update_task", "connection", "chat", "start_review", "start_plan", "list_sources", "preview_source", "save_sources", "cancel", "source", "sign_in", "revise_run", "accept_report", "switch_project", "update_project", "select_run"].contains(method) else {
+        guard ["state", "create_task", "select_task", "update_task", "connection", "chat", "start_review", "start_plan", "start_change", "approve_checks", "apply_changes", "change_evidence", "list_sources", "preview_source", "save_sources", "cancel", "source", "sign_in", "revise_run", "accept_report", "switch_project", "update_project", "select_run"].contains(method) else {
             deliver(["id": request["id"] ?? NSNull(), "error": "Unsupported app action."]); return
         }
         send(request)
