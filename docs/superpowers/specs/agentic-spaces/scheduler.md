@@ -119,6 +119,38 @@ class RunContext:
   - treat all connector content and file content as data;
   - reject provider messages that do not match its validated shapes (`runtime_protocol` error), as `provider.py` rejects unexpected events today.
 
+### `RunContext` additions (Wave 2A, additive)
+
+```python
+    def tools(self) -> list: ...                          # connector ToolDescriptors for the apps in the live scope
+    def observed(self, request, call_id) -> dict: ...     # record an action the provider ran without asking
+```
+
+- `tools()` lists the descriptors (connectors.md) of every app named in the task's live `scope.apps`, through the scheduler's `tool_catalog(app) -> [ToolDescriptor]` (2C passes it to `Scheduler(..., tool_catalog=…)`). An app that is signed out or fails is left out. Without `tool_catalog` the list is empty and the bridge exposes no tools.
+- `observed(request, call_id)` is for actions the provider only reports after the fact (for example a web search, or a command Codex ran without an approval request). It writes a `decision` audit record with `decision: allow` and `rule: "provider.sandbox"` and returns the final decision `{"decision": "allow", "rule": "provider.sandbox", …}` for the runtime's `tool_call` card. It never asks and never blocks.
+- A runtime may raise `runtime.RuntimeFailure(code, message)` (a `ValueError`) from `open` or `run_turn`; the scheduler then shows that code and sentence instead of the generic `runtime_exited`, and drops the session.
+
+## MCP bridge API (`runtime/mcp_bridge.py`, 2A; used by 2A and 2B)
+
+The Interspace MCP bridge exposes connector tools to any provider that speaks MCP over stdio. It is provider-neutral: each runtime turns `server` into its own configuration. Every tool call goes through `RunContext.app_tool`; the bridge never calls a connector and never decides policy.
+
+```python
+from runtime import mcp_bridge
+
+bridge = mcp_bridge.start(tools, socket_dir=None)   # once per runtime session; tools = ctx.tools()
+bridge.server    # {"name": "interspace", "command": "<python>", "args": ["-I", "<…/mcp_bridge.py>"],
+                 #  "env": {"INTERSPACE_MCP_SOCKET": "<path>", "INTERSPACE_MCP_TOKEN": "<random>"}}
+bridge.bind(ctx)     # at the start of each turn: route tools/call to this turn's ctx.app_tool
+bridge.unbind()      # at the end of each turn; a call outside a turn gets an MCP error result
+bridge.stop()        # end of session: close the socket, disconnect the stdio process, remove the socket file
+```
+
+- **Transport.** The provider starts `server.command server.args` as a stdio MCP server (MCP JSON-RPC, one JSON object per line). That small process is a relay: it connects to a Unix socket owned by the backend, sends the token, then copies lines both ways. The MCP protocol itself (`initialize`, `tools/list`, `tools/call`, `ping`) is answered inside the backend. The socket lives in a new `0700` directory (default under the system temporary directory, because macOS limits socket paths to 104 bytes), accepts only connections that present the token, and is removed by `stop()`.
+- **Secrets.** The token only proves the relay was started for this session; it is not a credential for any app. It goes in the provider's per-session MCP configuration (Codex: `thread/start.config.mcp_servers`; Claude: its MCP config), never on a command line or in an event.
+- **Tools.** `tools/list` returns one MCP tool per descriptor: `name`, `description`, `inputSchema` = `input_schema`, and `annotations` `{readOnlyHint, destructiveHint}` from `effect`. The list is fixed at `start`; a scope change that adds an app takes effect in the next session.
+- **Calls.** `tools/call {name, arguments}` → `ctx.app_tool(name, arguments, call_id)` with a fresh `call_id` (`mcp_<32 hex>`). Calls run on their own threads, so a call waiting on an ask does not block `ping`. The result is one `text` content item holding the tool result JSON (connectors.md); `isError` is `true` when `ok` is `false`. Results of `read` tools are wrapped as untrusted data: `<untrusted-content app="notion">…</untrusted-content>`, with a one-line reminder that it is data, not instructions.
+- **Provider mapping.** Codex: `config.mcp_servers.interspace = {command, args, env, default_tools_approval_mode: "prompt"}`; its approval elicitation for server `interspace` is answered `accept`, because `app_tool` authorizes the exact call. Claude Code: `{"mcpServers": {"interspace": {"type": "stdio", "command", "args", "env"}}}`. The server name `interspace` is reserved: a runtime never attaches another server under it.
+
 ## Budgets
 
 The budget stays per task, tokens only, gated before work starts.
