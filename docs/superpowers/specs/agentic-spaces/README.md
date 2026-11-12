@@ -77,4 +77,10 @@ Other ownership, in addition to the roadmap table:
 
 **Coordinator ruling (2026-11-12, Wave 1 start).** The user chose to start Wave 1 with four streams (1A, 1E, 1F, 1G); 1B–1D start after 1A merges. So `app/backend/spaces/__init__.py`, `app/backend/spaces/base.py` and `tests/spaces/fakehttp.py` are owned by **1A** for this round. 1A writes them exactly as connectors.md specifies, with their own tests. 1B–1D then reuse them unchanged. The coordinator created `tests/fixtures/events/basic-task.jsonl`. `app/macos/main.swift` (Keychain bridge, `open_url`, `bridge_hello`, new allowed methods) is owned by **1F**.
 
+**Coordinator ruling (2026-11-12, asked by 1E).** These are additive and optional; no existing shape changes.
+- App requests to `scope.decide` may carry `parents`: a list of refs, nearest first, as the connector reports them. `RunContext.app_tool` (1F, and the real adapter in 2A) fills it when the connector knows the ancestry. Without it, `include_children` matches only the exact ref, so a child resource asks instead of being allowed.
+- `scope.decide` gains optional keyword arguments `app_data`, `home` and `temp_roots`. They default to `~/Library/Application Support/Interspace`, `~` and `()`, so tests and the `Application` data directory can pass their own.
+- `scope.validate(document, *, project_ids=None)` checks registered projects when `project_ids` is given.
+- `Journal.begin` returns the stored record, or `None` after durably recording `started`, and never raises. `spaces.base.journaled_write` (1A) alone decides replay, `OutcomeUnknown` and `InvalidRequest` from that record. `FileJournal` (1E) and `MemoryJournal` (1A) both behave this way.
+
 A stream that needs a change to a contract asks the coordinator. It never changes the shape locally.
