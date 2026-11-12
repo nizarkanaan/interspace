@@ -13,6 +13,13 @@ CHARS_PER_TOKEN = 3
 PROVIDER_OVERHEAD_TOKENS = 12000
 OUTPUT_RESERVE = {'Orchestrator': 4000, 'Implementer': 8000}
 DEFAULT_OUTPUT_RESERVE = 4000
+# Agent turns (codex app-server) reserve a fixed allowance per turn. The 0B spike measured about
+# 21,000 tokens for a minimal turn; 30,000 leaves room for a few tool steps. PROVISIONAL(0B-2):
+# longer turns overshoot and the overshoot is shown, and mid-turn usage reports stop a turn at the cap.
+AGENT_TURN_ALLOWANCE = 30000
+PROVIDERS = ('codex', 'claude')
+# Entries without a provider are Codex (the Claude Code provider spec requires this reading).
+CHARGE_RULES = {'codex': 'codex.input+output'}
 
 
 class Exhausted(ValueError):
@@ -27,14 +34,17 @@ def validate(value):
     return value
 
 
-def charge(usage):
+def charge(usage, provider='codex'):
     """Tokens charged for one call, or None when no complete count was returned.
+
+    Only providers with a rule in CHARGE_RULES are counted; any other provider's usage is
+    unknown and the call is charged its estimate. (2B adds the Claude rule from its spec.)
 
     Codex TokenUsage: cached_input_tokens is a subset of input_tokens, and reasoning output
     is part of output_tokens (its own blended total is non-cached input + output_tokens).
     So input_tokens + output_tokens counts every token exactly once, cached input included.
     """
-    if not isinstance(usage, dict):
+    if provider not in CHARGE_RULES or not isinstance(usage, dict):
         return None
     values = [usage.get('input_tokens'), usage.get('output_tokens')]
     if any(type(v) is not int or v < 0 for v in values):
@@ -50,6 +60,14 @@ def estimate(prompt, role):
     return estimate_chars(len(prompt), role)
 
 
+_estimate_prompt = estimate  # reserve's `estimate` parameter shadows the function name.
+
+
+def estimate_turn(prompt_chars):
+    """The reservation for one agent turn: a fixed allowance plus the user's message."""
+    return AGENT_TURN_ALLOWANCE + -(-prompt_chars // CHARS_PER_TOKEN)
+
+
 def _amount(value):
     return value if type(value) is int and value >= 0 else None
 
@@ -60,7 +78,7 @@ def _entry_charge(entry):
         return None
     if kind in ('reported', 'estimated'):
         return _amount(entry.get('charge'))  # A malformed saved charge counts as unknown, never as zero.
-    return charge(entry.get('tokens'))  # Entries recorded before budgets existed.
+    return charge(entry.get('tokens'), entry.get('provider', 'codex'))  # Entries recorded before budgets existed.
 
 
 def ledger(state, task_id, token_budget=None):
@@ -91,8 +109,14 @@ def ledger(state, task_id, token_budget=None):
     return totals
 
 
-def reserve(state, task, *, role, prompt, project_id, run_id=None, assignment_id=None):
-    need = estimate(prompt, role)
+def reserve(state, task, *, role, prompt, project_id, run_id=None, assignment_id=None,
+            estimate=None, provider=None, turn_id=None, call_kind=None):
+    """Hold an estimate before a call. Agent turns pass `estimate`, `provider`, `turn_id` and `call_kind`."""
+    need = _estimate_prompt(prompt, role) if estimate is None else estimate
+    if type(need) is not int or need <= 0:
+        raise ValueError('Token estimate must be a positive whole number.')
+    if provider is not None and provider not in PROVIDERS:
+        raise ValueError('Unknown model provider.')
     limit = validate(task.get('token_budget'))
     if limit is not None:
         totals = ledger(state, task['id'], limit)
@@ -108,6 +132,8 @@ def reserve(state, task, *, role, prompt, project_id, run_id=None, assignment_id
         entry['run_id'] = run_id
     if assignment_id is not None:
         entry['assignment_id'] = assignment_id
+    if provider is not None:
+        entry.update(provider=provider, charge_rule=CHARGE_RULES.get(provider), turn_id=turn_id, call_kind=call_kind)
     state.setdefault('usage', []).append(entry)
     return entry['id']
 
@@ -121,7 +147,7 @@ def _reserved_entry(state, entry_id):
 
 def settle(state, entry_id, usage, outcome):
     entry = _reserved_entry(state, entry_id)
-    amount = charge(usage)
+    amount = charge(usage, entry.get('provider', 'codex'))
     entry.update(tokens=usage, outcome=outcome)
     if amount is None:
         entry.update(charge_kind='estimated', charge=entry['estimate'])
