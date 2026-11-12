@@ -1,6 +1,6 @@
 # Scope schema, policy decisions and audit record
 
-Status: approved by the user on 2026-11-12, Wave 0A. Provisional fields await the 0B and 0C reconciliation. Conventions and the provisional register are in [README.md](README.md).
+Status: approved by the user on 2026-11-12, Wave 0A. The 0B fields were reconciled in Wave 2A (2026-11-12); 0C fields await their reconciliation. Conventions and the provisional register are in [README.md](README.md).
 
 The user approves a **scope** once per task. Inside it the agent acts without asking. Outside it, that task alone pauses and asks. A fixed always-deny list is refused whatever the scope says. 1E implements `app/backend/scope.py` and `app/backend/audit.py`; every other stream calls them through the functions below.
 
@@ -51,10 +51,10 @@ Field rules (validated by `scope.validate(document)`, which raises `ValueError` 
   - Default for a new project entry: `read: ["**"]`, `write: ["**"]` when access is `write`, `deny: []`.
 - `commands`:
   - `workspace`: `allow` | `ask` | `deny`. Applies to commands that run **inside the sandbox** with the workspace as their only writable root and no network (Codex's `workspace-write` behaviour), and whose `cwd` resolves inside a workspace. Default `allow` when any project has `write` access, otherwise `ask`.
-  - Known limit `PROVISIONAL(0B-8)`: the sandbox restricts writes and network, not reads. A sandboxed command can read files the user can read outside the workspace.
+  - Known limit (0B-8, confirmed): Codex's `:workspace` sandbox restricts writes and network, not reads. The Codex runtime narrows reads with deny entries in its permission profile: credential folders (`~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.codex`, `~/.config/gh`, `~/Library/Keychains`, and similar), the app-owned `CODEX_HOME`, and all of Interspace's data except the task's own workspace (other tasks' clones, events, audit, state). Any other file the user can read, including the user's own project checkouts, stays readable by a sandboxed command.
   - `allow` and `deny`: 0–64 argv prefixes, each a list of 1–8 strings. A command matches when its argv starts with the prefix exactly. `deny` wins over `allow`.
 - `network` (the user's decision 3): `default` is `ask` | `deny` (`allow` is not offered in v1). `allow_hosts` and `deny_hosts` hold 0–64 hostnames, lowercase, optional leading `*.` for subdomains, no ports, no schemes. Default `{"default": "ask", "allow_hosts": [], "deny_hosts": []}`.
-  - Enforcement granularity is `PROVISIONAL(0B-5)`. If the sandbox has only on/off network, a command that needs network produces a `network` request with `host: null`; the ask is titled "Allow network to any host for this one command?", offers only `allow_once` and `deny`, and `allow_hosts`/`deny_hosts` are not used for commands. The scope editor then labels the network setting "Ask for each command that needs network". The user chose per-host asks; if 0B confirms on/off only, the coordinator tells the user before Wave 2.
+  - Enforcement granularity (0B-5, decided): on/off only. Interspace does not enable Codex's managed network proxy, so the sandbox cannot filter hosts. Because the sandbox has only on/off network, a command that needs network produces a `network` request with `host: null`; the ask is titled "Allow network to any host for this one command?", offers only `allow_once` and `deny`, and `allow_hosts`/`deny_hosts` are not used for commands. The scope editor then labels the network setting "Ask for each command that needs network". The user chose per-host asks; if 0B confirms on/off only, the coordinator tells the user before Wave 2.
 - `apps`: 0–4 entries, one per app.
   - `access`: `read` | `write`.
   - `resources`: `"all"` or 1–64 entries `{ref, include_children}`. `include_children` covers resources whose `parent` chain reaches `ref`, as reported by the connector.
@@ -66,7 +66,13 @@ Field rules (validated by `scope.validate(document)`, which raises `ValueError` 
 
 ## Requests
 
-Every action the runtime, the MCP bridge or the scheduler wants to take is described as one request and passed to `scope.decide`. The field set per category is fixed; how 2A fills it from app-server approval messages is `PROVISIONAL(0B-1)`.
+Every action the runtime, the MCP bridge or the scheduler wants to take is described as one request and passed to `scope.decide`. The field set per category is fixed. How the Codex runtime (2A) fills it from app-server approval messages (0B-1, decided):
+
+- `item/commandExecution/requestApproval` → `command`. Codex gives a shell string such as `/bin/zsh -lc '<cmd>'`; the runtime unwraps that one shell wrapper and sends `command: "<cmd>"` with `argv: null`, so `normalize_argv` sees the real command. `cwd` is relative to the workspace that contains it (`.` for its root), otherwise absolute. `additionalPermissions.network` enabled sets `network: true` (the on/off network ask below); extra `fileSystem` permissions set `sandbox: "escalated"`. A request carrying `networkApprovalContext` (only with Codex's managed proxy, which Interspace does not enable) becomes `network` with that host, `port: null`, `via: "command"`.
+- `item/fileChange/requestApproval` → `file_write`. The request carries no paths: they come from the `item/started` `fileChange` item with the same `itemId` (`changes[].path` and any `move_path`), relative to their workspace. Paths outside every workspace are sent absolute. A `grantRoot` is added as a path. An approval whose item is unknown is declined without asking.
+- `mcpServer/elicitation/request` with `_meta.codex_approval_kind: "mcp_tool_call"` → for server `interspace`, accepted without a request, because `RunContext.app_tool` authorizes the exact call as an `app` request; for any other server, `mcp` with `server` and `_meta.tool_name`. Other elicitations are declined.
+- `item/permissions/requestApproval` is answered with no extra permissions; dynamic tool calls, user-input requests, auth-token refresh, attestation and legacy approval methods are refused.
+- Actions Codex reports only after the fact (a command or file change that completed without an approval request, a hosted web search) are recorded with `RunContext.observed` as `rule: "provider.sandbox"`, using the same request shapes.
 
 ```json
 {"category": "file_read",  "project_id": "f03a…", "path": "src/parser.py"}

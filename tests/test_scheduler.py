@@ -30,7 +30,7 @@ class SchedulerCase(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name).resolve()
 
-    def make(self, max_running=4, script=default_script, legacy=None, grace=0.2, monotonic=None):
+    def make(self, max_running=4, script=default_script, legacy=None, grace=0.2, monotonic=None, tool_catalog=None, policy=None):
         self.scope = FakeScope()
         self.audit = FakeAudit()
         self.store = MemoryStore(self.scope)
@@ -45,13 +45,13 @@ class SchedulerCase(unittest.TestCase):
         tools = notion_tools(self.connector)
         self.legacy = legacy or (lambda: False)
         self.sched = scheduler.Scheduler(
-            max_running=max_running, runtime_factory=lambda task_id: self.runtime, policy=self.scope,
+            max_running=max_running, runtime_factory=lambda task_id: self.runtime, policy=policy(self.scope) if policy else self.scope,
             audit=self.audit, events=self.events, budget_gate=scheduler.BudgetGate(self.store), locks=self.locks,
             clock=time.time, tasks=self.store, workspaces=self.workspaces,
             app_tools=lambda name: (tools[name], self.connector) if name in tools else None,
             legacy_active=lambda: self.legacy(), interrupt_grace_s=grace,
             decide_options={'app_data': str(self.root / 'data')},
-            monotonic=monotonic or time.monotonic, tick_s=0.01)
+            monotonic=monotonic or time.monotonic, tick_s=0.01, tool_catalog=tool_catalog)
         self.addCleanup(self.sched.shutdown, 5)
         return self.sched
 
@@ -722,6 +722,158 @@ class FailureTests(SchedulerCase):
 
 
 @unittest.skipUnless(scheduler.shutil_which('git'), 'git is required')
+class RuntimeSupportTests(SchedulerCase):
+    """Wave 2A: the answer path through scope.apply_answer, RunContext.tools/observed and runtime failures."""
+
+    def ask_and_answer(self, decision, policy=None, **answer_args):
+        decisions = []
+
+        def script(session, text, ctx):
+            decisions.append(ctx.authorize({'category': 'command', 'argv': ['ls']}, 'call-1'))
+            return {'status': 'completed', 'usage': None, 'error': None}
+        self.make(script=script, policy=policy)
+        self.task('a', rules={'command': 'ask'})
+        self.sched.submit('a', 'p1', 'x', None)
+        self.wait_state('a', 'paused_ask')
+        ask = [e for e in self.events.read('a', 0)['events'] if e['kind'] == 'ask'][-1]['data']
+        if decision == 'add_to_scope':
+            answer_args.setdefault('scope_digest', ask['patched_scope_digest'])
+        self.sched.answer('a', ask['ask_id'], decision, request_digest=ask['request_digest'], **answer_args)
+        self.wait_state('a', 'idle')
+        return decisions[0], ask
+
+    def test_every_answer_goes_through_apply_answer(self):
+        for decision, rule in (('allow_once', 'ask.allow_once'), ('deny', 'ask.deny'), ('add_to_scope', 'ask.add_to_scope')):
+            with self.subTest(decision=decision):
+                final, ask = self.ask_and_answer(decision)
+                self.assertEqual(final['rule'], rule)
+                stored, answer = self.scope.answers[-1]
+                self.assertEqual((stored['ask_id'], answer['decision'], answer['request_digest']),
+                                 (ask['ask_id'], decision, ask['request_digest']))
+
+    def test_apply_answer_is_found_on_a_wrapped_scope_module(self):
+        class Adapter:  # Like service.ScopeAdapter: the scope functions, plus the module itself.
+            def __init__(self, module):
+                self.module = module
+
+            def __getattr__(self, name):
+                if name == 'apply_answer':
+                    raise AttributeError(name)
+                return getattr(self.module, name)
+        final, _ = self.ask_and_answer('add_to_scope', policy=Adapter)
+        self.assertEqual(final['rule'], 'ask.add_to_scope')
+        self.assertEqual(self.store.task('a')['scope']['version'], 2)
+        self.assertTrue(self.scope.answers)
+
+    def test_allow_once_is_refused_when_the_scope_was_edited(self):
+        def script(session, text, ctx):
+            return {'status': 'completed', 'usage': None, 'error': None}
+        decisions = []
+
+        def asking(session, text, ctx):
+            decisions.append(ctx.authorize({'category': 'command', 'argv': ['ls']}, 'call-1'))
+            return script(session, text, ctx)
+        self.make(script=asking)
+        self.task('a', rules={'command': 'ask'})
+        self.sched.submit('a', 'p1', 'x', None)
+        self.wait_state('a', 'paused_ask')
+        ask = [e for e in self.events.read('a', 0)['events'] if e['kind'] == 'ask'][-1]['data']
+        with self.store.lock:
+            self.store.task('a')['scope']['limits']['time_limit_s'] = 120  # Edited, not re-approved.
+        with self.assertRaisesRegex(ValueError, 'approve'):
+            self.sched.answer('a', ask['ask_id'], 'allow_once', request_digest=ask['request_digest'])
+        self.sched.cancel('a')
+        self.wait_state('a', 'cancelled')
+
+    def test_tools_lists_descriptors_for_apps_in_the_live_scope(self):
+        seen = []
+
+        def catalog(app):
+            if app == 'github':
+                raise ValueError('signed out')
+            return [dict(d) for d in notion_tools(None).values()] + [{'name': 'zotero_read', 'app': 'zotero'}]
+        self.make(script=lambda session, text, ctx: seen.append(ctx.tools()) or default_script(session, text, ctx),
+                  tool_catalog=catalog)
+        task = self.task('a')
+        task['scope']['apps'] = [{'app': 'notion', 'access': 'read', 'resources': 'all'},
+                                 {'app': 'github', 'access': 'read', 'resources': 'all'}]
+        task['scope_approval']['scope_digest'] = self.scope.digest(task['scope'])
+        self.sched.submit('a', 'p1', 'x', None)
+        self.wait_state('a', 'idle')
+        self.assertEqual(sorted(d['name'] for d in seen[0]), ['notion_browse', 'notion_page_append', 'notion_read'])
+
+    def test_tools_without_a_catalog_is_empty(self):
+        seen = []
+        self.make(script=lambda session, text, ctx: seen.append(ctx.tools()) or default_script(session, text, ctx))
+        self.task('a')
+        self.sched.submit('a', 'p1', 'x', None)
+        self.wait_state('a', 'idle')
+        self.assertEqual(seen, [[]])
+
+    def test_observed_actions_are_audited_as_provider_sandbox(self):
+        seen = []
+
+        def script(session, text, ctx):
+            seen.append(ctx.observed({'category': 'web_search', 'query': 'dates'}, 'w1'))
+            return default_script(session, text, ctx)
+        self.make(script=script)
+        self.task('a', rules={'web_search': 'deny'})
+        self.sched.submit('a', 'p1', 'x', None)
+        self.wait_state('a', 'idle')
+        self.assertEqual((seen[0]['decision'], seen[0]['rule'], seen[0]['scope_version']), ('allow', 'provider.sandbox', 1))
+        record = [r for r in self.audit.records if r['kind'] == 'decision'][0]
+        self.assertEqual((record['rule'], record['call_id'], record['detail']), ('provider.sandbox', 'w1', {'after_the_fact': True}))
+        self.assertEqual(self.scope.calls, [])  # Never decided, never asked.
+        self.assertNotIn('ask', self.kinds('a'))
+
+    def test_observed_with_a_failing_audit_reports_an_error(self):
+        def script(session, text, ctx):
+            ctx.observed({'category': 'web_search', 'query': 'q'}, 'w1')
+            return default_script(session, text, ctx)
+        self.make(script=script)
+        self.audit.fail = True
+        self.task('a')
+        self.sched.submit('a', 'p1', 'x', None)
+        self.wait_state('a', 'idle')
+        errors = [e['data'] for e in self.events.read('a', 0)['events'] if e['kind'] == 'error']
+        self.assertEqual(errors[0]['code'], 'audit_failed')
+
+    def test_runtime_failure_shows_its_code_and_message(self):
+        from runtime import RuntimeFailure
+        self.make()
+        self.runtime.open = lambda ctx: (_ for _ in ()).throw(RuntimeFailure('runtime_unavailable', 'Sign in to Codex first.'))
+        self.task('a')
+        self.sched.submit('a', 'p1', 'x', None)
+        self.wait_state('a', 'failed')
+        errors = [e['data'] for e in self.events.read('a', 0)['events'] if e['kind'] == 'error']
+        self.assertEqual((errors[-1]['code'], errors[-1]['message']), ('runtime_unavailable', 'Sign in to Codex first.'))
+        self.assertEqual(self.store.task('a')['agent']['reason'], 'runtime_unavailable')
+
+    def test_failed_turn_closes_the_session_and_the_next_turn_opens_a_new_one(self):
+        results = iter([{'status': 'failed', 'usage': None, 'error': {'code': 'runtime_protocol', 'message': 'Bad message.'}},
+                        {'status': 'completed', 'usage': None, 'error': None}])
+        self.make(script=lambda session, text, ctx: next(results))
+        self.task('a')
+        self.sched.submit('a', 'p1', 'x', None)
+        self.wait_state('a', 'failed')
+        self.assertTrue(self.runtime.sessions[0].closed)
+        with self.store.lock:
+            self.store.task('a')['agent']['state'] = 'idle'
+        self.sched.submit('a', 'p1', 'y', None)
+        self.wait_state('a', 'idle')
+        self.assertEqual(len(self.runtime.sessions), 2)
+
+    def test_model_comes_from_the_task(self):
+        seen = []
+        self.make(script=lambda session, text, ctx: seen.append(ctx.model) or default_script(session, text, ctx))
+        self.task('a')['model'] = 'gpt-6.1-sol'
+        self.task('b')
+        for name in 'ab':
+            self.sched.submit(name, 'p1', 'x', None)
+            self.wait_state(name, 'idle')
+        self.assertEqual(seen, ['gpt-6.1-sol', None])
+
+
 class WorkspaceTests(unittest.TestCase):
     def test_clone_publish_and_cumulative_diff_never_touch_user_checkout(self):
         import subprocess

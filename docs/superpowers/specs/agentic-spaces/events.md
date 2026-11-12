@@ -1,6 +1,6 @@
 # Agent event stream (backend → UI)
 
-Status: approved by the user on 2026-11-12, Wave 0A. Provisional fields await the 0B and 0C reconciliation. Conventions and the provisional register are in [README.md](README.md).
+Status: approved by the user on 2026-11-12, Wave 0A. The 0B fields were reconciled in Wave 2A (2026-11-12); 0C fields await their reconciliation. Conventions and the provisional register are in [README.md](README.md).
 
 The task view streams what an agent does as cards: messages, tool calls and results, diffs, app actions, ask prompts, budget charges, status and errors. Events travel over the existing JSON-lines bridge (backend stdout → Swift → `window.interspaceReceive`). The full `state` projection still exists and stays the source of truth for task lists and status; events carry the detail.
 
@@ -88,14 +88,14 @@ A task in a terminal state can be continued only by a new user message with a re
 - `role`: `user` | `assistant`. The user's own message is echoed as a `message` event when the backend accepts it, carrying `client_id` from the request so the UI can replace its optimistic bubble.
 - The closing `message` carries the full text and replaces the deltas. Text is Markdown, rendered as text-safe Markdown (no raw HTML, no images loaded from remote hosts).
 
-### `reasoning` and `plan_update` — `PROVISIONAL(0B-6)`
+### `reasoning` and `plan_update`
 
 ```json
 {"kind": "reasoning", "item_id": "rs_2", "data": {"text": "Summary of the agent's reasoning…"}}
 {"kind": "plan_update", "data": {"steps": [{"text": "Read failing test", "status": "completed"}, {"text": "Fix parser", "status": "in_progress"}]}}
 ```
 
-Both are optional to render. `status` is `pending` | `in_progress` | `completed`.
+Both are optional to render. `status` is `pending` | `in_progress` | `completed`. Decided (0B-6): Codex streams both. The runtime emits `reasoning` once per completed reasoning item (its summary parts joined), and `plan_update` for each `turn/plan/updated` (`inProgress` becomes `in_progress`).
 
 ### `tool_call`, `tool_output_delta`, `tool_result`
 
@@ -113,7 +113,7 @@ Both are optional to render. `status` is `pending` | `in_progress` | `completed`
 
 - `category`: `file_read` | `file_write` | `command` | `network` | `app` | `web_search` | `mcp`. It matches the scope request categories (scope.md), including `web_search` (Codex's hosted search, governed by the scope's `web_search` setting, not by command network) and `mcp` (an MCP server other than Interspace's own, which always asks in v1).
 - `tool` is the runtime's tool name (`shell`, `apply_patch`, `read_file`, a connector tool name such as `notion_page_append`, …). `title` is one line for the card, at most 200 characters.
-- `input` is the call's arguments, bounded to 8 KB (longer values are cut and marked). The exact fields for commands and file changes are `PROVISIONAL(0B-1)`; the UI shows unknown fields as a key–value list.
+- `input` is the call's arguments, bounded to 8 KB (longer values are cut and marked). For Codex commands `input` is `{command, cwd, sandbox, network}` (the unwrapped shell string, scope.md Requests), for network asks `{host}`, for file changes `{paths}`, for web searches `{query}`, and for other MCP servers `{arguments}`. The UI shows unknown fields as a key–value list.
 - `decision` is the **final** decision that let the call run or stopped it: `allow` or `deny`, never `ask`. The runtime calls `RunContext.authorize` first and emits `tool_call` after it returns. If the policy asked, the `ask` and `answer` events come before the `tool_call`, and `decision.rule` is `ask.allow_once`, `ask.add_to_scope` or `ask.deny`. A denied call gets a `tool_call` and a `tool_result` with `status: "denied"`.
 - **Connector tools are the exception:** `RunContext.app_tool` emits all of their events itself — `tool_call`/`tool_result` for reads, a single `app_action` card for writes. The runtime emits nothing for them.
 - `tool_result.status`: `ok` | `error` (ran and failed) | `denied` (policy or user refused; it never ran) | `cancelled`. `exit_code` only for commands. `error` is `{"code", "message"}` or `null`.
@@ -189,7 +189,7 @@ UI → backend:
 
 - `charge_kind`: `reserved` (an estimate held before a turn), `reported` (the provider's counts), `estimated` (the turn ended without counts and is charged its estimate). Same meaning as `budget.py`.
 - `used`, `reserved`, `remaining`, `overshoot` are the task's ledger totals after this charge.
-- When usage arrives is `PROVISIONAL(0B-2)`; the shape does not change.
+- When usage arrives (0B-2, decided): Codex reports usage after every model request. The runtime passes the turn's cumulative usage to `RunContext.report_usage` each time, and the scheduler stops the turn when it no longer fits the budget; the `reported` charge is made once, at the end of the turn.
 - Tokens only. No field ever holds money or account allowance.
 
 ### `scope`

@@ -1,6 +1,6 @@
 # Connector API
 
-Status: approved by the user on 2026-11-12, Wave 0A. Provisional fields await the 0B and 0C reconciliation. Conventions and the provisional register are in [README.md](README.md).
+Status: approved by the user on 2026-11-12, Wave 0A. The 0B fields were reconciled in Wave 2A (2026-11-12); 0C fields await their reconciliation. Conventions and the provisional register are in [README.md](README.md).
 
 One module per app: `app/backend/spaces/notion.py`, `github.py`, `gdrive.py`, `zotero.py`. Each defines a class `Connector`. The same object serves the **Spaces UI** (the user browsing and editing, no model call, no tokens) and **agent tools** (through the runtime's MCP bridge, every call authorized by the scope engine first).
 
@@ -313,7 +313,7 @@ def tools(connector) -> list: ...   # list of ToolDescriptor
 - The agent never supplies an idempotency key. `RunContext.app_tool` sets `agent_key(task_id, turn_id, call_id)`.
 - The runtime adapter configures the Interspace MCP server under the fixed server name `interspace` and routes its tool calls to `RunContext.app_tool`, never to `authorize` as `category: mcp`. Provider configuration is passed explicitly, so no other server can use that name.
 - Tool results are JSON: `{"ok": true, "result": …}` or `{"ok": false, "error": {"code": "…", "message": "…"}}`. Read results are wrapped by the bridge (2A) as untrusted external content.
-- How these reach Codex (an Interspace-owned MCP server) is `PROVISIONAL(0B-4)`. The descriptor shape does not change.
+- How these reach the provider (0B-4, decided): through the Interspace MCP bridge, server `interspace` (scheduler.md, "MCP bridge API"). The provider starts a stdio relay that reaches the backend over a private Unix socket; every call runs through `RunContext.app_tool`. The tools listed are those of the apps in the task's scope. The descriptor shape does not change.
 
 ## Backend protocol for the Spaces UI
 

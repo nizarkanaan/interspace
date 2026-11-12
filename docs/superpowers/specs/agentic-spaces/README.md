@@ -1,6 +1,6 @@
 # Agentic Spaces: frozen interface contracts (Wave 0A)
 
-Date: 2026-11-11. Status: approved by the user on 2026-11-12. Provisional fields await the 0B and 0C reconciliation. Roadmap: `docs/superpowers/plans/2026-11-11-agentic-spaces-roadmap.md` (approved 2026-11-11).
+Date: 2026-11-11. Status: approved by the user on 2026-11-12. The 0B fields were reconciled in Wave 2A (2026-11-12); 0C fields await their reconciliation. Roadmap: `docs/superpowers/plans/2026-11-11-agentic-spaces-roadmap.md` (approved 2026-11-11).
 
 These contracts let the seven Wave 1 streams build in parallel without talking to each other. Each stream codes against the shapes here, with fakes for everything it does not own. Nothing here exists in code yet.
 
@@ -59,6 +59,18 @@ A provisional field keeps its name and position. Only its value set, timing or t
 | 0C-3 | OAuth redirect: a single-use loopback listener in Python, or `ASWebAuthenticationSession` in Swift | connectors.md `browser` step | Single-use listener on `127.0.0.1`, random port, closed after one redirect or 5 minutes. |
 | 0C-4 | Zotero: can the local API write? | connectors.md Zotero action set | No. Writes use the web API key; without one, Zotero is read-only. |
 | 0C-5 | Notion: hosted MCP or REST API as the data route | connectors.md | Either is allowed behind the same Connector API; the connector hides the route. |
+
+**0B reconciliation (Wave 2A, 2026-11-12).** Every `0B` marker in these contracts is replaced by the decided behaviour, built in `app/backend/runtime/` (`codex.py`, `mcp_bridge.py`):
+
+- **0B-1** Approval shapes: commands carry a shell string, unwrapped from Codex's `/bin/zsh -lc` wrapper; file-change approvals carry no paths, so paths come from the started `fileChange` item. Full mapping in scope.md, Requests.
+- **0B-2** Usage arrives after every model request; the runtime reports the turn's cumulative usage each time, so the budget can stop a turn mid-way.
+- **0B-3** `turn/interrupt` stopped a live turn in about 0.1 s. The 10 s kill backstop stays; kill also stops the MCP bridge.
+- **0B-4** Connector tools reach the provider through the Interspace MCP bridge: a stdio relay to a private Unix socket in the backend; Interspace authorizes every call in `RunContext.app_tool` (scheduler.md, "MCP bridge API").
+- **0B-5** Network is on/off only (no managed proxy), as assumed: a command that needs network asks for any host, for that command only.
+- **0B-6** Reasoning summaries and plan updates are streamed and emitted.
+- **0B-7** A per-task model is supported: the task row's `model` (an id from the signed-in account's model list) is passed to `thread/start`; otherwise the provider default.
+- **0B-8** Confirmed: the sandbox does not deny reads by default. The runtime's profile denies credential folders, the app-owned `CODEX_HOME` and Interspace's own data except the task workspace; other readable files stay readable (scope.md). The coordinator tells the user before agent tasks ship.
+- Beyond the register: the runtime launches Codex with an app-owned `CODEX_HOME`, so agent tasks need a one-time Codex sign-in into that home (not built in 2A), and it disables Codex features that act outside the sandbox or load outside code (computer use, browser use, ChatGPT apps, plugins, hooks, sub-agents, shell snapshots).
 
 ## Shared-file ownership in Wave 1
 

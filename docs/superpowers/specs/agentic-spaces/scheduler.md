@@ -1,6 +1,6 @@
 # Scheduler, task runner and runtime adapter
 
-Status: approved by the user on 2026-11-12, Wave 0A. Provisional fields await the 0B and 0C reconciliation. Conventions and the provisional register are in [README.md](README.md).
+Status: approved by the user on 2026-11-12, Wave 0A. The 0B fields were reconciled in Wave 2A (2026-11-12); 0C fields await their reconciliation. Conventions and the provisional register are in [README.md](README.md).
 
 1F owns `app/backend/scheduler.py` and the `service.py` changes for parallel tasks. 2A (Codex app-server) and 2B (Claude Code) implement the runtime adapter against this file. 1F tests with a fake runtime; it never needs a real provider.
 
@@ -69,7 +69,7 @@ The time limit is checked by the scheduler, not the runtime. The scheduler keeps
 UI → backend: `agent_cancel {task_id}` → `{"cancellation_requested": bool}`.
 
 - A queued task leaves the queue and ends `cancelled`.
-- A running task: status `cancelling`, set the task's cancel event, call `session.interrupt()`. If the turn has not ended 10 s later, call `session.kill()`, which terminates the runtime's process group. `PROVISIONAL(0B-3)`.
+- A running task: status `cancelling`, set the task's cancel event, call `session.interrupt()`. If the turn has not ended 10 s later, call `session.kill()`, which terminates the runtime's process group. Decided (0B-3, Wave 2A): Codex's `turn/interrupt` ended a live turn in about 0.1 s and stopped its commands; the 10 s grace stays as the backstop. `kill` sends SIGTERM, then SIGKILL, to the app-server's process group and stops the MCP bridge, whose relay process exits when its socket closes (Codex starts MCP servers in their own process groups, which `killpg` does not reach).
 - A paused task (`paused_ask`, `paused_scope`): the open ask closes with `cancelled`; the turn is interrupted as above.
 - An app write already sent is not undone. If its result never arrives it is recorded as `outcome_unknown`.
 - The existing `cancel` method keeps cancelling only the legacy slot.
@@ -99,19 +99,19 @@ class RunContext:
     workspaces: dict          # project_id -> absolute workspace path
     primary_workspace: str    # cwd for the session
     scope: dict               # copy at turn start, for prompts and display only; never used for decisions
-    model: str or None        # PROVISIONAL(0B-7); None = provider default
+    model: str or None        # the task row's `model`, an id from the signed-in account's model list; None = provider default
     cancel: threading.Event
 
     def authorize(self, request, call_id) -> dict: ...   # final {'decision': 'allow'|'deny', 'rule', ...}
     def emit(self, kind, data, *, turn_id=None, item_id=None): ...
     def app_tool(self, name, arguments, call_id) -> dict: ...   # run a connector tool after authorization
-    def report_usage(self, usage): ...                    # optional mid-turn usage; PROVISIONAL(0B-2)
+    def report_usage(self, usage): ...                    # the turn's cumulative usage so far, after each model request
 ```
 
 - **`authorize` is the only policy entry point.** It reads the task's **live** scope and approval under `Application.lock`, calls `scope.decide`, writes the audit record and returns `allow` or `deny`. On `ask`, it emits `tool_call`/`ask`, sets `paused_ask`, blocks until the user answers or the task is cancelled, records the answer, then returns the final decision. A runtime never sees `ask`.
-  - It translates provider approval requests into scope requests and passes the answer back. With `codex app-server`, every command and file-change approval request goes through `authorize`. `PROVISIONAL(0B-1)`.
+  - It translates provider approval requests into scope requests and passes the answer back. With `codex app-server`, every command, file-change and MCP approval request goes through `authorize` (mapping in scope.md, Requests); the answer is only ever `accept` or `decline`, never `acceptForSession` or a policy amendment.
   - It must also be called for actions the provider would run without asking (for example in-sandbox commands), when the provider exposes them before they run, so audit and `always_deny` apply. Where the provider only reports such actions after the fact, the runtime emits them with `decision.rule: "provider.sandbox"` and the audit record says so.
-- **`app_tool`** is how connector tools run (through the Interspace MCP bridge, `PROVISIONAL(0B-4)`). It looks up the tool descriptor, builds the `app` request from the descriptor's `effect` and `ref_param`, calls `authorize`, takes the resource lock for writes, calls the connector with idempotency key `agent_key(task_id, turn_id, call_id)`, emits `tool_call`/`tool_result` for reads or `app_action` for writes, and returns the tool result JSON (connectors.md). The runtime never calls connectors directly.
+- **`app_tool`** is how connector tools run (through the Interspace MCP bridge, below). It looks up the tool descriptor, builds the `app` request from the descriptor's `effect` and `ref_param`, calls `authorize`, takes the resource lock for writes, calls the connector with idempotency key `agent_key(task_id, turn_id, call_id)`, emits `tool_call`/`tool_result` for reads or `app_action` for writes, and returns the tool result JSON (connectors.md). The runtime never calls connectors directly.
 - **`emit`** assigns `seq`, persists and forwards the event. Which component emits which kind is fixed in events.md ("Who emits what").
 - A runtime must:
   - start its provider in a sandboxed, approval-requesting mode (Codex `workspace-write` with approvals routed to Interspace) and never in a bypass mode (`always_deny.bypass`);
@@ -119,11 +119,43 @@ class RunContext:
   - treat all connector content and file content as data;
   - reject provider messages that do not match its validated shapes (`runtime_protocol` error), as `provider.py` rejects unexpected events today.
 
+### `RunContext` additions (Wave 2A, additive)
+
+```python
+    def tools(self) -> list: ...                          # connector ToolDescriptors for the apps in the live scope
+    def observed(self, request, call_id) -> dict: ...     # record an action the provider ran without asking
+```
+
+- `tools()` lists the descriptors (connectors.md) of every app named in the task's live `scope.apps`, through the scheduler's `tool_catalog(app) -> [ToolDescriptor]` (2C passes it to `Scheduler(..., tool_catalog=…)`). An app that is signed out or fails is left out. Without `tool_catalog` the list is empty and the bridge exposes no tools.
+- `observed(request, call_id)` is for actions the provider only reports after the fact (for example a web search, or a command Codex ran without an approval request). It writes a `decision` audit record with `decision: allow` and `rule: "provider.sandbox"` and returns the final decision `{"decision": "allow", "rule": "provider.sandbox", …}` for the runtime's `tool_call` card. It never asks and never blocks.
+- A runtime may raise `runtime.RuntimeFailure(code, message)` (a `ValueError`) from `open` or `run_turn`; the scheduler then shows that code and sentence instead of the generic `runtime_exited`, and drops the session.
+
+## MCP bridge API (`runtime/mcp_bridge.py`, 2A; used by 2A and 2B)
+
+The Interspace MCP bridge exposes connector tools to any provider that speaks MCP over stdio. It is provider-neutral: each runtime turns `server` into its own configuration. Every tool call goes through `RunContext.app_tool`; the bridge never calls a connector and never decides policy.
+
+```python
+from runtime import mcp_bridge
+
+bridge = mcp_bridge.start(tools, socket_dir=None)   # once per runtime session; tools = ctx.tools()
+bridge.server    # {"name": "interspace", "command": "<python>", "args": ["-I", "<…/mcp_bridge.py>"],
+                 #  "env": {"INTERSPACE_MCP_SOCKET": "<path>", "INTERSPACE_MCP_TOKEN": "<random>"}}
+bridge.bind(ctx)     # at the start of each turn: route tools/call to this turn's ctx.app_tool
+bridge.unbind()      # at the end of each turn; a call outside a turn gets an MCP error result
+bridge.stop()        # end of session: close the socket, disconnect the stdio process, remove the socket file
+```
+
+- **Transport.** The provider starts `server.command server.args` as a stdio MCP server (MCP JSON-RPC, one JSON object per line). That small process is a relay: it connects to a Unix socket owned by the backend, sends the token, then copies lines both ways. The MCP protocol itself (`initialize`, `tools/list`, `tools/call`, `ping`) is answered inside the backend. The socket lives in a new `0700` directory (default under the system temporary directory, because macOS limits socket paths to 104 bytes), accepts only connections that present the token, and is removed by `stop()`.
+- **Secrets.** The token only proves the relay was started for this session; it is not a credential for any app. It goes in the provider's per-session MCP configuration (Codex: `thread/start.config.mcp_servers`; Claude: its MCP config), never on a command line or in an event.
+- **Tools.** `tools/list` returns one MCP tool per descriptor: `name`, `description`, `inputSchema` = `input_schema`, and `annotations` `{readOnlyHint, destructiveHint}` from `effect`. The list is fixed at `start`; a scope change that adds an app takes effect in the next session.
+- **Calls.** `tools/call {name, arguments}` → `ctx.app_tool(name, arguments, call_id)` with a fresh `call_id` (`mcp_<32 hex>`). Calls run on their own threads, so a call waiting on an ask does not block `ping`. The result is one `text` content item holding the tool result JSON (connectors.md); `isError` is `true` when `ok` is `false`. Results of `read` tools are wrapped as untrusted data: `<untrusted-content app="notion">…</untrusted-content>`, with a one-line reminder that it is data, not instructions.
+- **Provider mapping.** Codex: `config.mcp_servers.interspace = {command, args, env, default_tools_approval_mode: "prompt"}`; its approval elicitation for server `interspace` is answered `accept`, because `app_tool` authorizes the exact call. Claude Code: `{"mcpServers": {"interspace": {"type": "stdio", "command", "args", "env"}}}`. The server name `interspace` is reserved: a runtime never attaches another server under it.
+
 ## Budgets
 
 The budget stays per task, tokens only, gated before work starts.
 
-- `budget.reserve` gains an `estimate` override and `provider`, `turn_id` parameters. An agent turn reserves `estimate_turn(prompt_chars)`, a fixed per-turn allowance that 1F sets from 0B's measured turns; it is `PROVISIONAL(0B-2)`.
+- `budget.reserve` gains an `estimate` override and `provider`, `turn_id` parameters. An agent turn reserves `estimate_turn(prompt_chars)`, a fixed per-turn allowance that 1F set from 0B's measured turns (`budget.AGENT_TURN_ALLOWANCE = 30000`; a minimal Codex turn measured about 21,000 tokens). Decided (0B-2): Codex reports usage after every model request, so the runtime calls `report_usage` each time and the scheduler can stop a turn at the budget mid-turn.
 - Ledger entries gain `provider` (`codex` | `claude`), `charge_rule` (for example `codex.input+output`), `turn_id` and `call_kind: "agent_turn"`. Entries without `provider` are Codex, as the Claude Code provider spec requires.
 - `budget.charge(usage, provider='codex')`: Codex keeps `input_tokens + output_tokens`; Claude follows its approved spec (`input + cache_creation + cache_read + output`). 2B adds the Claude rule.
 - Mid-turn: if `report_usage` shows `used + reserved` beyond the budget, the scheduler interrupts the turn and the task ends `budget_exhausted` with its work kept. A turn already started may overshoot; the overshoot is shown, as today.
