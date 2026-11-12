@@ -1,14 +1,15 @@
-# Controlled editing — paused handoff
+# Controlled editing — handoff (closeout complete)
 
 Paused at the user's explicit request on 2026-11-11. Do not automatically resume live work. The response to the proposed five-call authorization was **stop and save next steps**, not approval.
 
 ## Current state
 
-- Checkout: `~/Documents/Projects/interspace`, branch `interspace/controlled-editing`. Local only; no merge or push.
-- Implementation, all four scoped reviews and the whole-feature review are complete. The review's single Important finding (I1, hidden evidence after source edits) is fixed in `bae3ab1`, fully verified (215 tests on both Python 3.14 and Apple 3.9 with OS canaries, five source and packaged browser suites, rebuilt signed bundle, 26 matching resources) and passed one scoped re-review (Clean). See `docs/controlled-editing-validation.md`.
-- `dist/Interspace.app` is rebuilt from the fixed tree. It has not been launched since.
-- No live model calls, generated-test execution or Snack Picker source edits have happened for this controlled-fix pilot. Sample Project was not accessed. The earlier read-only Snack Picker run is separate and complete.
-- **Remaining:** native/live Snack Picker acceptance, which needs the user's explicit approvals (steps 5–9 below). Steps 1–4 are done.
+- Branch `interspace/controlled-editing`, local only; no merge or push.
+- Implementation, all reviews, the I1 fix (`bae3ab1`) and its clean re-review are complete.
+- The live Snack Picker acceptance run is complete: 5 model calls, 3 restricted checks (pass / assertion-fail / pass), Reviewer accept, exact diff applied and verified byte-identical, native reopen confirmed. Details in `docs/controlled-editing-validation.md`.
+- Snack Picker now has two uncommitted modified files (`snack_picker.py`, `tests/test_snack_picker.py`). No commit was made there.
+- Open: an unexplained ~45-second gap between **Propose a plan** and the planner job starting (no error). Not investigated.
+- The steps below are kept for history; all are done.
 
 ## Resume in order
 

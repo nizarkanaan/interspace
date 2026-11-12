@@ -82,9 +82,9 @@
 
 These steps remain required, but are owned by the coordinator rather than the UI implementer. Complete the four scoped code gates before the whole-feature review; complete that review before any live generated-code execution or source application.
 
-- [ ] Perform one fresh whole-feature review after implementation; address Critical/Important findings with regression tests and a green suite. Retain decisions/actual results in validation documentation. No merge/push.
-- [ ] In the native app, create a new Snack Picker python_fix task at c6c48d3, request Implementer/Tester/Reviewer, inspect exact two-file proposal and five-call ceiling. Obtain the exact live call approval if needed. Start generation, present the candidate/test approval to the user, run only the three approved processes and remaining calls, inspect review, then obtain exact final diff approval and apply only Snack Picker. No automatic extra calls on failure.
-- [ ] Verify actual original-pass/regression-fail/candidate-pass records, Reviewer/synthesis, original only changed by explicit application, persisted history and final diff. Write the acceptance record and stop with any real unresolved failures honestly reported. Commit documentation; keep only the sole rebuilt app.
+- [x] Perform one fresh whole-feature review after implementation; address Critical/Important findings with regression tests and a green suite. Retain decisions/actual results in validation documentation. No merge/push.
+- [x] In the native app, create a new Snack Picker python_fix task at c6c48d3, request Implementer/Tester/Reviewer, inspect exact two-file proposal and five-call ceiling. Obtain the exact live call approval if needed. Start generation, present the candidate/test approval to the user, run only the three approved processes and remaining calls, inspect review, then obtain exact final diff approval and apply only Snack Picker. No automatic extra calls on failure.
+- [x] Verify actual original-pass/regression-fail/candidate-pass records, Reviewer/synthesis, original only changed by explicit application, persisted history and final diff. Write the acceptance record and stop with any real unresolved failures honestly reported. Commit documentation; keep only the sole rebuilt app.
 
 ## Self-review and execution choice
 
