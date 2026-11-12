@@ -123,6 +123,25 @@ class TeamBudgetTests(unittest.TestCase):
         self.assertEqual(len(self.provider.calls),2)
 
 
+    def test_cancel_before_dispatch_or_failed_save_charges_nothing(self):
+        self.setup_app();calls=len(self.provider.calls)
+        task=self.task();self.app.state['active_project_id']=self.pid;self.app.state['active_task_id']=self.a
+        self.app.cancel.set()
+        with self.assertRaises(Exception):self.app.call('Orchestrator','prompt',{})
+        self.app.cancel.clear()
+        original=self.app.publish
+        def broken():raise OSError('disk full')
+        self.app.publish=broken
+        with self.assertRaises(OSError):self.app.call('Orchestrator','prompt',{})
+        self.app.publish=original
+        self.assertEqual(budget.ledger(self.app.state,self.a)['entries'],[])
+        self.assertEqual(len(self.provider.calls),calls)
+
+    def test_corrupt_usage_entry_does_not_stop_the_app(self):
+        self.setup_app();self.app.state['usage'].append({'task_id':self.a,'charge_kind':'reserved'});self.app.persist()
+        reopened=Application(self.app.storage,provider=self.provider)
+        self.assertEqual(reopened.handle('select_task',{'project_id':self.pid,'task_id':self.a})['task']['tokens']['unknown'],1)
+
 class ChangeBudgetTests(unittest.TestCase):
     setUp=test_change_workflow.WorkflowTests.setUp
     git=test_change_workflow.WorkflowTests.git

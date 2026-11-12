@@ -608,15 +608,19 @@ class Application:
 
     def call(self, role, prompt, schema):
         with self.lock:
+            if self.cancel.is_set():
+                raise ProviderError('Run cancelled before dispatch.')
             task=self.active_task()
             # Task-owned calls pass the budget gate; project and workspace conversation are not budgeted.
             reservation=budget.reserve(self.state,task,role=role,prompt=prompt,project_id=self.state['active_project_id']) if task else None
-            self.state['active'] = role
-            self.publish()
+            try:
+                self.state['active'] = role
+                self.publish()
+            except BaseException:
+                if reservation:budget.release(self.state,reservation)
+                raise
         usage=None;outcome='failed'
         try:
-            if self.cancel.is_set():
-                raise ProviderError('Run cancelled before dispatch.')
             try:
                 result, usage = self.provider.run(prompt,schema,self.storage/'provider',self.cancel)
             except ProviderError as error:

@@ -48,13 +48,17 @@ def invoke(app, project, run, identity, role, prompt, schema, search=False):
         owner=project.get('tasks',{}).get(record.get('task_id')) if record.get('task_id') else None
         # The budget gate runs before any job reservation, so a refusal consumes nothing.
         entry=budget.reserve(app.state,owner,role=role,prompt=prompt,project_id=project['id'],run_id=record['id'],assignment_id=identity) if owner else None
-        record['jobs'].append({'id':identity,'role':role,'status':'reserved','tokens':None})
-        record['stage']='synthesizing' if identity=='synthesis' else 'running'
-        for task in record['tasks']:
-            if task['id']==identity:task['status']='running'
-        app.state['active']=role
-        runner.event(record,role,'started','Reserved '+identity+' before provider launch; no retry.')
-        runner.save(run/'run.json',record);app.publish()
+        try:
+            record['jobs'].append({'id':identity,'role':role,'status':'reserved','tokens':None})
+            record['stage']='synthesizing' if identity=='synthesis' else 'running'
+            for task in record['tasks']:
+                if task['id']==identity:task['status']='running'
+            app.state['active']=role
+            runner.event(record,role,'started','Reserved '+identity+' before provider launch; no retry.')
+            runner.save(run/'run.json',record);app.publish()
+        except BaseException:
+            if entry:budget.release(app.state,entry)  # Never launched: no tokens were used.
+            raise
     observed=[]
     def on_search(event):
         with app.lock:

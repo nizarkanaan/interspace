@@ -50,12 +50,16 @@ def estimate(prompt, role):
     return estimate_chars(len(prompt), role)
 
 
+def _amount(value):
+    return value if type(value) is int and value >= 0 else None
+
+
 def _entry_charge(entry):
     kind = entry.get('charge_kind')
     if kind == 'reserved':
         return None
     if kind in ('reported', 'estimated'):
-        return entry.get('charge')
+        return _amount(entry.get('charge'))  # A malformed saved charge counts as unknown, never as zero.
     return charge(entry.get('tokens'))  # Entries recorded before budgets existed.
 
 
@@ -67,7 +71,11 @@ def ledger(state, task_id, token_budget=None):
             continue
         entries.append(entry)
         if entry.get('charge_kind') == 'reserved':
-            reserved += entry['estimate']
+            held = _amount(entry.get('estimate'))
+            if held is None:
+                unknown += 1
+            else:
+                reserved += held
             continue
         amount = _entry_charge(entry)
         if amount is None:
@@ -122,11 +130,17 @@ def settle(state, entry_id, usage, outcome):
     return entry
 
 
+def release(state, entry_id):
+    """Drop a reservation whose call was never launched (its setup failed before dispatch)."""
+    entry = _reserved_entry(state, entry_id)
+    state['usage'].remove(entry)
+
+
 def recover(state):
     """A reservation that survived a restart is charged its estimate; it is never released."""
     for entry in state.get('usage', []):
         if isinstance(entry, dict) and entry.get('charge_kind') == 'reserved':
-            entry.update(charge_kind='estimated', charge=entry['estimate'], outcome='interrupted')
+            entry.update(charge_kind='estimated', charge=_amount(entry.get('estimate')), outcome='interrupted')
 
 
 def typical_prompt_chars(state, task_id):

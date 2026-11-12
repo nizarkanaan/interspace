@@ -31,7 +31,7 @@
 - `project(state, task_id)`: projects the remaining budget and the estimate for a list of planned calls.
 
 Steps:
-- [ ] Write failing tests:
+- [x] Write failing tests:
   - the exact-fit boundary and refusal by one token;
   - unknown usage charged as the estimate;
   - an overshoot recorded with the actual count;
@@ -39,14 +39,14 @@ Steps:
   - `None` budgets never refusing;
   - malformed budgets rejected;
   - the charge rule.
-- [ ] Implement until green.
+- [x] Implement until green.
 
 ## Task 2: Gates, terminal stage and approval binding
 
 **Files:** modify `service.py`, `team.py`, `orchestration.py`, `changes.py`, `change_team.py` and `tasks.py`. Extend the workflow tests: `test_task_workflow.py`, `test_team.py`, `test_change_workflow.py` and `test_tasks.py`.
 
 Steps:
-- [ ] Write failing tests:
+- [x] Write failing tests:
   - a refused call never reaches the provider and adds no job reservation;
   - each gate checks the right task;
   - `budget_exhausted` ends team runs and change runs (at generation, after check approval, and at synthesis), with artifacts preserved;
@@ -57,34 +57,34 @@ Steps:
   - plan digests and check approvals bind `token_budget`, so a stale budget reference is rejected;
   - legacy budget-less tasks and their pending plans remain valid;
   - Project conversation and Workspace advice are never refused.
-- [ ] `Application.call`: when an active task exists, reserve before `provider.run` and settle in `finally`.
-- [ ] `team.invoke`: reserve after the existing ceiling check, before the job reservation is saved. Replace its post-call usage append with `settle`, keeping the existing entry fields.
-- [ ] `launch`: on `budget.Exhausted`, set stage and task status to `budget_exhausted`. Add `budget_exhausted` to `orchestration.TERMINAL`, which `changes.TERMINAL` inherits. `interrupt` marks unfinished assignments as failed.
-- [ ] `Application.__init__`: call `budget.recover`.
-- [ ] Bind the budget into approvals:
+- [x] `Application.call`: when an active task exists, reserve before `provider.run` and settle in `finally`.
+- [x] `team.invoke`: reserve after the existing ceiling check, before the job reservation is saved. Replace its post-call usage append with `settle`, keeping the existing entry fields.
+- [x] `launch`: on `budget.Exhausted`, set stage and task status to `budget_exhausted`. Add `budget_exhausted` to `orchestration.TERMINAL`, which `changes.TERMINAL` inherits. `interrupt` marks unfinished assignments as failed.
+- [x] `Application.__init__`: call `budget.recover`.
+- [x] Bind the budget into approvals:
   - `orchestration.make_plan` (v2) and `changes.make_plan` add `limits.token_budget` only when the task has a budget, so legacy digests are unchanged;
   - `tasks.validate_plan_owner` requires plan and task budgets to match;
   - `approve_checks` binds `token_budget` in `test_approval` and in the projected `approve_checks` reference.
-- [ ] `create_task` and `update_task` accept `token_budget`, with a default of 250,000 for new tasks. An edit that changes the budget clears the pending plan.
-- [ ] Public projection per task: `token_budget`, the ledger totals, and a `budget_projection` for the pending plan or paused check approval.
-- [ ] Run the focused suites, then the full backend suite.
+- [x] `create_task` and `update_task` accept `token_budget`, with a default of 250,000 for new tasks. An edit that changes the budget clears the pending plan.
+- [x] Public projection per task: `token_budget`, the ledger totals, and a `budget_projection` for the pending plan or paused check approval.
+- [x] Run the focused suites, then the full backend suite.
 
 ## Task 3: State v4 migration
 
 **Files:** modify `projects.py` and `tasks.py`; extend `test_projects.py`.
 
-- [ ] Write failing tests:
+- [x] Write failing tests:
   - v3 migrates to v4 with `state.v3-backup.json` written exactly once;
   - existing tasks get `token_budget: null` and their usage is preserved;
   - unknown future versions fail without writing;
   - a malformed budget isolates only its task.
-- [ ] Implement. `tasks.validate` accepts `None` or a valid budget.
+- [x] Implement. `tasks.validate` accepts `None` or a valid budget.
 
 ## Task 4: UI, docs and verification
 
 **Files:** modify `app/ui/index.html`, `app.js`, `team.js`, `changes.js` and `desk.css`; extend the browser fixtures and journeys (`tests/task-desk-ui.mjs`, `tests/changes-ui.mjs`, `tests/task_saved_state_fixture.py`, `tests/change_saved_state_fixture.py`); update `app/README.md`, `README.md` and `AGENTS.md`; create `docs/token-budgets-validation.md`.
 
-- [ ] Write a failing browser journey covering:
+- [x] Write a failing browser journey covering:
   - the New task **Token budget** field and its default;
   - the header `Tokens used / budget`, with "estimated" marked;
   - the Plan and check projection, and the warning when it doesn't fit;
@@ -94,17 +94,17 @@ Steps:
   - a budget edit clearing the plan;
   - no money text anywhere;
   - light/dark appearance at widths 320, 390, 760, 1024 and 1280.
-- [ ] Implement. UI write intentions keep using backend-projected references unchanged.
-- [ ] Verify:
+- [x] Implement. UI write intentions keep using backend-projected references unchanged.
+- [x] Verify:
   - full backend suites on Python 3.14 and on signed Apple 3.9 with `INTERSPACE_REQUIRE_OS_CHECKS=1`, run one after the other;
   - source and packaged browser suites;
   - syntax and `git diff --check`;
   - rebuild of the sole bundle, signature check and byte-for-byte resource match.
-- [ ] Write the validation document with actual results. Commit.
+- [x] Write the validation document with actual results. Commit.
 
 ## Closeout
 
-- [ ] One independent whole-feature review. Fix Critical and Important findings test-first.
+- [x] One independent whole-feature review. Fix Critical and Important findings test-first.
 - [ ] Live check, only with the user's exact approval at the time: a small task with a deliberately tight budget, showing a call refused before launch and the exhausted state in the native app.
 
 Execution: sequential tasks, each committed when its tests pass.

@@ -130,5 +130,27 @@ class BudgetPolicyTests(unittest.TestCase):
             budget.settle(state, 'missing', None, 'failed')
 
 
+    def test_malformed_entries_count_as_unknown_and_never_break_recovery(self):
+        state = {'usage': [
+            {'task_id': 'task-1', 'charge_kind': 'reserved'},
+            {'task_id': 'task-1', 'charge_kind': 'reported', 'charge': 'lots'},
+            {'task_id': 'task-1', 'charge_kind': 'estimated', 'charge': -4},
+            {'task_id': 'task-1', 'charge_kind': 'reported', 'charge': 7},
+            'not an entry',
+        ]}
+        budget.recover(state)
+        totals = budget.ledger(state, 'task-1', 100)
+        self.assertEqual(totals['used'], 7)
+        self.assertEqual(totals['unknown'], 3)
+        self.assertEqual(totals['reserved'], 0)
+
+    def test_release_drops_only_an_unlaunched_reservation(self):
+        state, task = state_with(100000)
+        entry = budget.reserve(state, task, role='Researcher', prompt='p', project_id='p')
+        budget.release(state, entry)
+        self.assertEqual(state['usage'], [])
+        with self.assertRaises(ValueError):
+            budget.release(state, entry)
+
 if __name__ == '__main__':
     unittest.main()

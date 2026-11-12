@@ -48,9 +48,27 @@ The constants are named in `budget.py`: 3 characters per token, a 12,000-token p
 | Packaged resources | All 27 bundled files are byte-identical to source, including `budget.py`, with no extra files. `/private/tmp/interspace-budgets-resources.log` |
 | Syntax and whitespace | `node --check` on all UI, test and runner scripts; `git diff --check`. Passed. |
 
+## Whole-feature review
+
+One independent review of `b54e9ec..ce4b3b3` returned **Clean**: no Critical or Important findings. It confirmed:
+- all model calls go through the two gates;
+- refusals consume no job reservation;
+- `budget_exhausted` is terminal and survives restart;
+- approval binding, migration and owner-bound UI requests work as specified.
+
+Three Minor robustness findings were fixed test-first. Each new test failed before its fix.
+
+- **A setup failure after the reservation left it held.** If saving `run.json` or publishing failed after reserving but before launch, the reservation stayed held and was later charged. It is now released (`budget.release`), because no call was made.
+- **Cancel before dispatch charged the estimate.** `Application.call` reserved before checking cancel, so a cancel in that window charged the estimate. It now checks cancel first, as `team.invoke` already did.
+- **A corrupt usage entry could stop the app opening.** A malformed entry (a reservation without an estimate, or a non-integer charge) could make `recover` raise at startup. Such entries now count as unknown, never as zero, and never crash.
+
+The reviewer also noted, as a non-defect, that the gate enforces the task's current budget. That matches the approval only because budget edits are refused while a run is active.
+
+After the fixes, both full suites passed again with the OS checks required: Python 3.14.6 and Apple 3.9.6, 244 tests each, zero skips. The rebuilt bundle passed the signature check, the byte-for-byte resource match and all six packaged browser suites. Logs: `/private/tmp/interspace-budgets-review-*.log`.
+
 ## Limits and pending
 
 - No real model calls, native launch, personal app data or source projects were used for these checks.
 - Estimates are heuristics, so a real call can be refused early or overshoot slightly. Both outcomes are shown and never hidden.
-- The whole-feature review and the live native check with a deliberately tight budget are pending. The live check needs the user's exact approval of its calls.
+- The live native check with a deliberately tight budget is pending. It needs the user's exact approval of its calls.
 - No merge or push.
