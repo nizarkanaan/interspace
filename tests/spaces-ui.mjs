@@ -36,8 +36,40 @@ export default async function check(page,url){
   // Panels merged so far register themselves; the rest still show the placeholder.
   const placeholder=(await text(page.locator('#space-panel'))).includes('Not available yet');
   if(name==='Notion')assert(!placeholder,'Merged Notion panel did not register');
+  else if(name==='Zotero')assert(!placeholder,'Zotero panel did not register');
   else assert(placeholder,'Missing panel not reported for '+name);
  }
+
+ // Zotero panel: unavailable instructions, then a read-only listing and read with literal remote text.
+ await page.evaluate(()=>{
+  const handler=window.webkit.messageHandlers.interspace,original=handler.postMessage.bind(handler);
+  const z=window.zoteroFixture={state:'unavailable',requests:[]};
+  handler.postMessage=r=>{
+   const p=r.params||{};if(p.app!=='zotero')return original(r);
+   z.requests.push(r);let result={};
+   const signedIn=z.state==='signed_in';
+   if(r.method==='spaces_status')result={apps:[{v:1,app:'zotero',state:z.state,account:signedIn?{label:'My Library',id:'local'}:null,granted:signedIn?['library:read']:[],detail:signedIn?'':'Zotero is not running. Open Zotero on this Mac, then try again.',checked_at:'2026-11-11T09:30:00.000Z'}]};
+   else if(r.method==='spaces_browse')result={v:1,items:[{ref:'zotero:library:users/0',kind:'library',title:'My Library',parent:null,url:null,updated_at:null,has_children:true,meta:{type:'user'}},{ref:'zotero:item:users/0/items/ITEM2222',kind:'item',title:'<img src=x onerror=alert(1)>Attention',parent:'zotero:library:users/0',url:null,updated_at:'2026-11-10T18:02:11.000Z',has_children:false,meta:{type:'journalArticle',creators:'Vaswani et al.',date:'2017'}}],next_cursor:null};
+   else if(r.method==='spaces_read')result={v:1,ref:p.ref,title:'Attention',format:'json',text:'{"title": "<b>Attention</b>"}',truncated:false,next_cursor:null,version:'1203',url:null,meta:{type:'journalArticle'},parent:null};
+   queueMicrotask(()=>window.interspaceReceive({id:r.id,result}));
+  };
+ });
+ await nav.getByRole('button',{name:/^Notion/}).click();await nav.getByRole('button',{name:/^Zotero/}).click();
+ const zPanel=page.locator('#space-panel');
+ await zPanel.getByRole('button',{name:'Check again'}).waitFor();
+ assert((await text(zPanel)).includes('Open Zotero on this Mac'),'Zotero unavailable detail missing');
+ await page.evaluate(()=>{window.zoteroFixture.state='signed_in';});
+ await zPanel.getByRole('button',{name:'Check again'}).click();
+ const zItem=zPanel.getByRole('button',{name:'<img src=x onerror=alert(1)>Attention'});
+ await zItem.waitFor();
+ assert(await zPanel.locator('img').count()===0,'Zotero title inserted as markup');
+ assert((await text(zPanel)).includes('(read-only)')&&(await text(zPanel)).includes('Vaswani et al.'),'Zotero read-only account or item meta missing');
+ await zItem.click();
+ await zPanel.locator('pre.space-content').waitFor();
+ assert((await text(zPanel.locator('pre.space-content'))).includes('<b>Attention</b>')&&await zPanel.locator('pre b').count()===0,'Zotero content not literal');
+ assert(await zPanel.getByRole('button',{name:'Move to trash'}).count()===0,'Read-only Zotero offered a write');
+ const zSent=await page.evaluate(()=>window.zoteroFixture.requests.map(r=>r.method));
+ assert(!zSent.includes('spaces_write')&&zSent.includes('spaces_read'),'Unexpected Zotero requests: '+zSent.join(','));
 
  // A registered panel renders with a scoped api; the frame disposes it on leaving.
  await page.evaluate(()=>{
