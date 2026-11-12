@@ -72,6 +72,30 @@ class FakeScope:
                 merged[key] = value
         return merged
 
+    def apply_answer(self, document, approval, ask, answer, *, now):
+        """Mirrors scope.apply_answer's checks (scope.py), with this fake's digest and merge."""
+        self.answers = getattr(self, 'answers', []) + [(copy.deepcopy(ask), dict(answer))]
+        if answer.get('ask_id') != ask.get('ask_id') or answer.get('request_digest') != ask.get('request_digest'):
+            raise ValueError('The answer does not match the open question.')
+        decision = answer.get('decision')
+        if decision in ('deny', 'cancelled', 'text'):
+            return {'scope': document, 'approval': approval, 'run': False, 'change': None}
+        if decision not in ask.get('options', ()):
+            raise ValueError('That answer was not offered for this question.')
+        if decision == 'allow_once':
+            if not approval or approval.get('scope_digest') != self.digest(document):
+                raise ValueError('The task scope changed; approve it again before answering.')
+            return {'scope': document, 'approval': approval, 'run': True, 'change': None}
+        if not ask.get('scope_patch') or answer.get('scope_digest') != ask.get('patched_scope_digest'):
+            raise ValueError('The scope change does not match the one that was shown.')
+        amended = self.merge_patch(document, ask['scope_patch'])
+        amended['version'] = document['version'] + 1
+        if self.digest(amended) != ask['patched_scope_digest']:
+            raise ValueError('The task scope changed since the question was asked; review it again.')
+        return {'scope': amended, 'approval': {'v': 1, 'scope_version': amended['version'],
+                                               'scope_digest': self.digest(amended), 'approved_at': 'now', 'by': 'user'},
+                'run': True, 'change': 'amended'}
+
     def decide(self, scope, approval, request, *, workspace_roots, now, home=None, app_data=None, temp_roots=()):
         self.calls.append((copy.deepcopy(request), dict(workspace_roots)))
         self.decide_options.append({'home': home, 'app_data': app_data, 'temp_roots': temp_roots})

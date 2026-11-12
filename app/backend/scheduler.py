@@ -45,7 +45,7 @@ MAX_MESSAGE_CHARS = 20000
 DEFAULT_MAX_RUNNING = 4
 MAX_RUNNING_RANGE = (1, 16)
 LOCK_TIMEOUT_S = 300
-INTERRUPT_GRACE_S = 10  # PROVISIONAL(0B-3): interrupt, then kill the process group after this long.
+INTERRUPT_GRACE_S = 10  # 0B measured turn/interrupt ending a turn in about 0.1 s; kill the process group after this long.
 GIT_TIMEOUT_S = 120
 MAX_PARENTS = 32
 MAX_KNOWN_PARENTS = 10000
@@ -421,7 +421,8 @@ class RunContext:
         self.workspaces = {pid: info['path'] for pid, info in workspaces.items()}
         self.primary_workspace = self.workspaces.get(run.project_id) or next(iter(self.workspaces.values()), None)
         self.scope = copy.deepcopy(task['scope'])  # For prompts and display only; decisions read the live scope.
-        self.model = None  # PROVISIONAL(0B-7): the provider default.
+        # A model id from the signed-in account's model list (0B-7), or None for the provider default.
+        self.model = task.get('model') if isinstance(task.get('model'), str) and task.get('model') else None
         self.cancel = run.cancel
 
     def authorize(self, request, call_id):
@@ -441,6 +442,14 @@ class RunContext:
 
     def report_usage(self, usage):
         self._scheduler._report_usage(self._run, usage)
+
+    def tools(self):
+        """Connector tool descriptors for the apps in the task's live scope (for the MCP bridge)."""
+        return self._scheduler._tools(self._run)
+
+    def observed(self, request, call_id):
+        """Record an action the provider ran without asking; returns its final decision (`provider.sandbox`)."""
+        return self._scheduler._observed(self._run, request, _runtime_id(call_id, 'call_id'))
 
 
 class _Run:
@@ -479,7 +488,7 @@ def _final(decision, rule=None):
 class Scheduler:
     def __init__(self, *, max_running, runtime_factory, policy, audit, events, budget_gate, locks, clock,
                  tasks, workspaces=None, app_tools=None, legacy_active=None, interrupt_grace_s=INTERRUPT_GRACE_S,
-                 monotonic=time.monotonic, tick_s=0.5, decide_options=None):
+                 monotonic=time.monotonic, tick_s=0.5, decide_options=None, tool_catalog=None):
         self.max_running = validate_max_running(max_running)
         self.runtime_factory = runtime_factory
         self.policy = policy
@@ -492,6 +501,7 @@ class Scheduler:
         self.lock = tasks.lock
         self.workspaces = workspaces
         self.app_tools = app_tools
+        self.tool_catalog = tool_catalog  # app name -> [ToolDescriptor] (2C wires runtime.tool_catalog).
         self.legacy_active = legacy_active or (lambda: False)
         self.interrupt_grace_s = interrupt_grace_s
         self.monotonic = monotonic
@@ -564,8 +574,7 @@ class Scheduler:
             if decision == 'text' and (not isinstance(text, str) or not text.strip() or len(text) > 6000):
                 raise ValueError('Reply must contain 1–6,000 characters.')
             task = self._task(task_id)
-            if decision == 'add_to_scope':
-                self._amend(run, task, ask, scope_digest)
+            self._apply_answer(run, task, ask, decision, scope_digest)
             self._record_answer(run, ask, decision)
             self.events.append(task_id, run.project_id, 'answer',
                                {'ask_id': ask_id, 'decision': decision, 'text': text if decision == 'text' else None,
@@ -798,8 +807,13 @@ class Scheduler:
             if not isinstance(result, dict) or result.get('status') not in ('completed', 'failed', 'cancelled'):
                 raise ValueError('Invalid turn result.')
             status, usage, error = result['status'], result.get('usage'), result.get('error')
-        except Exception:
+            if status == 'failed':
+                self._drop_session(run.task_id, close=True)  # The next turn starts a fresh session.
+        except Exception as failure:
             status = 'crashed'
+            if isinstance(failure, ValueError) and isinstance(getattr(failure, 'code', None), str):
+                # runtime.RuntimeFailure: a known code and a sentence that is safe to show.
+                status, error = 'failed', {'code': failure.code, 'message': str(failure)}
             with self.lock:
                 broken = self._sessions.pop(run.task_id, None)
             if broken is not None:
@@ -828,6 +842,15 @@ class Scheduler:
         if status == 'cancelled':
             return 'cancelled', None
         return 'idle', None
+
+    def _drop_session(self, task_id, close):
+        with self.lock:
+            session = self._sessions.pop(task_id, None)
+        if session is not None:
+            try:
+                session.close() if close else session.kill()
+            except Exception:
+                pass  # The session is already gone.
 
     def _prepare_workspaces(self, run):
         with self.lock:
@@ -939,7 +962,8 @@ class Scheduler:
                 self._stop(run, 'time_limit')
 
     def _report_usage(self, run, usage):
-        """`usage` is the turn's usage so far (PROVISIONAL(0B-2)). Over budget, the turn is interrupted."""
+        """`usage` is the turn's cumulative usage so far, reported after each model request (0B: Codex sends
+        `thread/tokenUsage/updated` per request). Over budget, the turn is interrupted."""
         with self.lock:
             run.last_usage = copy.deepcopy(usage)
             amount = budget.charge(usage, run.provider)
@@ -1039,17 +1063,27 @@ class Scheduler:
         except Exception:
             raise ValueError('Could not record the answer, so nothing was allowed.') from None
 
-    def _amend(self, run, task, ask, scope_digest):
-        if ask.get('scope_patch') is None or scope_digest is None or scope_digest != ask.get('patched_scope_digest'):
-            raise ValueError('The scope change does not match what was shown.')
-        current = task['scope']
-        if self.policy.digest(current) != ask['scope_digest']:
+    def _apply_answer(self, run, task, ask, decision, scope_digest):
+        """Bind the answer to the exact ask with `scope.apply_answer` (coordinator ruling: one place for the checks)."""
+        apply_answer = getattr(self.policy, 'apply_answer', None)
+        if apply_answer is None:  # service.ScopeAdapter wraps the scope module itself.
+            apply_answer = getattr(getattr(self.policy, 'module', None), 'apply_answer', None)
+        if apply_answer is None:
+            raise ValueError('The scope engine is not available, so nothing was allowed.')
+        stored = {'ask_id': ask['ask_id'], 'request_digest': ask['request_digest'], 'options': ask['options'],
+                  'scope_patch': ask.get('scope_patch'), 'patched_scope_digest': ask.get('patched_scope_digest')}
+        answer = {'ask_id': ask['ask_id'], 'request_digest': ask['request_digest'], 'decision': decision,
+                  'scope_digest': scope_digest}
+        current, approval = task['scope'], task.get('scope_approval')
+        if decision == 'add_to_scope' and self.policy.digest(current) != ask['scope_digest']:
             raise ValueError('The scope changed since this question was asked. Nothing was changed.')
-        amended = self.policy.merge_patch(current, ask['scope_patch'])
-        amended['version'] = current['version'] + 1
+        outcome = apply_answer(current, approval, stored, answer, now=self.clock())
+        if outcome.get('change') != 'amended':
+            return
+        amended, new_approval = outcome['scope'], outcome['approval']
         self.policy.validate(amended, project_ids=list(self.store.state['projects']))
         digest = self.policy.digest(amended)
-        if digest != scope_digest:
+        if digest != scope_digest or new_approval.get('scope_digest') != digest:
             raise ValueError('The scope change does not match what was shown.')
         try:
             self._audit(run, 'scope', actor='user', detail={'from_version': current['version'], 'to_version': amended['version'],
@@ -1058,11 +1092,45 @@ class Scheduler:
             raise ValueError('Could not record the scope change, so nothing was changed.') from None
         task['scope'] = amended
         task['token_budget'] = amended.get('limits', {}).get('token_budget', task.get('token_budget'))
-        task['scope_approval'] = {'v': V, 'scope_version': amended['version'], 'scope_digest': digest,
-                                  'approved_at': iso_time(self.clock()), 'by': 'user'}
+        task['scope_approval'] = new_approval
         self.events.append(run.task_id, run.project_id, 'scope',
                            {'scope_version': amended['version'], 'scope_digest': digest, 'change': 'amended',
                             'by': 'user', 'summary': 'Added to the scope while answering a question.'})
+
+    # -- runtime support ----------------------------------------------------------------------------
+
+    def _tools(self, run):
+        if self.tool_catalog is None:
+            return []
+        with self.lock:
+            apps = [a.get('app') for a in self._task(run.task_id)['scope'].get('apps', []) if isinstance(a, dict)]
+        found = []
+        for app_name in apps:
+            try:
+                descriptors = self.tool_catalog(app_name)
+            except Exception:
+                continue  # Signed out or unavailable: the agent simply has no tools for that app.
+            found += [copy.deepcopy(d) for d in descriptors or [] if isinstance(d, dict) and d.get('app') == app_name]
+        return found
+
+    def _observed(self, run, request, call_id):
+        with self.lock:
+            scope = self._task(run.task_id)['scope']
+            version = scope.get('version')
+            try:
+                digest = self.policy.digest(scope)
+            except Exception:
+                digest = None
+        decision = {'decision': 'allow', 'rule': 'provider.sandbox',
+                    'reason': 'Run by the provider inside its sandbox and reported after the fact.',
+                    'scope_version': version, 'scope_digest': digest}
+        try:
+            self._audit(run, 'decision', call_id=call_id, request=copy.deepcopy(request), decision='allow',
+                        rule='provider.sandbox', scope_version=version, scope_digest=digest,
+                        detail={'after_the_fact': True})
+        except Exception:
+            self._error(run, 'audit_failed', 'An action the agent ran could not be recorded in the audit log.', True, call_id)
+        return decision
 
     # -- connector tools ----------------------------------------------------------------------------
 
