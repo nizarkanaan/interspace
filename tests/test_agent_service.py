@@ -10,6 +10,7 @@ import threading
 import time
 import types
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'app/backend'))
@@ -528,6 +529,50 @@ class RuntimeWiringTests(ApplicationCase):
         task_id = self.create(app, project_id)
         app.handle('agent_message', {'task_id': task_id, 'text': 'go', 'client_id': 'c1'})
         wait_for(lambda: self.agent_state(app, task_id) == 'failed')
+
+
+class ToolCatalogTests(ApplicationCase):
+    """`tool_catalog(app) -> [ToolDescriptor]` for RunContext.tools() (scheduler.md, Wave 2A additions)."""
+
+    def test_catalog_lists_tools_of_signed_in_apps_only(self):
+        app = self.open()
+        base = service.optional_module('spaces.base')
+        with mock.patch.object(base, 'tools', lambda connector: [{'name': connector.app + '_browse'}]):
+            self.assertEqual(app.tool_catalog('notion'), [{'name': 'notion_browse'}])
+            self.assertEqual(app.tool_catalog('ghost'), [])
+            self.assertEqual(app.tool_catalog(None), [])
+            signed_out = FakeSpacesConnector('github')
+            signed_out.status = lambda: {'v': 1, 'app': 'github', 'state': 'signed_out'}
+            self.connectors['github'] = signed_out
+            self.assertEqual(app.tool_catalog('github'), [])
+            broken = FakeSpacesConnector('gdrive')
+            broken.status = mock.Mock(side_effect=OSError('offline'))
+            self.connectors['gdrive'] = broken
+            self.assertEqual(app.tool_catalog('gdrive'), [], 'a failing app is left out')
+        with mock.patch.object(base, 'tools', mock.Mock(side_effect=RuntimeError('bad descriptor'))):
+            self.assertEqual(app.tool_catalog('notion'), [])
+
+    def test_scheduler_gets_the_catalog_only_when_it_accepts_one(self):
+        received = {}
+
+        class Accepting(scheduler.Scheduler):
+            def __init__(self, *args, tool_catalog=None, **kwargs):
+                received['tool_catalog'] = tool_catalog
+                super().__init__(*args, **kwargs)
+        with mock.patch.object(scheduler, 'Scheduler', Accepting):
+            app = self.open()
+        self.assertEqual(received['tool_catalog'], app.tool_catalog)
+        self.assertIsInstance(self.open().scheduler, scheduler.Scheduler)  # Today's constructor: not passed.
+
+
+class ApplyAnswerAdapterTests(unittest.TestCase):
+    def test_delegates_to_scope_apply_answer(self):
+        module = types.SimpleNamespace(apply_answer=mock.Mock(return_value={'run': True}))
+        adapter = service.ScopeAdapter(module)
+        self.assertEqual(adapter.apply_answer({'v': 1}, None, {'ask_id': 'a'}, {'decision': 'deny'}, now=5.0), {'run': True})
+        module.apply_answer.assert_called_once_with({'v': 1}, None, {'ask_id': 'a'}, {'decision': 'deny'}, now=5.0)
+        with self.assertRaisesRegex(ValueError, 'scope engine'):
+            service.ScopeAdapter(None).apply_answer({}, None, {}, {}, now=0)
 
 
 class AgentProviderTests(ApplicationCase):

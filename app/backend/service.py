@@ -3,6 +3,7 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor
 import copy
 import importlib
+import inspect
 import json
 import os
 from pathlib import Path
@@ -185,6 +186,10 @@ class ScopeAdapter:
 
     def request_digest(self, request):
         return self._need().request_digest(request)
+
+    def apply_answer(self, document, approval, ask, answer, *, now):
+        """scope.apply_answer: binds the answer to the exact ask and applies add_to_scope (README answer path)."""
+        return self._need().apply_answer(document, approval, ask, answer, now=now)
 
     def merge_patch(self, scope, patch):
         """The patched copy with `version` unchanged; the scheduler increments it."""
@@ -576,7 +581,10 @@ class Application:
         except (AttributeError, ValueError):
             max_running = scheduler.DEFAULT_MAX_RUNNING
         self.spaces = SpacesHub(self, connector_factory or default_connector_factory(self))
-        self.scheduler = scheduler.Scheduler(
+        extra = {}
+        if 'tool_catalog' in inspect.signature(scheduler.Scheduler).parameters:
+            extra['tool_catalog'] = self.tool_catalog  # RunContext.tools() (2A); older schedulers take none.
+        self.scheduler = scheduler.Scheduler(**extra,
             max_running=max_running, runtime_factory=runtime_factory or self.default_runtime_factory(), policy=self.scope,
             audit=self.audit, events=self.events, budget_gate=scheduler.BudgetGate(self.store), locks=self.locks,
             clock=time.time, tasks=self.store, workspaces=scheduler.Workspaces(self.storage/'workspaces'),
@@ -601,6 +609,22 @@ class Application:
     @staticmethod
     def no_runtime(task_id):
         raise ValueError('The agent runtime is not in this build yet.')
+
+    def tool_catalog(self, name):
+        """Connector tool descriptors for one app (`spaces.base.tools`), for RunContext.tools().
+
+        Only a signed-in app lists tools; an unknown, signed-out or failing app gives an empty list.
+        """
+        base = optional_module('spaces.base')
+        if base is None or name not in SPACES_APPS:
+            return []
+        try:
+            connector = self.spaces.connector(name)
+            if (connector.status() or {}).get('state') != 'signed_in':
+                return []
+            return list(base.tools(connector))
+        except Exception:
+            return []
 
     def agent_tool(self, name):
         """Connector tool descriptor and connector for `RunContext.app_tool` (spaces.base.tools, 1A)."""
