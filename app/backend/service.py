@@ -170,8 +170,8 @@ class ScopeAdapter:
             raise ValueError('Agent tasks need the scope engine, which is not in this build yet.')
         return self.module
 
-    def validate(self, document):
-        result = self._need().validate(document)
+    def validate(self, document, *, project_ids=None):
+        result = self._need().validate(document, project_ids=project_ids)
         return document if result is None else result
 
     def digest(self, scope):
@@ -180,26 +180,28 @@ class ScopeAdapter:
     def default(self, task, project_ids):
         return self._need().default(task, project_ids)
 
-    def decide(self, scope, approval, request, *, workspace_roots, now):
-        return self._need().decide(scope, approval, request, workspace_roots=workspace_roots, now=now)
+    def decide(self, scope, approval, request, *, workspace_roots, now, **options):
+        return self._need().decide(scope, approval, request, workspace_roots=workspace_roots, now=now, **options)
 
     def request_digest(self, request):
         return self._need().request_digest(request)
 
-    def apply_patch(self, scope, patch):
-        return self._need().apply_patch(scope, patch)
+    def merge_patch(self, scope, patch):
+        """The patched copy with `version` unchanged; the scheduler increments it."""
+        return self._need().merge_patch(scope, patch)
 
 
 class AuditAdapter:
-    """Audit writes (1E's audit.py). Without the module every write fails, so agent actions fail closed."""
+    """Audit writes. `log` is 1E's `audit.AuditLog` (or a test fake) with `append(record)`, which raises
+    when the record is not durable. Without it every write fails, so agent actions fail closed."""
 
-    def __init__(self, module):
-        self.module = module
+    def __init__(self, log):
+        self.log = log
 
     def append(self, record):
-        if self.module is None:
+        if self.log is None:
             raise OSError('The audit log is not in this build yet.')
-        self.module.append(record)
+        return self.log.append(record)
 
 
 class AgentStore:
@@ -263,7 +265,7 @@ class SpacesHub:
         return status
 
     def _audit(self, kind, **fields):
-        record = {'v': 1, 'id': uuid.uuid4().hex, 'at': scheduler.iso_time(time.time()), 'actor': 'user', 'kind': kind,
+        record = {'v': 1, 'actor': 'user', 'kind': kind,
                   'task_id': None, 'project_id': None, 'turn_id': None, 'call_id': None, 'request': None,
                   'decision': None, 'rule': None, 'scope_version': None, 'scope_digest': None, 'outcome': None,
                   'idempotency_key': None, 'detail': None}
@@ -355,10 +357,6 @@ class SpacesHub:
         if not isinstance(ref, str) or not isinstance(values, dict) or not isinstance(key, str):
             raise ValueError('Invalid write request.')
         request = {'category': 'app', 'app': name, 'action': action, 'ref': ref}
-        try:
-            self._audit('user_write', request=request, idempotency_key=key)
-        except Exception:
-            raise ValueError('Could not record the change in the audit log, so it was not sent.') from None
         lock = 'app:' + ref
         self.app.locks.acquire(lock, None, None)  # The same lock agents take, so edits never interleave.
         try:
@@ -370,9 +368,10 @@ class SpacesHub:
                 raise
             finally:
                 try:
+                    # One record with the outcome: a user_write record requires it (audit.py).
                     self._audit('user_write', request=request, idempotency_key=key, outcome=outcome)
                 except Exception:
-                    pass  # The write already happened or failed; the first record shows it was attempted.
+                    pass  # The write already happened or failed; it is never re-sent to make the record.
         finally:
             self.app.locks.release(lock, None)
         return result
@@ -563,7 +562,10 @@ class Application:
     def setup_agents(self, scope_api, audit_api, runtime_factory, connector_factory, interrupt_grace_s):
         """Agentic tasks (scheduler.md) and Spaces (connectors.md), beside the unchanged legacy slot."""
         self.scope = ScopeAdapter(scope_api if scope_api is not None else optional_module('scope'))
-        self.audit = AuditAdapter(audit_api if audit_api is not None else optional_module('audit'))
+        if audit_api is None:
+            module = optional_module('audit')
+            audit_api = module.AuditLog(self.storage/'audit') if module is not None and hasattr(module,'AuditLog') else None
+        self.audit = AuditAdapter(audit_api)
         self.events = scheduler.EventLog(self.storage/'tasks', forward=lambda event: self.emit({'type':'event','event':event}))
         self.store = AgentStore(self)
         self.locks = scheduler.Locks()
@@ -579,7 +581,7 @@ class Application:
             audit=self.audit, events=self.events, budget_gate=scheduler.BudgetGate(self.store), locks=self.locks,
             clock=time.time, tasks=self.store, workspaces=scheduler.Workspaces(self.storage/'workspaces'),
             app_tools=self.agent_tool, legacy_active=lambda: bool(self.state['active']),
-            interrupt_grace_s=interrupt_grace_s)
+            interrupt_grace_s=interrupt_grace_s, decide_options={'app_data':str(self.storage)})
 
     @staticmethod
     def no_runtime(task_id):
@@ -1139,7 +1141,7 @@ class Application:
         raise ValueError('Unknown method')
 
     def audit_scope(self, task, before, after, before_digest, after_digest):
-        record={'v':1,'id':uuid.uuid4().hex,'at':scheduler.iso_time(time.time()),'actor':'user','kind':'scope',
+        record={'v':1,'actor':'user','kind':'scope',
                 'task_id':task['id'],'project_id':task['agent']['project_id'],'turn_id':None,'call_id':None,'request':None,
                 'decision':None,'rule':None,'scope_version':after['version'],'scope_digest':after_digest,'outcome':None,
                 'idempotency_key':None,'detail':{'from_version':before['version'] if before else None,'to_version':after['version'],
@@ -1165,7 +1167,7 @@ class Application:
             document=self.scope.default(task,[project_id]) if proposed is None else copy.deepcopy(proposed)
             if not isinstance(document,dict):raise ValueError('Scope must be an object.')
             document.update(v=1,task_id=task['id'],version=1)
-            self.scope.validate(document)
+            self.scope.validate(document,project_ids=list(self.state['projects']))
             task.update(scope=document,token_budget=budget.validate(document['limits']['token_budget']))
             digest=self.scope.digest(document)
             self.audit_scope(task,None,document,None,digest)
@@ -1182,7 +1184,7 @@ class Application:
         if not isinstance(params.get('scope'),dict):raise ValueError('Scope must be an object.')
         document=copy.deepcopy(params['scope'])
         document.update(v=1,task_id=task['id'],version=current['version']+1)
-        self.scope.validate(document)
+        self.scope.validate(document,project_ids=list(self.state['projects']))
         limit=budget.validate(document['limits']['token_budget'])
         digest=self.scope.digest(document)
         self.audit_scope(task,current,document,self.scope.digest(current),digest)

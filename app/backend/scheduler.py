@@ -47,6 +47,8 @@ MAX_RUNNING_RANGE = (1, 16)
 LOCK_TIMEOUT_S = 300
 INTERRUPT_GRACE_S = 10  # PROVISIONAL(0B-3): interrupt, then kill the process group after this long.
 GIT_TIMEOUT_S = 120
+MAX_PARENTS = 32
+MAX_KNOWN_PARENTS = 10000
 
 QUEUED = 'queued'
 COUNTED = ('starting', 'running', 'waiting_lock')  # Only these count against the time limit.
@@ -477,7 +479,7 @@ def _final(decision, rule=None):
 class Scheduler:
     def __init__(self, *, max_running, runtime_factory, policy, audit, events, budget_gate, locks, clock,
                  tasks, workspaces=None, app_tools=None, legacy_active=None, interrupt_grace_s=INTERRUPT_GRACE_S,
-                 monotonic=time.monotonic, tick_s=0.5):
+                 monotonic=time.monotonic, tick_s=0.5, decide_options=None):
         self.max_running = validate_max_running(max_running)
         self.runtime_factory = runtime_factory
         self.policy = policy
@@ -493,6 +495,9 @@ class Scheduler:
         self.legacy_active = legacy_active or (lambda: False)
         self.interrupt_grace_s = interrupt_grace_s
         self.monotonic = monotonic
+        # Extra keyword arguments for policy.decide (coordinator ruling): app_data, home, temp_roots.
+        self.decide_options = dict(decide_options or {})
+        self._parents = {}  # ref -> parent ref, as connectors reported them in listings.
         self._cond = threading.Condition(self.lock)
         self._runs = {}
         self._queue = []
@@ -701,7 +706,8 @@ class Scheduler:
                        turn_id=run.turn_id)
 
     def _audit(self, run, kind, actor='agent', **fields):
-        record = {'v': V, 'id': uuid.uuid4().hex, 'at': iso_time(self.clock()), 'actor': actor, 'kind': kind,
+        # audit.AuditLog fills id, at and prev itself, and redacts the request.
+        record = {'v': V, 'actor': actor, 'kind': kind,
                   'task_id': run.task_id, 'project_id': run.project_id, 'turn_id': run.turn_id, 'call_id': None,
                   'request': None, 'decision': None, 'rule': None, 'scope_version': None, 'scope_digest': None,
                   'outcome': None, 'idempotency_key': None, 'detail': None}
@@ -952,7 +958,7 @@ class Scheduler:
         try:
             decision = self.policy.decide(task['scope'], task.get('scope_approval'), copy.deepcopy(request),
                                           workspace_roots=dict((k, v['path']) for k, v in run.workspaces.items()),
-                                          now=self.clock())
+                                          now=self.clock(), **self.decide_options)
             if not isinstance(decision, dict) or decision.get('decision') not in ('allow', 'ask', 'deny'):
                 raise ValueError('Invalid policy decision.')
             return decision
@@ -1039,9 +1045,9 @@ class Scheduler:
         current = task['scope']
         if self.policy.digest(current) != ask['scope_digest']:
             raise ValueError('The scope changed since this question was asked. Nothing was changed.')
-        amended = self.policy.apply_patch(current, ask['scope_patch'])
+        amended = self.policy.merge_patch(current, ask['scope_patch'])
         amended['version'] = current['version'] + 1
-        self.policy.validate(amended)
+        self.policy.validate(amended, project_ids=list(self.store.state['projects']))
         digest = self.policy.digest(amended)
         if digest != scope_digest:
             raise ValueError('The scope change does not match what was shown.')
@@ -1072,6 +1078,9 @@ class Scheduler:
         effect = descriptor['effect']
         action = descriptor.get('action') or descriptor['name']
         request = {'category': 'app', 'app': descriptor['app'], 'op': effect, 'action': action, 'ref': ref}
+        parents = self._ancestry(ref)
+        if parents:
+            request['parents'] = parents  # Without it, include_children matches the exact ref only.
         decision = self._authorize(run, request, call_id)
         title = (descriptor.get('title', name) + (' ' + ref if isinstance(ref, str) else ''))[:200]
         if effect == 'read':
@@ -1113,6 +1122,25 @@ class Scheduler:
             self._error(run, 'lock_timeout', 'Timed out waiting for another write to the same resource.', True, call_id)
             return failure('lock_timeout', 'Timed out waiting for another write to the same resource.')
 
+    def _ancestry(self, ref):
+        """Ancestor refs, nearest first, from what connectors reported in browse and search results."""
+        chain = []
+        with self.lock:
+            current = self._parents.get(ref) if isinstance(ref, str) else None
+            while isinstance(current, str) and current not in chain and current != ref and len(chain) < MAX_PARENTS:
+                chain.append(current)
+                current = self._parents.get(current)
+        return chain
+
+    def _learn_parents(self, result):
+        items = result.get('items') if isinstance(result, dict) else None
+        with self.lock:
+            for item in items if isinstance(items, list) else ():
+                if isinstance(item, dict) and isinstance(item.get('ref'), str) and isinstance(item.get('parent'), str):
+                    if len(self._parents) >= MAX_KNOWN_PARENTS:
+                        self._parents.clear()  # Bounded memory; ancestry is learned again from later listings.
+                    self._parents[item['ref']] = item['parent']
+
     def _app_read(self, run, descriptor, connector, name, arguments, call_id, title, decision, failure):
         shown = json.dumps(arguments, ensure_ascii=False)
         self._emit(run, 'tool_call', {'call_id': call_id, 'category': 'app', 'tool': name, 'app': descriptor['app'],
@@ -1131,7 +1159,7 @@ class Scheduler:
             if verb == 'read':
                 result = connector.read(arguments.get(descriptor.get('ref_param')), **args)
             elif verb == 'browse':
-                result = connector.browse(**arguments)
+                result = connector.browse(**arguments)  # ref_param is `parent`, passed as itself.
             elif verb == 'search':
                 result = connector.search(**arguments)
             else:
@@ -1143,6 +1171,7 @@ class Scheduler:
                                                 duration_ms=int((time.monotonic() - started) * 1000)),
                        turn_id=run.turn_id, item_id=call_id)
             return failure(code, message)
+        self._learn_parents(result)
         text = json.dumps(result, ensure_ascii=False)
         self._emit(run, 'tool_result', dict(result_card, duration_ms=int((time.monotonic() - started) * 1000),
                                             output={'text': text[:MAX_TOOL_OUTPUT_CHARS],

@@ -31,6 +31,8 @@ class FakeScope:
     def __init__(self):
         self.fail = False
         self.calls = []
+        self.decide_options = []
+        self.validated_with = []
 
     def digest(self, scope):
         return 'sha256:' + hashlib.sha256(canonical(scope)).hexdigest()
@@ -38,7 +40,10 @@ class FakeScope:
     def request_digest(self, request):
         return 'sha256:' + hashlib.sha256(canonical(request)).hexdigest()
 
-    def validate(self, document):
+    def validate(self, document, *, project_ids=None):
+        self.validated_with.append(project_ids)
+        if project_ids is not None and any(p.get('project_id') not in project_ids for p in document.get('projects', [])):
+            raise ValueError('A project in the scope is not registered.')
         if not isinstance(document, dict) or not isinstance(document.get('version'), int):
             raise ValueError('Scope is invalid.')
         limits = document.get('limits', {})
@@ -55,7 +60,7 @@ class FakeScope:
                 'apps': [], 'web_search': 'ask',
                 'limits': {'token_budget': task.get('token_budget') or 250000, 'time_limit_s': 3600}}
 
-    def apply_patch(self, scope, patch):
+    def merge_patch(self, scope, patch):
         merged = copy.deepcopy(scope)
         for key, value in patch.items():
             if isinstance(value, list):
@@ -67,8 +72,9 @@ class FakeScope:
                 merged[key] = value
         return merged
 
-    def decide(self, scope, approval, request, *, workspace_roots, now):
+    def decide(self, scope, approval, request, *, workspace_roots, now, home=None, app_data=None, temp_roots=()):
         self.calls.append((copy.deepcopy(request), dict(workspace_roots)))
+        self.decide_options.append({'home': home, 'app_data': app_data, 'temp_roots': temp_roots})
         if self.fail:
             raise RuntimeError('policy engine broke')
         base = {'scope_version': scope['version'], 'scope_digest': self.digest(scope), 'reason': ''}
@@ -80,7 +86,7 @@ class FakeScope:
         if rule in ('allow', 'deny'):
             return dict(base, decision=rule, rule='fake.' + rule, ask=None)
         patch = {'fake_rules': {request['category']: 'allow'}}
-        patched = self.apply_patch(scope, patch)
+        patched = self.merge_patch(scope, patch)
         patched['version'] = scope['version'] + 1
         return dict(base, decision='ask', rule='fake.ask', ask={
             'reason': 'outside_scope', 'title': 'Allow ' + request['category'] + '?', 'detail': 'Outside scope.',
@@ -94,7 +100,18 @@ class FakeAudit:
         self.fail = False
         self.lock = threading.Lock()
 
+    FIELDS = ('actor', 'kind', 'task_id', 'project_id', 'turn_id', 'call_id', 'request', 'decision', 'rule',
+              'scope_version', 'scope_digest', 'outcome', 'idempotency_key', 'detail')
+
     def append(self, record):
+        """Mirrors audit.AuditLog's validation: the log fills v/id/at/prev itself."""
+        unknown = set(record) - set(self.FIELDS) - {'v'}
+        if unknown:
+            raise ValueError('The audit record has unknown fields: ' + ', '.join(sorted(unknown)))
+        if record['kind'] in ('action', 'user_write') and record.get('outcome') not in ('succeeded', 'failed', 'outcome_unknown', 'cancelled'):
+            raise ValueError('Action records need a known outcome.')
+        if record['kind'] == 'scope' and record.get('request') is not None:
+            raise ValueError('Scope records carry no request.')
         if self.fail:
             raise OSError('disk full')
         with self.lock:
@@ -193,7 +210,9 @@ class FakeConnector:
         return {'v': 1, 'items': [], 'next_cursor': None}
 
     def browse(self, parent=None, cursor=None, limit=50):
-        return {'v': 1, 'items': [], 'next_cursor': None}
+        return {'v': 1, 'items': [{'ref': 'notion:page:child', 'kind': 'page', 'title': 'Child', 'parent': parent,
+                                   'url': None, 'updated_at': None, 'has_children': False, 'meta': {}}],
+                'next_cursor': None}
 
     def read(self, ref, cursor=None):
         return {'v': 1, 'ref': ref, 'title': 'Page', 'format': 'markdown', 'text': 'hello', 'truncated': False,
@@ -220,6 +239,8 @@ class FakeConnector:
 def notion_tools(connector):
     """Two descriptors, shaped like spaces.base.tools output."""
     return {
+        'notion_browse': {'v': 1, 'name': 'notion_browse', 'app': 'notion', 'title': 'Browse', 'description': '',
+                          'input_schema': {}, 'effect': 'read', 'action': None, 'ref_param': 'parent'},
         'notion_read': {'v': 1, 'name': 'notion_read', 'app': 'notion', 'title': 'Read', 'description': '',
                         'input_schema': {}, 'effect': 'read', 'action': None, 'ref_param': 'ref'},
         'notion_page_append': {'v': 1, 'name': 'notion_page_append', 'app': 'notion', 'title': 'Append to page',

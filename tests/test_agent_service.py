@@ -292,6 +292,10 @@ class AgentMethodTests(ApplicationCase):
         self.assertEqual([t['status'] for t in public['tasks'] if t['id'] == task_id], ['idle'])
         kinds = [r['kind'] for r in self.audit.records]
         self.assertEqual(kinds[:2], ['scope', 'scope'])
+        self.assertEqual(self.scope.validated_with[0], [project_id])
+        with self.assertRaisesRegex(ValueError, 'not registered'):
+            app.handle('agent_create', {'project_id': project_id, 'title': 'X',
+                                        'scope': dict(scope['scope'], projects=[{'project_id': 'ghost'}])})
 
     def test_scope_update_invalidates_approval_and_checks_base_version(self):
         app = self.open()
@@ -405,6 +409,19 @@ class AgentMethodTests(ApplicationCase):
             app.handle('scheduler_settings', {'max_running': 99})
 
 
+class DecideOptionTests(ApplicationCase):
+    def test_application_passes_its_data_directory_as_app_data(self):
+        def script(session, text, ctx):
+            ctx.authorize({'category': 'command', 'argv': ['ls']}, 'c1')
+            return {'status': 'completed', 'usage': None, 'error': None}
+        self.runtime.script = script
+        app = self.open()
+        task_id = self.create(app, self.add_project(app))
+        app.handle('agent_message', {'task_id': task_id, 'text': 'go', 'client_id': None})
+        wait_for(lambda: self.agent_state(app, task_id) == 'idle')
+        self.assertEqual(self.scope.decide_options[0]['app_data'], str(app.storage))
+
+
 class SpacesMethodTests(ApplicationCase):
     def test_status_write_and_changes(self):
         app = self.open()
@@ -417,13 +434,12 @@ class SpacesMethodTests(ApplicationCase):
                                              'params': {'markdown': 'hi'}, 'idempotency_key': 'k1'})
         self.assertTrue(result['ok'])
         records = [r for r in self.audit.records if r['kind'] == 'user_write']
-        self.assertEqual([(r['actor'], r['outcome']) for r in records], [('user', None), ('user', 'succeeded')])
+        self.assertEqual([(r['actor'], r['outcome'], r['idempotency_key']) for r in records], [('user', 'succeeded', 'k1')])
         self.assertEqual(app.locks.holders(), {})
-        self.audit.fail = True
-        with self.assertRaisesRegex(ValueError, 'audit'):
-            app.handle('spaces_write', {'app': 'notion', 'action': 'notion.page.append', 'ref': 'notion:page:n1',
-                                        'params': {}, 'idempotency_key': 'k2'})
-        self.assertEqual(len(self.connectors['notion'].writes), 1)
+        self.audit.fail = True  # The write already happened; its result is still returned, never re-sent.
+        self.assertTrue(app.handle('spaces_write', {'app': 'notion', 'action': 'notion.page.append', 'ref': 'notion:page:n1',
+                                                    'params': {}, 'idempotency_key': 'k2'})['ok'])
+        self.assertEqual(len(self.connectors['notion'].writes), 2)
         self.audit.fail = False
         self.assertEqual(app.handle('spaces_changes', {})['apps']['notion'], [])
         self.assertEqual(len(app.handle('spaces_changes', {})['apps']['notion']), 1)

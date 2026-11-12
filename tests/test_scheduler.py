@@ -50,6 +50,7 @@ class SchedulerCase(unittest.TestCase):
             clock=time.time, tasks=self.store, workspaces=self.workspaces,
             app_tools=lambda name: (tools[name], self.connector) if name in tools else None,
             legacy_active=lambda: self.legacy(), interrupt_grace_s=grace,
+            decide_options={'app_data': str(self.root / 'data')},
             monotonic=monotonic or time.monotonic, tick_s=0.01)
         self.addCleanup(self.sched.shutdown, 5)
         return self.sched
@@ -637,6 +638,21 @@ class AuthorizeTests(SchedulerCase):
         self.sched.scope_changed('a')
         self.wait_state('a', 'idle')
         self.assertEqual(decisions[0]['decision'], 'allow')
+
+    def test_decide_gets_options_and_known_parents(self):
+        def script(session, text, ctx):
+            ctx.app_tool('notion_page_append', {'ref': 'notion:page:child', 'markdown': 'x'}, 'c0')
+            ctx.app_tool('notion_browse', {'parent': 'notion:page:top'}, 'c1')
+            ctx.app_tool('notion_page_append', {'ref': 'notion:page:child', 'markdown': 'x'}, 'c2')
+            return {'status': 'completed', 'usage': None, 'error': None}
+        self.make(script=script)
+        self.task('a', rules={'app': 'allow'})
+        self.sched.submit('a', 'p1', 'x', None)
+        self.wait_state('a', 'idle')
+        requests = [call[0] for call in self.scope.calls]
+        self.assertNotIn('parents', requests[0], 'unknown ancestry: exact ref only')
+        self.assertEqual(requests[2]['parents'], ['notion:page:top'])
+        self.assertEqual(self.scope.decide_options[0]['app_data'], str(self.root / 'data'))
 
     def test_denied_app_write_emits_denied_card_and_never_writes(self):
         results = []
