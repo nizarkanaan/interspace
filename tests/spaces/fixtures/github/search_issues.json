@@ -1,0 +1,36 @@
+{
+ "incomplete_results": false,
+ "items": [
+  {
+   "body": "Invented body.",
+   "closed_at": null,
+   "comments": 2,
+   "created_at": "2026-11-01T09:00:00Z",
+   "html_url": "https://github.com/octo/notes/issues/41",
+   "id": 900041,
+   "labels": [
+    {
+     "id": 0,
+     "name": "reading"
+    },
+    {
+     "id": 1,
+     "name": "todo"
+    }
+   ],
+   "number": 41,
+   "repository_url": "https://api.github.com/repos/octo/notes",
+   "state": "open",
+   "title": "Track reading list",
+   "updated_at": "2026-11-10T17:00:00Z",
+   "url": "https://api.github.com/repos/octo/notes/issues/41",
+   "user": {
+    "html_url": "https://github.com/octocat",
+    "id": 583231,
+    "login": "octocat",
+    "type": "User"
+   }
+  }
+ ],
+ "total_count": 1
+}

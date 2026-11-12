@@ -36,6 +36,7 @@ export default async function check(page,url){
   // Panels merged so far register themselves; the rest still show the placeholder.
   const placeholder=(await text(page.locator('#space-panel'))).includes('Not available yet');
   if(name==='Notion')assert(!placeholder,'Merged Notion panel did not register');
+  else if(name==='GitHub')assert(!placeholder&&(await text(page.locator('#space-panel'))).includes('Connect GitHub'),'GitHub panel did not register');
   else assert(placeholder,'Missing panel not reported for '+name);
  }
 
