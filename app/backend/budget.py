@@ -19,7 +19,12 @@ DEFAULT_OUTPUT_RESERVE = 4000
 AGENT_TURN_ALLOWANCE = 30000
 PROVIDERS = ('codex', 'claude')
 # Entries without a provider are Codex (the Claude Code provider spec requires this reading).
-CHARGE_RULES = {'codex': 'codex.input+output'}
+CHARGE_RULES = {'codex': 'codex.input+output', 'claude': 'claude.input+cache_creation+cache_read+output'}
+CHARGE_FIELDS = {
+    'codex': ('input_tokens', 'output_tokens'),
+    # Anthropic's input_tokens excludes cache writes and reads, so the four counts are disjoint.
+    'claude': ('input_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens', 'output_tokens'),
+}
 
 
 class Exhausted(ValueError):
@@ -38,18 +43,21 @@ def charge(usage, provider='codex'):
     """Tokens charged for one call, or None when no complete count was returned.
 
     Only providers with a rule in CHARGE_RULES are counted; any other provider's usage is
-    unknown and the call is charged its estimate. (2B adds the Claude rule from its spec.)
+    unknown and the call is charged its estimate.
 
     Codex TokenUsage: cached_input_tokens is a subset of input_tokens, and reasoning output
     is part of output_tokens (its own blended total is non-cached input + output_tokens).
     So input_tokens + output_tokens counts every token exactly once, cached input included.
+
+    Claude (runtime.claude.turn_usage): input, cache creation, cache read and output are disjoint, so all
+    four are added. Any missing, negative or non-integer field makes the count unknown.
     """
     if provider not in CHARGE_RULES or not isinstance(usage, dict):
         return None
-    values = [usage.get('input_tokens'), usage.get('output_tokens')]
+    values = [usage.get(name) for name in CHARGE_FIELDS[provider]]
     if any(type(v) is not int or v < 0 for v in values):
         return None
-    return values[0] + values[1]
+    return sum(values)
 
 
 def estimate_chars(chars, role):
