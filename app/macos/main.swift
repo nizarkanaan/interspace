@@ -9,7 +9,7 @@ let allowedMethods: Set<String> = [
     "sign_in", "revise_run", "accept_report", "switch_project", "update_project", "select_run",
     // Agentic tasks (scheduler.md, events.md, scope.md)
     "agent_create", "agent_message", "agent_answer", "agent_cancel", "task_events", "task_blob",
-    "scope_get", "scope_update", "scope_approve", "scheduler_settings",
+    "scope_get", "scope_update", "scope_approve", "scope_default", "scheduler_settings",
     // Spaces (connectors.md)
     "spaces_status", "spaces_sign_in", "spaces_complete_sign_in", "spaces_cancel_sign_in", "spaces_sign_out",
     "spaces_browse", "spaces_search", "spaces_read", "spaces_actions", "spaces_write", "spaces_changes",

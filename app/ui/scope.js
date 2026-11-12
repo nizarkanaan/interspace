@@ -35,10 +35,10 @@ function hostErrors(list,label,errors){for(const h of list)if(!/^(\*\.)?[a-z0-9-
 function argvList(text,label,errors){return lines(text).map(line=>{const argv=line.split(/\s+/);if(argv.length>8)errors.push(label+': “'+line+'” has more than 8 words.');return argv;});}
 
 // Renders the editor for a deep copy of the displayed scope; onSave receives the edited copy, never a digest.
-function editor(host,info,{projectName,onSave,onClose,saving}){
+function editor(host,info,{projectName,onSave,onClose,saving,heading='Edit scope',note='Saving creates a new scope version. The task pauses before its next action until you approve it.',submitLabel='Save scope',closeLabel='Close editor'}){
  host.replaceChildren();const s=JSON.parse(JSON.stringify(info.scope)),uid='scope-'+String(s.task_id||'task').replace(/[^\w-]/g,'');
  const form=el('form','scope-editor',null,host);form.noValidate=true;
- el('h3','','Edit scope',form);el('p','footnote','Saving creates a new scope version. The task pauses before its next action until you approve it.',form);
+ el('h3','',heading,form);el('p','footnote',note,form);
  const read=[];
  (s.projects||[]).forEach((p,i)=>{const fs=el('fieldset','',null,form);el('legend','',projectName(p.project_id),fs);const id=uid+'-p'+i;
   read.push({p,access:select(fs,'Access',id+'-access',[['read','Read only'],['write','Read and write']],p.access),read:area(fs,'Read paths',id+'-read',p.read||[],'One pattern per line, for example src/**'),write:area(fs,'Write paths',id+'-write',p.write||[]),deny:area(fs,'Never paths',id+'-deny',p.deny||[])});});
@@ -60,7 +60,7 @@ function editor(host,info,{projectName,onSave,onClose,saving}){
  const budget=number(gfs,'Token budget',uid+'-budget',s.limits?.token_budget??250000,1);
  const minutes=number(gfs,'Time limit (minutes)',uid+'-time',Math.round((s.limits?.time_limit_s??3600)/60),1,1440);
  const errorBox=el('div','error-text',null,form);errorBox.setAttribute('role','alert');
- const actions=el('div','actions',null,form);const save=el('button','primary','Save scope',actions);save.type='submit';save.disabled=!!saving;const close=el('button','','Close editor',actions);close.type='button';close.onclick=onClose;
+ const actions=el('div','actions',null,form);const save=el('button','primary',submitLabel,actions);save.type='submit';save.disabled=!!saving;const close=el('button','',closeLabel,actions);close.type='button';close.onclick=onClose;
  form.onsubmit=event=>{
   event.preventDefault();const errors=[];
   for(const r of read){const p=r.p;p.access=r.access.value;p.read=lines(r.read.value);p.write=p.access==='write'?lines(r.write.value):[];p.deny=lines(r.deny.value);

@@ -26,3 +26,4 @@
 #space-panel{min-width:0;overflow-wrap:anywhere}dialog{border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);padding:20px 22px;max-width:min(460px,calc(100vw - 32px))}dialog::backdrop{background:rgba(0,0,0,.35)}dialog .actions{justify-content:flex-end}
 @supports not (color:light-dark(white,black)){.diff-line.add{background:#e7f6ec}.diff-line.del{background:#fdecea}@media(prefers-color-scheme:dark){.diff-line.add{background:#163322}.diff-line.del{background:#3a1d1b}}}
 @media(max-width:600px){.spaces-nav{margin-top:0}.spaces-nav .nav-label{width:100%}.stream .message.user{max-width:100%}.pairs{grid-template-columns:1fr}}
+.new-agent-fields{display:grid;gap:6px;margin:0 0 14px;max-width:560px}.new-agent-fields input,.new-agent-fields select{width:100%;margin:0 0 8px}.new-agent-fields .footnote{margin:0}.new-agent-scope{margin-top:25px}.new-agent-scope .scope-editor{margin-top:0}
