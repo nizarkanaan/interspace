@@ -1,4 +1,4 @@
-"""Service wiring for agentic tasks: stdin routing, agent and scope methods, the legacy slot, and the
+"""Service wiring for agentic tasks: stdin routing, agent and scope methods, sign-in beside agent tasks, and the
 agent-mode task and budget changes. Fakes only: no provider, no network, no Keychain."""
 import json
 from pathlib import Path
@@ -71,7 +71,7 @@ class RouterTests(unittest.TestCase):
         wait_for(lambda: len(self.out.messages) == 6)
         self.assertEqual(self.app.calls, ['a', 'b', 'boom', 'c'])
         self.assertEqual([m.get('id') for m in self.out.messages], [0, 1, 2, 3, None, None])
-        self.assertEqual(self.out.messages[2]['error'], 'Request failed. Check repository and provider access.')
+        self.assertEqual(self.out.messages[2]['error'], 'Request failed. Check the project folder and try again.')
         self.assertEqual(self.out.messages[5]['error'], 'Request must be an object')
 
     def test_agent_requests_do_not_wait_behind_legacy(self):
@@ -231,18 +231,14 @@ class AgentMethodTests(ApplicationCase):
         wait_for(lambda: self.agent_state(app, task_id) == 'cancelled')
         self.assertEqual(app.handle('agent_cancel', {'task_id': task_id}), {'cancellation_requested': False})
 
-    def test_agent_task_refuses_legacy_flows(self):
+    def test_old_task_flows_are_gone(self):
         app = self.open()
         task_id = self.create(app, self.add_project(app))
-        for method in ('chat', 'start_review', 'start_plan', 'start_change'):
-            with self.assertRaisesRegex(ValueError, 'Agent tasks'):
+        for method in ('chat', 'start_review', 'start_plan', 'start_change', 'update_task', 'create_task'):
+            with self.assertRaisesRegex(ValueError, 'Unknown method'):
                 app.handle(method, {'project_id': app.state['selected_project_id'], 'task_id': task_id, 'text': 'x'})
-        with self.assertRaisesRegex(ValueError, 'scope'):
-            app.handle('update_task', {'project_id': app.state['selected_project_id'], 'task_id': task_id, 'token_budget': 5})
-        with self.assertRaisesRegex(ValueError, 'agent_create'):
-            app.handle('create_task', {'project_id': app.state['selected_project_id'], 'title': 'x', 'mode': 'agent'})
 
-    def test_legacy_interaction_needs_a_free_slot_and_frees_it(self):
+    def test_sign_in_runs_beside_agent_tasks_without_taking_a_slot(self):
         self.runtime.script = wait_interrupt(honor=True)
         app = self.open()
         project_id = self.add_project(app)
@@ -251,20 +247,15 @@ class AgentMethodTests(ApplicationCase):
         busy = self.create(app, project_id)
         app.handle('agent_message', {'task_id': busy, 'text': 'go', 'client_id': None})
         wait_for(lambda: self.agent_state(app, busy) == 'running')
-        with self.assertRaisesRegex(ValueError, 'slots'):
-            app.handle('sign_in', {})
+        app.handle('sign_in', {})  # The fake sign-in waits for cancel.
+        self.assertEqual(app.state['active'], 'Signing in')
+        self.assertNotIn('legacy_active', app.handle('state', {})['scheduler'])
+        app.handle('cancel', {})
+        app.wait()
         self.assertIsNone(app.state['active'])
+        self.assertEqual(self.agent_state(app, busy), 'running')  # Stop ends the sign-in only.
         app.handle('agent_cancel', {'task_id': busy})
         wait_for(lambda: self.agent_state(app, busy) == 'cancelled')
-        app.handle('sign_in', {})  # The legacy slot is free again; the fake sign-in waits for cancel.
-        self.assertEqual(app.state['active'], 'Signing in')
-        queued = self.create(app, project_id)
-        self.assertEqual(app.handle('agent_message', {'task_id': queued, 'text': 'go', 'client_id': None})['state'], 'queued')
-        self.assertTrue(app.handle('state', {})['scheduler']['legacy_active'])
-        app.handle('cancel', {})
-        wait_for(lambda: self.agent_state(app, queued) == 'running')
-        app.handle('agent_cancel', {'task_id': queued})
-        wait_for(lambda: self.agent_state(app, queued) == 'cancelled')
 
     def test_restart_interrupts_unfinished_agent_task(self):
         self.runtime.script = wait_interrupt(honor=True)
@@ -320,17 +311,19 @@ class DecideOptionTests(ApplicationCase):
 class AgentModeTests(unittest.TestCase):
     def test_agent_task_shape(self):
         with self.assertRaisesRegex(ValueError, 'project'):
-            tasks.create('A', mode='agent')
-        task = tasks.create('A', mode='agent', project_id='p1')
+            tasks.create('A', project_id=None)
+        task = tasks.create('A', project_id='p1')
+        self.assertEqual(task['mode'], 'agent')
         self.assertEqual(task['agent']['state'], None)
         self.assertIs(tasks.validate(task, task['id']), task)
         task['agent']['state'] = 'flying'
         with self.assertRaises(ValueError):
             tasks.validate(task, task['id'])
-        with self.assertRaisesRegex(ValueError, 'agent'):
+        with self.assertRaisesRegex(ValueError, 'mode'):
             tasks.validate_mode('chaos')
-        legacy = tasks.create('B')
+        legacy = tasks.imported('B')
         self.assertNotIn('agent', legacy)
+        self.assertIs(tasks.validate(legacy, legacy['id']), legacy)  # Earlier modes still load.
 
 
 class RuntimeWiringTests(ApplicationCase):
@@ -441,7 +434,7 @@ class AgentProviderTests(ApplicationCase):
                                                      'model': ''})['task_id'] != '', True, 'empty model means default')
 
     def test_saved_rows_are_validated(self):
-        task = tasks.create('A', mode='agent', project_id='p1')
+        task = tasks.create('A', project_id='p1')
         self.assertEqual((task['provider'], task['model']), ('codex', None))
         del task['provider'], task['model']
         tasks.validate(task, task['id'])  # Agent tasks saved before Wave 2 run on Codex.
@@ -450,10 +443,10 @@ class AgentProviderTests(ApplicationCase):
             broken = dict(task, **bad)
             with self.assertRaises(ValueError):
                 tasks.validate(broken, task['id'])
-        legacy = tasks.create('B')
+        legacy = tasks.imported('B')
         self.assertNotIn('provider', legacy)
         with self.assertRaises(ValueError):
-            tasks.create('C', provider='claude')  # Only agent tasks choose a runtime.
+            tasks.create('C', project_id='p1', provider='other')
 
 
 class ProviderBudgetTests(unittest.TestCase):

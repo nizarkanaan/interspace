@@ -30,7 +30,7 @@ class SchedulerCase(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name).resolve()
 
-    def make(self, max_running=4, script=default_script, legacy=None, grace=0.2, monotonic=None, policy=None):
+    def make(self, max_running=4, script=default_script, grace=0.2, monotonic=None, policy=None):
         self.scope = FakeScope()
         self.audit = FakeAudit()
         self.store = MemoryStore(self.scope)
@@ -41,12 +41,11 @@ class SchedulerCase(unittest.TestCase):
         self.runtime = FakeRuntime(script)
         self.locks = scheduler.Locks()
         self.workspaces = FakeWorkspaces(self.root / 'workspaces')
-        self.legacy = legacy or (lambda: False)
         self.sched = scheduler.Scheduler(
             max_running=max_running, runtime_factory=lambda task_id: self.runtime, policy=policy(self.scope) if policy else self.scope,
             audit=self.audit, events=self.events, budget_gate=scheduler.BudgetGate(self.store), locks=self.locks,
             clock=time.time, tasks=self.store, workspaces=self.workspaces,
-            legacy_active=lambda: self.legacy(), interrupt_grace_s=grace,
+            interrupt_grace_s=grace,
             decide_options={'app_data': str(self.root / 'data')},
             monotonic=monotonic or time.monotonic, tick_s=0.01)
         self.addCleanup(self.sched.shutdown, 5)
@@ -114,26 +113,10 @@ class ConcurrencyTests(SchedulerCase):
         for n in 'abcd':
             self.wait_state(n, 'idle')
 
-    def test_legacy_interaction_takes_one_slot(self):
-        legacy = {'on': True}
-        gate = threading.Event()
-
-        def script(session, text, ctx):
-            gate.wait(5)
-            return default_script(session, text, ctx)
-        self.make(max_running=2, script=script, legacy=lambda: legacy['on'])
-        self.task('a')
-        self.task('b')
-        self.assertEqual(self.sched.submit('a', 'p1', 'x', None)['state'], 'starting')
-        self.assertEqual(self.sched.submit('b', 'p1', 'x', None)['state'], 'queued')
-        self.assertTrue(self.sched.snapshot()['legacy_active'])
-        self.assertFalse(self.sched.legacy_slot_free())
-        legacy['on'] = False
-        self.sched.pump()
-        self.wait_state('b', 'running')
-        gate.set()
-        self.wait_state('a', 'idle')
-        self.wait_state('b', 'idle')
+    def test_snapshot_has_no_legacy_slot(self):
+        self.make(max_running=1)
+        self.assertEqual(self.sched.snapshot(), {'max_running': 1, 'running': [], 'queued': []})
+        self.assertFalse(hasattr(self.sched, 'legacy_slot_free'))
 
     def test_submit_requires_current_approval_and_one_turn_at_a_time(self):
         gate = threading.Event()

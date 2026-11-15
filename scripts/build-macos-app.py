@@ -18,12 +18,6 @@ for relative in ['app/backend', 'app/ui', 'pilot']:
     if destination.exists():
         shutil.rmtree(destination)
     shutil.copytree(root / relative, destination, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
-for relative in ['design/scene/lab-scene.js','design/agents/role-catalog.js','design/agents/role-contracts.json']:
-    destination = resources / relative
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(root / relative, destination)
-# UI references scene assets within its own permitted read directory.
-shutil.copy2(root / 'design/scene/lab-scene.js', resources / 'app/ui/lab-scene.js')
 with (contents / 'Info.plist').open('wb') as f:
     plistlib.dump({'CFBundleExecutable':'Interspace','CFBundleIdentifier':'local.interspace.desktop',
                   'CFBundleName':'Interspace','CFBundleDisplayName':'Interspace','CFBundlePackageType':'APPL',

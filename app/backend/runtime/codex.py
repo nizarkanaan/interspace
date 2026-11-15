@@ -76,7 +76,7 @@ class ProtocolError(Exception):
 
 def find_binary():
     try:
-        from provider import find_codex
+        from codex_auth import find_codex
     except ImportError:
         return None
     return find_codex()

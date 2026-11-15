@@ -7,7 +7,6 @@ export default async function check(page,url){
  const scope={v:1,task_id:'t1',version:1,projects:[{project_id:'p1',access:'write',read:['**'],write:['src/**','tests/**'],deny:[]}],commands:{workspace:'allow',allow:[],deny:[['git','push']]},network:{default:'ask',allow_hosts:[],deny_hosts:[]},apps:[],web_search:'ask',limits:{token_budget:250000,time_limit_s:3600}};
  const install=async()=>{
   await page.goto(url);
-  if(!await page.evaluate(()=>!!document.getElementById('ispace').interspaceLab))await page.addScriptTag({path:'design/scene/lab-scene.js'});
   await page.evaluate(({scope})=>{
    const project={id:'p1',name:'Fixture project',brief:'',priority:'normal',next_action:''};
    const rows=[{id:'t1',mode:'agent',title:'Fix the date parser',status:'idle',run_count:0,specialist_limit:1},{id:'t2',mode:'agent',title:'Tidy the reading list',status:'running',run_count:0,specialist_limit:1},{id:'L1',title:'Legacy review',status:'draft',run_count:0,specialist_limit:6}];

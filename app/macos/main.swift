@@ -3,9 +3,7 @@ import WebKit
 
 /// Methods the WebView may send to the backend. Everything else is refused here.
 let allowedMethods: Set<String> = [
-    "state", "create_task", "select_task", "update_task", "connection", "chat", "start_review", "start_plan", "start_change",
-    "approve_checks", "apply_changes", "change_evidence", "list_sources", "preview_source", "save_sources", "cancel", "source",
-    "sign_in", "revise_run", "accept_report", "switch_project", "update_project", "select_run",
+    "state", "select_task", "connection", "cancel", "sign_in", "switch_project", "update_project",
     // Agentic tasks (scheduler.md, events.md, scope.md)
     "agent_create", "agent_message", "agent_answer", "agent_cancel", "task_events", "task_blob",
     "scope_get", "scope_update", "scope_approve", "scope_default", "scheduler_settings",
@@ -131,7 +129,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         if method == "choose_project" {
             let alert = NSAlert()
             alert.messageText = "Add a project folder"
-            alert.informativeText = "Only committed technical files will be reviewed. The app will not edit or run the project."
+            alert.informativeText = "Agent tasks work in their own copy of the project. Interspace never edits your checked-out files."
             let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 480, height: 26))
             field.placeholderString = "Full repository folder path"
             field.stringValue = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents/Projects").path

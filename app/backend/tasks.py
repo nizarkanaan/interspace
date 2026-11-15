@@ -1,14 +1,18 @@
-"""Task metadata and exact ownership, independent of the selected UI context."""
+"""Task metadata and exact ownership, independent of the selected UI context.
+
+New tasks are agent tasks. Tasks of the earlier modes (`review`, `python_fix`) still load and are shown
+read-only through `history`; nothing in them can run.
+"""
 import hashlib
 import json
-import re
 from pathlib import Path
+import re
 import uuid
 
 import budget
-import orchestration
 
-MODES = ('review','python_fix','agent')
+MODES = ('agent',)
+LEGACY_MODES = ('review','python_fix')
 # Agent task run states (events.md `status`); None means no turn has started yet.
 AGENT_STATES = ('queued','starting','running','waiting_lock','paused_ask','paused_scope','idle','cancelling',
                 'completed','failed','cancelled','budget_exhausted','time_limit','interrupted')
@@ -16,6 +20,12 @@ AGENT_STATES = ('queued','starting','running','waiting_lock','paused_ask','pause
 PROVIDERS = ('codex','claude')
 DEFAULT_PROVIDER = 'codex'
 MODEL = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:/\[\]-]{0,127}$')
+MAX_SAFE_INTEGER = 9007199254740991
+# Saved run stages that ended; any other saved stage was cut off when an earlier version quit.
+FINISHED_STAGES = ('completed','completed_unreviewed','accepted','needs_revision','blocked','failed','cancelled',
+                   'interrupted','integrity_failed','budget_exhausted','awaiting_test_approval','ready_to_apply',
+                   'applied','application_failed','recovery_required','abandoned')
+MAX_REPORT_CHARS = 24000
 
 
 def title(value):
@@ -31,7 +41,14 @@ def draft_text(value):
 
 
 def validate_mode(value):
-    if value not in MODES:raise ValueError('Choose review, python_fix or agent task mode.')
+    if value not in MODES+LEGACY_MODES:raise ValueError('Unknown task mode.')
+    return value
+
+
+def validate_specialist_limit(value):
+    """The specialist allowance of an earlier task (kept for loading saved tasks)."""
+    if type(value) is not int or not 1<=value<=MAX_SAFE_INTEGER:
+        raise ValueError('Specialist allowance must be a positive JavaScript-safe integer.')
     return value
 
 
@@ -55,20 +72,20 @@ def provider(task):
     return task.get('provider',DEFAULT_PROVIDER)
 
 
-def create(name='New task', specialist_limit=6, draft='', mode='review', token_budget=budget.DEFAULT_BUDGET, project_id=None,
-           provider=None, model=None):
-    task={'id':uuid.uuid4().hex,'title':title(name),'mode':validate_mode(mode),
-          'specialist_limit':orchestration.validate_specialist_limit(specialist_limit),'draft':draft_text(draft),
-          'token_budget':budget.validate(token_budget),'thread':[],'pending':None,'run_id':None,'run_ids':[],'error':'','error_status':None}
-    if mode!='agent' and (provider is not None or model is not None):
-        raise ValueError('Only agent tasks choose a runtime or model.')
-    if mode=='agent':
-        # The scope (scope.md) is attached by the caller, which needs the task ID to build it.
-        if not isinstance(project_id,str) or not project_id:raise ValueError('An agent task needs a project.')
-        task.update(scope=None,scope_approval=None,provider=validate_provider(DEFAULT_PROVIDER if provider is None else provider),
-                    model=validate_model(model),
-                    agent={'project_id':project_id,'state':None,'detail':'','reason':None,'turns':0,'active_s':0.0,'workspaces':{}})
-    return task
+def create(name='New agent task', *, project_id, provider=None, model=None, token_budget=budget.DEFAULT_BUDGET):
+    """A new agent task. The scope (scope.md) is attached by the caller, which needs the task ID to build it."""
+    if not isinstance(project_id,str) or not project_id:raise ValueError('An agent task needs a project.')
+    return {'id':uuid.uuid4().hex,'title':title(name),'mode':'agent','draft':'',
+            'token_budget':budget.validate(token_budget),'thread':[],'pending':None,'run_id':None,'run_ids':[],
+            'error':'','error_status':None,'scope':None,'scope_approval':None,
+            'provider':validate_provider(DEFAULT_PROVIDER if provider is None else provider),'model':validate_model(model),
+            'agent':{'project_id':project_id,'state':None,'detail':'','reason':None,'turns':0,'active_s':0.0,'workspaces':{}}}
+
+
+def imported(name):
+    """An earlier-mode review row for runs and plans migrated from schema version 2 (read-only)."""
+    return {'id':uuid.uuid4().hex,'title':title(name),'mode':'review','specialist_limit':6,'draft':'',
+            'token_budget':budget.DEFAULT_BUDGET,'thread':[],'pending':None,'run_id':None,'run_ids':[],'error':'','error_status':None}
 
 
 def validate_agent(task):
@@ -87,8 +104,12 @@ def validate_agent(task):
 def validate(task, identity):
     try:
         if not isinstance(task,dict) or task['id']!=identity:raise ValueError()
-        if validate_mode(task.get('mode','review'))=='agent':validate_agent(task)
-        title(task['title']);orchestration.validate_specialist_limit(task['specialist_limit']);budget.validate(task.get('token_budget'));draft_text(task.get('draft',''))
+        if validate_mode(task.get('mode','review'))=='agent':
+            validate_agent(task)
+            if 'specialist_limit' in task:validate_specialist_limit(task['specialist_limit'])
+        else:
+            validate_specialist_limit(task['specialist_limit'])
+        title(task['title']);budget.validate(task.get('token_budget'));draft_text(task.get('draft',''))
         if not isinstance(task['thread'],list) or not isinstance(task['run_ids'],list):raise ValueError()
         for message in task['thread']:
             if (not isinstance(message,dict) or message.get('role') not in ('user','assistant')
@@ -96,7 +117,7 @@ def validate(task, identity):
                 raise ValueError()
         if not isinstance(task.get('error',''),str):raise ValueError()
         status=task.get('error_status')
-        if status is not None and (not isinstance(status,str) or status not in orchestration.TERMINAL):raise ValueError()
+        if status is not None and (not isinstance(status,str) or status not in FINISHED_STAGES):raise ValueError()
         if any(not isinstance(r,str) or not r for r in task['run_ids']):raise ValueError()
         if task['run_id'] is not None and task['run_id'] not in task['run_ids']:raise ValueError()
         pending=task['pending']
@@ -129,50 +150,84 @@ def selected(project):
     return validate(dict(entries(project)).get(identity),identity)
 
 
-def owner(project, reference):
-    task=selected(project)
-    if reference.get('task_id')!=(task['id'] if task else None):
-        raise ValueError('The selected task changed; this request is stale or missing its task reference.')
-    return task if task is not None else project
-
-
-def run_ids(project):
-    return project['run_ids']+[r for task in available(project) for r in task['run_ids']]
-
-
 def fingerprint(plan):
     return hashlib.sha256(json.dumps(plan,sort_keys=True,separators=(',',':')).encode()).hexdigest()
 
 
-def clear_pending(project, owner, disposition='revoked'):
-    """Clear a proposal while retaining imported provenance and its terminal lifecycle."""
-    pending=owner.get('pending')
-    if isinstance(pending,dict):
-        identity=pending.get('id')
-        binding=project.get('imported_plan_owners',{}).get(identity)
-        if binding and owner is not project and binding.get('task_id')==owner['id']:
-            states=project.setdefault('imported_plan_states',{})
-            if states.get(identity) not in ('revoked','consumed'):
-                states[identity]=disposition
-    owner['pending']=None
+# -- read-only history of earlier tasks ------------------------------------------------------------
+
+def _clip(text, limit=MAX_REPORT_CHARS):
+    return text if len(text)<=limit else text[:limit-1]+'…'
 
 
-def validate_plan_owner(project, owner, plan):
-    binding=project.get('imported_plan_owners',{}).get(plan.get('id'))
-    if binding is not None:
-        if owner is project or binding!={'task_id':owner['id'],'fingerprint':fingerprint(plan)}:
-            raise ValueError('Imported approval belongs to a different task or changed.')
-        if project.get('imported_plan_states',{}).get(plan['id'])!='live':
-            raise ValueError('Imported approval is no longer live (revoked or consumed). Request a new proposal.')
-        return
-    if owner is project:
-        if plan.get('task_id') is not None:raise ValueError('Plan belongs to a task.')
-    elif plan.get('task_id')!=owner['id']:
-        raise ValueError('Plan belongs to a different task.')
-    elif (plan.get('policy_version')==2 or plan.get('kind')=='change') and plan.get('limits',{}).get('specialist_limit')!=owner['specialist_limit']:
-        raise ValueError('Task allowance changed; request a new proposal.')
-    if owner is not project and (plan.get('policy_version')==2 or plan.get('kind')=='change') and plan.get('limits',{}).get('token_budget')!=owner.get('token_budget'):
-        raise ValueError('Task token budget changed; request a new proposal.')
+def _str(value):
+    return value if isinstance(value,str) else ''
+
+
+def plan_text(plan):
+    """Plain text of a saved plan or proposal: its goal and each assignment. Unknown shapes give ''."""
+    if not isinstance(plan,dict):return ''
+    lines=[]
+    if _str(plan.get('goal')).strip():lines.append('Goal: '+plan['goal'].strip())
+    for item in plan.get('tasks') if isinstance(plan.get('tasks'),list) else ():
+        if not isinstance(item,dict):continue
+        name=_str(item.get('label')) or _str(item.get('role')).replace('_',' ').capitalize() or 'Assignment'
+        line='- '+name+': '+_str(item.get('objective')).strip()
+        if _str(item.get('expected_output')).strip():line+=' (expected: '+item['expected_output'].strip()+')'
+        lines.append(line)
+    if isinstance(plan.get('roles'),list) and all(isinstance(r,str) for r in plan['roles']):
+        lines.append('Roles: '+' → '.join(plan['roles']))
+    return _clip('\n'.join(lines))
+
+
+def _artifact_text(heading, artifact):
+    if not isinstance(artifact,dict):return ''
+    lines=[heading+(' · '+artifact['verdict'] if _str(artifact.get('verdict')) and artifact['verdict']!='not_reviewed' else '')]
+    if _str(artifact.get('summary')).strip():lines.append(artifact['summary'].strip())
+    for finding in artifact.get('findings') if isinstance(artifact.get('findings'),list) else ():
+        if isinstance(finding,dict) and _str(finding.get('claim')).strip():lines.append('- '+finding['claim'].strip())
+    if _str(artifact.get('proposal')).strip():lines.append('Proposal (not executed): '+artifact['proposal'].strip())
+    questions=[q for q in artifact.get('questions') if isinstance(q,str) and q.strip()] if isinstance(artifact.get('questions'),list) else []
+    if questions:lines.append('Open questions:\n'+'\n'.join('- '+q.strip() for q in questions))
+    return '\n'.join(lines)
+
+
+def report_text(record):
+    """The final report of a saved run: the combined result, else the legacy research and review."""
+    if not isinstance(record,dict):return ''
+    if isinstance(record.get('combined'),dict):
+        return _clip(_artifact_text('Combined result',record['combined']))
+    results=record.get('results') if isinstance(record.get('results'),dict) else {}
+    parts=[_artifact_text('Research report',results.get('researcher')),_artifact_text('Independent review',results.get('reviewer'))]
+    return _clip('\n\n'.join(p for p in parts if p))
+
+
+def _run(runs, run_id):
+    if not isinstance(run_id,str) or not run_id or Path(run_id).name!=run_id:raise ValueError()
+    record=json.loads((runs/run_id/'run.json').read_text(encoding='utf-8'))
+    if not isinstance(record,dict):raise ValueError()
+    return record
+
+
+def history(task, runs):
+    """What an earlier task shows, read-only: its conversation, plan text and final report text per run.
+
+    Reads saved run records under `runs` and never writes them. Nothing in the result can start work.
+    """
+    reports=[];plan=plan_text(task.get('pending'))
+    for run_id in reversed(task.get('run_ids') or []):
+        try:
+            record=_run(runs,run_id)
+        except (OSError,ValueError,TypeError):
+            reports.append({'run_id':str(run_id),'goal':'','stage':'unavailable','text':'This saved report is unavailable.'})
+            continue
+        stage=_str(record.get('stage')) or 'unknown'
+        reports.append({'run_id':run_id,'goal':_clip(_str(record.get('goal')),2000),
+                        'stage':stage if stage in FINISHED_STAGES else 'interrupted','text':report_text(record)})
+        if not plan:plan=plan_text(record.get('plan'))
+    return {'mode':task.get('mode','review'),'label':'Earlier task (read-only)',
+            'messages':[{'role':m['role'],'text':m['text']} for m in task.get('thread') or []],
+            'plan':plan,'reports':reports,'error':_str(task.get('error'))}
 
 
 def migrate(state, storage):
@@ -189,7 +244,7 @@ def migrate(state, storage):
                 record=json.loads(run_path.read_text())
                 goal=record.get('goal','Imported review') if isinstance(record,dict) else 'Imported review'
             except (OSError,ValueError):goal='Imported review'
-            task=create(goal[:160] if isinstance(goal,str) and goal.strip() else 'Imported review')
+            task=imported(goal[:160] if isinstance(goal,str) and goal.strip() else 'Imported review')
             task.update(run_id=run_id,run_ids=[run_id])
             project['tasks'][task['id']]=task;run_owners[run_id]=task
         pending=project['pending']
@@ -198,7 +253,7 @@ def migrate(state, storage):
             pending_owner=run_owners.get(pending.get('run_id')) if pending.get('kind')=='revision' else None
             if pending_owner is None:
                 goal=pending.get('goal','Imported task')
-                pending_owner=create(goal[:160] if isinstance(goal,str) and goal.strip() else 'Imported task')
+                pending_owner=imported(goal[:160] if isinstance(goal,str) and goal.strip() else 'Imported task')
                 project['tasks'][pending_owner['id']]=pending_owner
             pending_owner['pending']=pending
             project['imported_plan_owners'][pending['id']]={'task_id':pending_owner['id'],'fingerprint':fingerprint(pending)}

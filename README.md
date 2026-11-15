@@ -2,11 +2,11 @@
 
 A personal observatory for projects, research, knowledge, and specialist AI agents.
 
-**Status: native Mac development app with a task desk, controlled Python editing and per-task token budgets.** Launch `dist/Interspace.app` after [building](app/README.md). Tasks have separate conversations, plans and results. The Orchestrator can assign multiple Web searchers, Researchers and Reviewers within a user-set allowance, with the exact team and call limit approved before Start. The design preview and earlier offline pilot remain separate. Fix & test tasks add bounded Implementer/Tester/Reviewer work behind separate generation, check and application approvals. Other catalog roles and external-app integrations do not execute.
+**Status: native Mac development app with agent tasks (Codex or Claude Code) and per-task token budgets; a multi-provider revamp is in progress.** Launch `dist/Interspace.app` after [building](app/README.md). Each agent task works in its own copy of the project under a scope you approve and commits to its own `interspace/task-…` branch. Tasks from the earlier Read-only review and Fix & test modes stay readable but no longer run. The design preview and earlier offline pilot remain separate.
 
 ## Mac app
 
-Double-click `dist/Interspace.app`. Add or select a Git project, save its committed source selection in **Settings**, then choose **New task**. Describe the outcome, adjust the specialist allowance if needed, inspect the proposed plan and Start it. Six is the initial allowance, not a fixed maximum; assignments execute sequentially. Read-only review is the default. Choose **Fix & test (Python)** for bounded replacement proposals: inspect the candidate, separately approve fixed checks, then separately apply the exact reviewed changes. Only that final action writes the displayed paths, uncommitted. See [app setup and limits](app/README.md), [task-desk verification](docs/task-desk-validation.md) and [controlled-editing validation](docs/controlled-editing-validation.md).
+Double-click `dist/Interspace.app`. Add or select a Git project, then choose **New task**: pick the runtime, review and approve the task scope, and message the agent. See [app setup and limits](app/README.md).
 
 ## Design preview
 

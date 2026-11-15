@@ -1,4 +1,4 @@
-"""Disposable reopened backend states consumed by the task-desk browser regression."""
+"""Disposable reopened backend states with earlier (read-only) tasks, consumed by the task-desk browser regression."""
 import copy
 import json
 from pathlib import Path
@@ -21,8 +21,9 @@ def reopened_states(storage, malformed):
     project.update(id='fixture', name='Saved-state fixture', thread=[{'role':'user','text':'General history survives'}])
     other = projects.new_project(storage.parent / 'other-inert-source')
     other.update(id='other', name='Other healthy project')
-    broken = tasks.create('Malformed task');broken.update(id='broken', **copy.deepcopy(malformed))
-    healthy = tasks.create('Healthy task');healthy.update(id='healthy', thread=[{'role':'user','text':'Healthy conversation survives'}])
+    broken = tasks.imported('Malformed task');broken.update(id='broken', **copy.deepcopy(malformed))
+    healthy = tasks.imported('Healthy task');healthy.update(id='healthy', thread=[{'role':'user','text':'Healthy conversation survives'}],
+                                                           pending={'id':'plan-h','goal':'Healthy saved plan'})
     project.update(tasks={'broken':broken,'healthy':healthy}, selected_task_id='healthy')
     state = projects.empty_state();state.update(projects={'fixture':project,'other':other}, selected_project_id='fixture')
     storage.mkdir(parents=True)
@@ -38,6 +39,7 @@ def reopened_states(storage, malformed):
     saved = json.loads((storage/'state.json').read_text())
     result['raw_preserved'] = (app.state['projects']['fixture']['tasks']['broken'] == broken
                                and saved['projects']['fixture']['tasks']['broken'] == broken)
+    app.scheduler.shutdown(5)
     return result
 
 

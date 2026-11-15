@@ -1,4 +1,4 @@
-/* Project registry presentation. No filesystem or provider access. */
+/* Project registry presentation: the project picker and project details. No filesystem or provider access. */
 window.interspaceWorkspace = (() => {
   const $ = id => document.getElementById(id);
   const drafts = new Map();
@@ -18,22 +18,6 @@ window.interspaceWorkspace = (() => {
     picker.value = state.project_id || '';
     picker.disabled = !state.projects.length;
     picker.onchange = () => openProject(picker.value);
-    const overview = $('project-overview');
-    overview.replaceChildren();
-    for (const project of [...state.projects].sort((a,b) => ['high','normal','low'].indexOf(a.priority)-['high','normal','low'].indexOf(b.priority))) {
-      const card = node('article', '', overview);
-      card.className = 'project-card';
-      node('span', project.priority+' priority', card).className = 'mono';
-      node('h3', project.name, card);
-      node('p', project.brief || 'Add a brief to give your Workspace Orchestrator context.', card);
-      node('p', project.next_action ? 'Next: '+project.next_action : 'Next action not set.', card).className = 'muted';
-      const latest = project.latest_run;
-      node('small', latest ? 'Latest review · '+latest.stage.replaceAll('_',' ') : 'No review yet', card);
-      if (project.has_pending_plan) node('small', ' · Proposal ready to inspect', card);
-      const button = node('button', 'Open project →', card);
-      button.onclick = () => openProject(project.id);
-    }
-    $('overview-empty').hidden = !!state.projects.length;
     const project = state.projects.find(p => p.id === state.project_id);
     $('project-settings').hidden = !project;
     if (project) {
@@ -48,7 +32,6 @@ window.interspaceWorkspace = (() => {
         $('metadata-status').textContent = 'Unsaved changes';
       };
       $('metadata-status').textContent = drafts.has(project.id) ? 'Unsaved changes' : 'Saved on your machine';
-      for (const control of form.elements) control.disabled = !!state.active;
       form.onsubmit = event => {
         event.preventDefault();
         const value = {};
@@ -61,15 +44,6 @@ window.interspaceWorkspace = (() => {
         }).catch(() => {});
       };
     }
-    $('run-history-label').textContent = state.task_id ? 'Task run history' : 'General project run history';
-    const history = $('run-picker');
-    history.replaceChildren();
-    $('run-history').hidden = !state.runs.length;
-    for (const run of state.runs) {
-      node('option', run.goal.slice(0,90)+' · '+run.stage.replaceAll('_',' ')+' · '+run.id.slice(-6), history).value = run.id;
-    }
-    history.value = state.run?.id || '';
-    history.onchange = () => request('select_run', {project_id:state.project_id, task_id:state.task_id??null, run_id:history.value}).catch(() => {});
   }
   return {render};
 })();

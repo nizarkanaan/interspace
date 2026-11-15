@@ -83,7 +83,6 @@ export default async function check(page,url){
   await page.exposeFunction('interspaceLivePost',message=>{sent.push(message);child.stdin.write(JSON.stringify(message)+'\n');});
   await page.addInitScript(()=>{window.webkit={messageHandlers:{interspace:{postMessage:m=>window.interspaceLivePost(m)}}};});
   await page.goto(url);
-  if(!await page.evaluate(()=>!!document.getElementById('ispace').interspaceLab))await page.addScriptTag({path:'design/scene/lab-scene.js'});
   await page.evaluate(()=>window.interspaceBoot());
   await until(async()=>(await page.locator('#project-picker option').count())===1,'the real state');
   const calls=method=>sent.filter(m=>m.method===method);
@@ -92,9 +91,7 @@ export default async function check(page,url){
   // New agent task form: title, project, runtime and model, then the real default scope in the editor.
   const newAgent=async(title,provider,model,goal)=>{
    await page.getByRole('button',{name:'New task',exact:true}).click();
-   await page.locator('#new-mode').selectOption('agent');
-   assert(await page.locator('#new-agent-fields').isVisible()&&await page.locator('#new-legacy-fields').isHidden(),'Agent fields not shown');
-   assert(await page.locator('#create-draft').isHidden(),'Legacy draft button shown for agent mode');
+   assert(await page.locator('#new-agent-fields').isVisible()&&await page.locator('#new-mode').count()===0,'Agent fields not shown');
    await page.locator('#new-title').fill(title);await page.locator('#new-runtime').selectOption(provider);await page.locator('#new-model').fill(model);
    if(goal)await page.locator('#new-goal').fill(goal);
    await page.getByRole('button',{name:'Review scope',exact:true}).click();
@@ -102,7 +99,6 @@ export default async function check(page,url){
    assert(await page.locator('#new-task-form').isHidden(),'Form still shown during scope review');
   };
   await page.getByRole('button',{name:'New task',exact:true}).click();
-  await page.locator('#new-mode').selectOption('agent');
   await page.locator('#new-model').fill('bad model');await page.locator('#new-title').fill('Bad');
   await page.getByRole('button',{name:'Review scope',exact:true}).click();
   assert(calls('scope_default').length===0,'Invalid model reached the backend');
@@ -195,7 +191,7 @@ export default async function check(page,url){
   const fits=[];
   for(const colorScheme of ['light','dark']){await page.emulateMedia({colorScheme});for(const width of [320,390,760,1024,1280]){await page.setViewportSize({width,height:900});
    for(const target of ['new','agent','running']){
-    if(target==='new'){await page.getByRole('button',{name:'Tasks',exact:true}).click();await page.getByRole('button',{name:'New task',exact:true}).click();await page.locator('#new-mode').selectOption('agent');}
+    if(target==='new'){await page.getByRole('button',{name:'Tasks',exact:true}).click();await page.getByRole('button',{name:'New task',exact:true}).click();}
     if(target==='agent'){await page.getByRole('button',{name:'Tasks',exact:true}).click();await page.locator('[data-open-task="'+taskA+'"]').click();}
     if(target==='running')await page.getByRole('button',{name:'Running',exact:true}).click();
     const fit=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}));assert(fit.scroll<=fit.width,'Overflow '+target+' '+width+' '+colorScheme);fits.push(fit);

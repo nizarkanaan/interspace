@@ -1,4 +1,4 @@
-"""Durable task ownership and non-destructive legacy migration."""
+"""Task storage: agent-only new tasks, non-destructive migration and the read-only history of earlier tasks."""
 import copy
 import json
 from pathlib import Path
@@ -10,59 +10,112 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"pilot"))
 
 import projects
 import runner
+import tasks
 import test_pilot
 from service import Application
-from test_team import TeamProvider
+
+
+class NoProvider:
+    """Loading and showing earlier tasks never reaches a provider or a sign-in."""
+    calls = []
+
+    def __getattr__(self, name):
+        raise AssertionError('Unexpected provider access: ' + name)
+
+
+def earlier(title, **fields):
+    task = tasks.imported(title)
+    task.update(fields)
+    return task
+
+
+def team_record(run_id, project, task_id, stage='completed'):
+    return {'id': run_id, 'format': 'team-v2', 'project_id': project['id'], 'task_id': task_id, 'goal': 'Compare sources',
+            'stage': stage, 'revision': 'abc', 'source_path': project['source_path'],
+            'plan': {'goal': 'Compare sources', 'tasks': [
+                {'id': 'r1', 'role': 'researcher', 'label': 'Researcher 1', 'objective': 'Read the README',
+                 'expected_output': 'Claims with citations', 'dependencies': []},
+                {'id': 'v1', 'role': 'reviewer', 'objective': 'Check the claims', 'expected_output': 'A verdict',
+                 'dependencies': ['r1']}]},
+            'results': {}, 'events': [],
+            'combined': {'summary': 'Two sources agree.', 'findings': [{'claim': 'The README documents setup.'}],
+                         'questions': ['Is the benchmark current?'], 'verdict': 'accept'}}
+
+
+def review_record(run_id, project):
+    return {'id': run_id, 'goal': 'Review evidence', 'stage': 'researcher', 'revision': 'abc',
+            'source_path': project['source_path'], 'events': [],
+            'results': {'researcher': {'summary': 'Evidence reviewed', 'findings': [{'claim': 'Documented'}],
+                                       'proposal': 'A bounded check'}}}
+
 
 class TaskStorageTests(unittest.TestCase):
     setUp=test_pilot.PilotTests.setUp
     git=test_pilot.PilotTests.git
 
-    def test_new_task_is_local_durable_and_validated_atomically(self):
-        provider=TeamProvider();app=Application(self.base/'data',provider=provider)
-        pid=test_pilot.legacy_project(app,self.source)['project_id']
-        self.assertEqual(app.public().get('tasks'),[])
-        state=app.handle('create_task',{'project_id':pid})
-        self.assertEqual(state['task']['title'],'New task');self.assertEqual(state['task']['specialist_limit'],6)
-        tid=state['task_id'];self.assertEqual(provider.calls,[])
-        self.assertEqual(state['tasks'][0]['status'],'draft')
-        app.handle('update_task',{'project_id':pid,'task_id':tid,'specialist_limit':12,'title':'Expanded'})
-        before=copy.deepcopy(app.public())
-        for invalid in (0,-1,True,1.5,2**53,'8'):
-            with self.assertRaises(ValueError):app.handle('update_task',{'project_id':pid,'task_id':tid,'title':'Wrong','specialist_limit':invalid})
-        self.assertEqual(app.public(),before)
-        restored=Application(app.storage,provider=provider).public()
-        self.assertEqual(restored['task'],before['task']);self.assertEqual(restored['version'],4)
-        test_pilot.legacy_project(app,self.source)
-        self.assertEqual(app.public()['task_id'],tid)
+    def app(self, storage=None):
+        return Application(storage or self.base/'data', provider=NoProvider())
 
-    def test_full_local_draft_survives_restart_without_chat_or_provider_calls(self):
-        provider=TeamProvider();app=Application(self.base/'data',provider=provider)
-        pid=test_pilot.legacy_project(app,self.source)['project_id']
-        goal='LOCAL_DRAFT_PRIVATE '+('Full outcome and evidence requirements. '*12)+'\nKeep this final paragraph.'
-        state=app.handle('create_task',{'project_id':pid,'title':goal[:160],'draft':goal,'specialist_limit':9})
-        tid=state['task_id'];self.assertEqual(state['task'].get('draft'),goal)
-        self.assertEqual(state['threads']['task'],[]);self.assertEqual(provider.calls,[])
-        restored=Application(app.storage,provider=provider)
-        self.assertEqual(restored.public()['task']['draft'],goal)
-        self.assertEqual(restored.public()['threads']['task'],[]);self.assertEqual(provider.calls,[])
-        before=copy.deepcopy(restored.public())
-        for invalid in (None,False,12,[],{},'x'*6001):
-            with self.subTest(draft_type=type(invalid).__name__):
-                with self.assertRaises(ValueError):restored.handle('create_task',{'project_id':pid,'draft':invalid})
-                self.assertEqual(restored.public(),before)
-        self.assertEqual(restored.state['projects'][pid]['tasks'][tid]['draft'],goal)
-        maximum=restored.handle('create_task',{'project_id':pid,'draft':'x'*6000})
-        self.assertEqual(len(maximum['task']['draft']),6000);self.assertEqual(provider.calls,[])
+    def seeded(self, *saved, selected=None):
+        """A project holding the given saved task rows, persisted and reopened."""
+        app=self.app();project=projects.new_project(self.source);app.state['projects'][project['id']]=project
+        app.state['selected_project_id']=project['id']
+        for task in saved:project['tasks'][task['id']]=task
+        project['selected_task_id']=selected;app.persist()
+        return Application(app.storage,provider=NoProvider()),project
 
-    def test_old_task_without_draft_is_read_as_empty_without_rewriting_raw_metadata(self):
-        app=Application(self.base/'data',provider=TeamProvider());pid=test_pilot.legacy_project(app,self.source)['project_id']
-        state=app.handle('create_task',{'project_id':pid});tid=state['task_id']
-        self.assertEqual(state['task'].get('draft'),'')
-        raw=app.state['projects'][pid]['tasks'][tid];raw.pop('draft',None);original=copy.deepcopy(raw);app.persist()
-        restored=Application(app.storage,provider=TeamProvider())
-        self.assertEqual(restored.public()['task'].get('draft'),'')
-        self.assertEqual(restored.state['projects'][pid]['tasks'][tid],original)
+    def write_run(self, storage, record):
+        folder=storage/'runs'/record['id'];folder.mkdir(parents=True)
+        (folder/'run.json').write_text(json.dumps(record))
+        return folder/'run.json'
+
+    def test_new_tasks_are_agent_tasks_only(self):
+        task=tasks.create('Fix it',project_id='p1')
+        self.assertEqual((task['mode'],task['provider'],task['agent']['project_id']),('agent','codex','p1'))
+        self.assertEqual(tasks.MODES,('agent',))
+        tasks.validate(task,task['id'])
+        with self.assertRaises(ValueError):tasks.create('Fix it',project_id=None)
+        with self.assertRaises(TypeError):tasks.create('Fix it',mode='review',project_id='p1')
+        app=self.app();pid=test_pilot.legacy_project(app,self.source)['project_id']
+        for method in ('create_task','update_task','chat','start_plan','start_review','start_change','approve_checks',
+                       'apply_changes','revise_run','accept_report','select_run','source','save_sources','list_sources'):
+            with self.subTest(method=method):
+                with self.assertRaisesRegex(ValueError,'Unknown method'):app.handle(method,{'project_id':pid})
+
+    def test_earlier_tasks_load_read_only_with_conversation_plan_and_report(self):
+        storage=self.base/'data'
+        project=projects.new_project(self.source)
+        old=earlier('Compare sources',thread=[{'role':'user','text':'Compare the sources'},{'role':'assistant','text':'Here is a plan.'}],
+                    run_ids=['run-team','run-review','run-missing'],run_id='run-team',error='Stopped early',error_status='failed')
+        fixed=earlier('Fix value',mode='python_fix',pending={'id':'plan-1','goal':'Fix the value','tasks':[
+            {'id':'i1','role':'implementer','objective':'Change main.py','expected_output':'A patch'}]})
+        storage.mkdir()
+        saved=[self.write_run(storage,team_record('run-team',project,old['id'])),self.write_run(storage,review_record('run-review',project))]
+        before=[p.read_bytes() for p in saved]
+        app,project=self.seeded(old,fixed,selected=old['id'])
+        public=app.public()
+        rows={t['id']:t for t in public['tasks']}
+        self.assertEqual(rows[old['id']]['status'],'read_only');self.assertTrue(rows[old['id']]['read_only'])
+        self.assertEqual(rows[fixed['id']]['mode'],'python_fix')
+        history=public['task']['history']
+        self.assertEqual(history['label'],'Earlier task (read-only)')
+        self.assertEqual([m['text'] for m in history['messages']],['Compare the sources','Here is a plan.'])
+        self.assertIn('Goal: Compare sources',history['plan']);self.assertIn('- Researcher 1: Read the README',history['plan'])
+        self.assertEqual([r['run_id'] for r in history['reports']],['run-missing','run-review','run-team'])
+        missing,review,team=history['reports']
+        self.assertEqual(missing['stage'],'unavailable')
+        self.assertEqual(review['stage'],'interrupted')  # Cut off by an earlier version; shown, never resumed.
+        self.assertIn('Research report',review['text']);self.assertIn('Proposal (not executed): A bounded check',review['text'])
+        self.assertEqual(team['stage'],'completed')
+        for part in ('Combined result · accept','Two sources agree.','- The README documents setup.','Is the benchmark current?'):
+            self.assertIn(part,team['text'])
+        self.assertEqual(history['error'],'Stopped early')
+        self.assertEqual(public['error'],'')  # A task's old error belongs to its history, not the app banner.
+        self.assertNotIn('pending',public);self.assertNotIn('run',public)
+        self.assertEqual([p.read_bytes() for p in saved],before)  # Showing history never rewrites a run.
+        selected=app.handle('select_task',{'project_id':project['id'],'task_id':fixed['id']})
+        self.assertIn('- Implementer: Change main.py (expected: A patch)',selected['task']['history']['plan'])
+        self.assertEqual(selected['task']['history']['reports'],[])
 
     def test_v2_migration_moves_runs_and_exact_revision_approval_preserving_general_chat(self):
         storage=self.base/'data';storage.mkdir()
@@ -75,27 +128,41 @@ class TaskStorageTests(unittest.TestCase):
         project.pop('tasks',None);project.pop('selected_task_id',None)
         state=projects.empty_state();state.update(version=2,projects={project['id']:project},selected_project_id=project['id'])
         original=json.dumps(state).encode();(storage/'state.json').write_bytes(original)
-        app=Application(storage,provider=TeamProvider());public=app.public()
+        app=self.app(storage);public=app.public()
         self.assertEqual(public['version'],4);self.assertEqual(len(public['tasks']),2)
-        self.assertEqual(public['pending'],pending);self.assertEqual(public['run']['id'],runs[0].name)
-        self.assertEqual(public['threads']['task'],[]);self.assertEqual(public['threads']['project'],project['thread'])
+        self.assertTrue(all(t['status']=='read_only' and t['mode']=='review' for t in public['tasks']))
+        history=public['task']['history']
+        self.assertEqual(history['plan'],'Goal: Revise')
+        self.assertEqual([r['goal'] for r in history['reports']],['Old goal 0'])
         saved=app.state['projects'][project['id']]
         self.assertEqual(saved['run_ids'],[]);self.assertIsNone(saved['pending'])
+        self.assertEqual(saved['thread'],project['thread'])  # Kept in the saved state, no longer shown.
+        task=saved['tasks'][public['task_id']]
+        self.assertEqual(task['pending'],pending)
+        self.assertEqual(saved['imported_plan_owners']['original-approval']['task_id'],task['id'])
         self.assertEqual((storage/'state.v2-backup.json').read_bytes(),original)
-        self.assertEqual(Application(storage,provider=TeamProvider()).public()['pending'],pending)
+        self.assertEqual(self.app(storage).public()['task']['history'],history)
         self.assertEqual((storage/'state.v2-backup.json').read_bytes(),original)
 
+    def test_migration_isolates_malformed_historical_run_metadata(self):
+        storage=self.base/'data';storage.mkdir();project=projects.new_project(self.source)
+        run=runner.prepare(self.source,storage/'runs');(run/'run.json').write_text('[]')
+        project.update(run_ids=[run.name],run_id=run.name)
+        state=projects.empty_state();state.update(version=2,projects={project['id']:project},selected_project_id=project['id'])
+        (storage/'state.json').write_text(json.dumps(state))
+        app=self.app(storage)
+        self.assertEqual(app.public()['task']['title'],'Imported review')
+        self.assertEqual(app.public()['task']['history']['reports'][0]['stage'],'unavailable')
+        self.assertEqual((run/'run.json').read_text(),'[]')
+
     def test_malformed_task_stays_saved_and_other_tasks_remain_usable(self):
-        app=Application(self.base/'data',provider=TeamProvider());pid=test_pilot.legacy_project(app,self.source)['project_id']
-        self.assertTrue(hasattr(app,'handle'))
-        state=app.handle('create_task',{'project_id':pid});tid=state['task_id']
+        healthy=earlier('Healthy')
         raw={'id':'broken','title':['invalid'],'specialist_limit':False,'private':'preserve'}
-        app.state['projects'][pid]['tasks']['broken']=copy.deepcopy(raw);app.persist()
-        restored=Application(app.storage,provider=TeamProvider())
-        self.assertEqual(restored.state['projects'][pid]['tasks']['broken'],raw)
-        self.assertEqual(restored.public()['task_id'],tid)
-        self.assertEqual(next(t for t in restored.public()['tasks'] if t['id']=='broken')['status'],'unavailable')
-        with self.assertRaises(ValueError):restored.handle('select_task',{'project_id':pid,'task_id':'broken'})
+        app,project=self.seeded(healthy,copy.deepcopy(raw),selected=healthy['id'])
+        self.assertEqual(app.state['projects'][project['id']]['tasks']['broken'],raw)
+        self.assertEqual(app.public()['task_id'],healthy['id'])
+        self.assertEqual(next(t for t in app.public()['tasks'] if t['id']=='broken')['status'],'unavailable')
+        with self.assertRaises(ValueError):app.handle('select_task',{'project_id':project['id'],'task_id':'broken'})
 
     def test_reopened_malformed_presentation_fields_are_isolated_without_rewriting(self):
         from task_saved_state_fixture import reopened_states
@@ -104,185 +171,68 @@ class TaskStorageTests(unittest.TestCase):
                    {'error_status':'invented'}, {'thread':[None]}, {'thread':['message']},
                    {'thread':[{}]}, {'thread':[{'role':'user','text':None}]},
                    {'thread':[{'role':7,'text':'Text'}]}, {'thread':[{'role':'system','text':'Text'}]},
-                   {'thread':[{'role':'assistant'}]}]
+                   {'thread':[{'role':'assistant'}]}, {'mode':'invented'}, {'specialist_limit':0}]
         for index, malformed in enumerate(invalid):
             with self.subTest(malformed=malformed):
                 states=reopened_states(self.base/('saved-'+str(index)),malformed)
                 for name in ('nonselected','selected','healthy','general'):
                     self.assertEqual(states[name]['tasks'][0]['status'],'unavailable')
-                    self.assertEqual(states[name]['tasks'][1]['status'],'draft')
+                    self.assertEqual(states[name]['tasks'][1]['status'],'read_only')
                     self.assertTrue(all(isinstance(t['status'],str) for t in states[name]['tasks']))
                 self.assertTrue(states['raw_preserved'])
                 self.assertIsNone(states['selected']['task'])
-                self.assertEqual(states['selected']['threads']['task'],[])
                 self.assertIn('unavailable',states['selected']['error'])
                 self.assertEqual(states['healthy']['task']['title'],'Healthy task')
-                self.assertEqual(states['general']['threads']['project'][0]['text'],'General history survives')
+                self.assertEqual(states['healthy']['task']['history']['messages'][0]['text'],'Healthy conversation survives')
+                self.assertIsNone(states['general']['task'])
                 self.assertEqual(states['other']['project'],'Other healthy project')
 
-    def test_old_optional_error_fields_and_supported_recovery_statuses_remain_usable(self):
-        import orchestration
-        import tasks
-        app=Application(self.base/'optional-data',provider=TeamProvider())
-        project=projects.new_project(self.base/'inert-source');app.state['projects'][project['id']]=project
-        app.state['selected_project_id']=project['id']
-        task=tasks.create('Old task');project['tasks'][task['id']]=task;project['selected_task_id']=task['id']
+    def test_old_optional_fields_and_finished_statuses_remain_usable(self):
+        task=earlier('Old task')
         for field in ('draft','error','error_status'):task.pop(field)
-        raw=copy.deepcopy(task);app.persist();app=Application(app.storage,provider=TeamProvider())
-        self.assertEqual(app.public()['tasks'][0]['status'],'draft')
+        raw=copy.deepcopy(task)
+        app,project=self.seeded(task,selected=task['id'])
+        self.assertEqual(app.public()['tasks'][0]['status'],'read_only')
         self.assertEqual(app.state['projects'][project['id']]['tasks'][task['id']],raw)
         saved=app.state['projects'][project['id']]['tasks'][task['id']]
-        for status in (None,*sorted(orchestration.TERMINAL)):
+        for status in (None,*tasks.FINISHED_STAGES):
             with self.subTest(status=status):
                 saved.update(error='Saved failure',error_status=status);app.persist()
-                restored=Application(app.storage,provider=TeamProvider())
-                self.assertEqual(restored.public()['tasks'][0]['status'],status or 'failed')
-                self.assertEqual(restored.public()['error'],'Saved failure')
-
-    def test_imported_policy_one_approval_executes_unchanged_only_in_its_task(self):
-        from test_orchestration import assignment
-        import orchestration
-        app=Application(self.base/'data',provider=TeamProvider())
-        pid=test_pilot.legacy_project(app,self.source)['project_id'];project=app.state['projects'][pid]
-        plan=orchestration.make_plan(project,self.git('rev-parse','HEAD'),'Imported approval',[assignment('researcher'),assignment('reviewer',['researcher'])])
-        project['pending']=copy.deepcopy(plan);app.state['version']=2;app.persist()
-        app=Application(app.storage,provider=TeamProvider());tid=app.public()['task_id']
-        self.assertEqual(app.public()['pending'],plan)
-        other=app.handle('create_task',{'project_id':pid,'title':'Other'})['task_id']
-        app.state['projects'][pid]['tasks'][other]['pending']=copy.deepcopy(plan)
-        with self.assertRaisesRegex(ValueError,'task'):
-            app.handle('start_plan',{'project_id':pid,'task_id':other,'plan_id':plan['id'],'plan_digest':plan['digest']})
-        self.assertEqual(app.provider.calls,[])
-        app.handle('select_task',{'project_id':pid,'task_id':tid})
-        app.handle('start_plan',{'project_id':pid,'task_id':tid,'plan_id':plan['id'],'plan_digest':plan['digest']});app.wait()
-        self.assertEqual(app.public()['run']['plan'],plan);self.assertEqual(app.public()['run']['stage'],'completed')
-        self.assertEqual(app.public()['run']['task_id'],tid)
-
-    def test_imported_revision_approval_and_accepted_artifact_ids_survive(self):
-        from test_revision import result, Scripted
-        import revisions
-        app=Application(self.base/'data',provider=Scripted());pid=test_pilot.legacy_project(app,self.source)['project_id']
-        project=app.state['projects'][pid];run=runner.prepare(self.source,app.storage/'runs')
-        runner.start(run,'researcher');runner.complete(run,'researcher',result())
-        runner.start(run,'reviewer');runner.complete(run,'reviewer',result('Review feedback','revise'))
-        record=runner.load(run);identity=revisions.artifact_id(record)
-        plan={'id':'revision-plan','kind':'revision','goal':'Address feedback','project_id':pid,'source_path':str(self.source),
-              'revision':record['revision'],'run_id':run.name,'artifact_id':identity}
-        project.update(run_ids=[run.name],run_id=run.name,pending=plan);app.state['version']=2;app.persist()
-        app=Application(app.storage,provider=Scripted());tid=app.public()['task_id']
-        self.assertEqual(app.public()['run']['artifact_id'],identity);self.assertEqual(app.public()['pending'],plan)
-        app.handle('start_review',{'project_id':pid,'task_id':tid,'plan_id':plan['id']});app.wait()
-        public=app.public();self.assertEqual(public['run']['revision_round'],1);self.assertEqual(public['run']['stage'],'completed')
-        self.assertEqual(public['run']['id'],run.name);self.assertEqual(len(public['threads']['task']),1)
-        self.assertEqual(public['threads']['project'],[])
-        app.handle('accept_report',{'project_id':pid,'task_id':tid,'run_id':run.name,'artifact_id':public['run']['artifact_id']})
-        accepted=app.public()['run'];reopened=Application(app.storage,provider=Scripted()).public()['run']
-        self.assertEqual(reopened['artifact_id'],accepted['artifact_id']);self.assertEqual(reopened['user_acceptance'],accepted['user_acceptance'])
-
-    def test_imported_approval_cannot_escape_to_general_project_context(self):
-        from test_orchestration import assignment
-        import orchestration
-        app=Application(self.base/'data',provider=TeamProvider());self.addCleanup(app.wait)
-        pid=test_pilot.legacy_project(app,self.source)['project_id'];project=app.state['projects'][pid]
-        plan=orchestration.make_plan(project,self.git('rev-parse','HEAD'),'Imported approval',[assignment('researcher')])
-        project['pending']=copy.deepcopy(plan);app.state['version']=2;app.persist()
-        app=Application(app.storage,provider=TeamProvider());self.addCleanup(app.wait)
-        app.handle('select_task',{'project_id':pid,'task_id':None})
-        app.state['projects'][pid]['pending']=copy.deepcopy(plan)
-        with self.assertRaisesRegex(ValueError,'task|imported'):
-            app.handle('start_plan',{'project_id':pid,'plan_id':plan['id'],'plan_digest':plan['digest']})
-        self.assertEqual(app.provider.calls,[])
-
-    def test_migration_isolates_malformed_historical_run_metadata(self):
-        storage=self.base/'data';storage.mkdir();project=projects.new_project(self.source)
-        run=runner.prepare(self.source,storage/'runs');(run/'run.json').write_text('[]')
-        project.update(run_ids=[run.name],run_id=run.name)
-        state=projects.empty_state();state.update(version=2,projects={project['id']:project},selected_project_id=project['id'])
-        (storage/'state.json').write_text(json.dumps(state))
-        app=Application(storage,provider=TeamProvider())
-        self.assertEqual(app.public()['tasks'][0]['status'],'unavailable')
-        self.assertEqual((run/'run.json').read_text(),'[]')
+                restored=Application(app.storage,provider=NoProvider())
+                self.assertEqual(restored.public()['tasks'][0]['status'],'read_only')
+                self.assertEqual(restored.public()['task']['history']['error'],'Saved failure')
 
     def test_malformed_selected_task_reference_and_collection_remain_isolated(self):
-        app=Application(self.base/'data',provider=TeamProvider());pid=test_pilot.legacy_project(app,self.source)['project_id']
+        app=self.app();pid=test_pilot.legacy_project(app,self.source)['project_id']
         app.state['projects'][pid]['selected_task_id']=['not a task ID'];app.persist()
-        app=Application(app.storage,provider=TeamProvider())
+        app=self.app(app.storage)
         self.assertIn('unavailable',app.public()['error'])
         self.assertEqual(app.state['projects'][pid]['selected_task_id'],['not a task ID'])
         self.assertIsNone(app.public()['task_id'])
         app.handle('select_task',{'project_id':pid,'task_id':None})
         app.state['projects'][pid]['tasks']=['malformed collection'];app.persist()
-        app=Application(app.storage,provider=TeamProvider())
+        app=self.app(app.storage)
         self.assertIn('unavailable',app.public()['error'])
         self.assertEqual(app.state['projects'][pid]['tasks'],['malformed collection'])
 
-    def test_imported_approval_restoration_rejects_revoked_and_consumed_plans(self):
-        from test_orchestration import assignment
-        import orchestration
-        for trigger in ('allowance','chat','sources','start'):
-            with self.subTest(trigger=trigger):
-                app=Application(self.base/('data-'+trigger),provider=TeamProvider());self.addCleanup(app.wait)
-                pid=test_pilot.legacy_project(app,self.source)['project_id'];project=app.state['projects'][pid]
-                plan=orchestration.make_plan(project,self.git('rev-parse','HEAD'),'Exact imported approval',
-                                              [assignment('researcher'),assignment('reviewer',['researcher'])])
-                project['pending']=copy.deepcopy(plan);app.state['version']=2;app.persist()
-                app=Application(app.storage,provider=TeamProvider());self.addCleanup(app.wait)
-                tid=app.public()['task_id'];project=app.state['projects'][pid]
-                provenance=copy.deepcopy(project['imported_plan_owners'])
-                ref={'project_id':pid,'task_id':tid}
-                start=dict(ref,plan_id=plan['id'],plan_digest=plan['digest'])
-                if trigger=='allowance':app.handle('update_task',dict(ref,specialist_limit=1))
-                elif trigger=='chat':
-                    app.handle('chat',dict(ref,scope='task',text='Replace the old proposal'));app.wait()
-                elif trigger=='sources':
-                    app.handle('save_sources',{'project_id':pid,'selection_version':0,
-                                              'revision':self.git('rev-parse','HEAD'),'paths':['README.md']})
-                else:
-                    app.handle('start_plan',start);app.wait()
-                    self.assertEqual(app.public()['run']['plan'],plan)
-                calls=len(app.provider.calls)
-                # Only pending is restored; neither immutable provenance nor lifecycle status is altered.
-                project['tasks'][tid]['pending']=copy.deepcopy(plan)
-                with self.assertRaisesRegex(ValueError,'revoked|consumed|live'):
-                    app.handle('start_plan',start)
-                app.handle('select_task',{'project_id':pid,'task_id':None})
-                project['pending']=copy.deepcopy(plan)
-                with self.assertRaisesRegex(ValueError,'task|revoked|consumed|live'):
-                    app.handle('start_plan',{'project_id':pid,'plan_id':plan['id'],'plan_digest':plan['digest']})
-                self.assertEqual(len(app.provider.calls),calls)
-                self.assertEqual(project['imported_plan_owners'],provenance)
-                self.assertEqual(project['tasks'][tid]['pending'],plan)
-                self.assertEqual(project['imported_plan_states'][plan['id']],'consumed' if trigger=='start' else 'revoked')
-                app.persist()
-                restored=Application(app.storage,provider=TeamProvider())
-                restored.handle('select_task',ref)
-                with self.assertRaisesRegex(ValueError,'revoked|consumed|live'):
-                    restored.handle('start_plan',start)
-                self.assertEqual(restored.provider.calls,[])
-
-    def test_active_malformed_pending_is_isolated_without_clearing_other_proposals(self):
-        for pending in ({'id':[]},{},{'id':''}):
+    def test_interaction_active_at_quit_is_cleared_without_touching_saved_tasks(self):
+        for pending in ({'id':[]},{},{'id':''},{'id':'kept','goal':'Old proposal'}):
             with self.subTest(pending=pending):
-                storage=self.base/('malformed-'+str(len(list(self.base.glob('malformed-*')))))
-                app=Application(storage,provider=TeamProvider());pid=test_pilot.legacy_project(app,self.source)['project_id']
-                tid=app.handle('create_task',{'project_id':pid})['task_id'];project=app.state['projects'][pid]
-                project['tasks'][tid]['pending']=copy.deepcopy(pending)
-                raw=copy.deepcopy(project['tasks'][tid])
-                general={'id':'keep-general','goal':'Unrelated general proposal'};project['pending']=copy.deepcopy(general)
-                healthy=projects.new_project(self.source);healthy['pending']={'id':'keep-healthy','goal':'Other project proposal'}
-                healthy_pending=copy.deepcopy(healthy['pending']);app.state['projects'][healthy['id']]=healthy
-                app.state.update(selected_project_id=healthy['id'],active='Orchestrator',active_project_id=pid,active_task_id=tid)
-                app.persist()
-                restored=Application(storage,provider=TeamProvider())
-                self.assertEqual(restored.state['projects'][pid]['tasks'][tid],raw)
-                self.assertEqual(restored.state['projects'][pid]['pending'],general)
-                self.assertEqual(restored.public()['pending'],healthy_pending)
+                storage=self.base/('active-'+str(len(list(self.base.glob('active-*')))))
+                task=earlier('Old task',pending=copy.deepcopy(pending))
+                app=Application(storage,provider=NoProvider());project=projects.new_project(self.source)
+                project['tasks'][task['id']]=task;project['pending']={'id':'keep-general','goal':'General proposal'}
+                app.state['projects'][project['id']]=project
+                app.state.update(selected_project_id=project['id'],active='Orchestrator',active_project_id=project['id'],
+                                 active_task_id=task['id'],active_run_id='run-x')
+                app.persist();raw=copy.deepcopy(task)
+                restored=Application(storage,provider=NoProvider())
+                self.assertIsNone(restored.public()['active'])
+                self.assertEqual((restored.state['active_task_id'],restored.state['active_run_id']),(None,None))
+                self.assertEqual(restored.state['projects'][project['id']]['tasks'][task['id']],raw)
+                self.assertEqual(restored.state['projects'][project['id']]['pending'],{'id':'keep-general','goal':'General proposal'})
                 self.assertEqual(restored.public()['error'],'')
-                restored.handle('create_task',{'project_id':healthy['id'],'title':'Healthy task'})
-                self.assertEqual(restored.public()['task']['title'],'Healthy task')
-                restored.handle('switch_project',{'project_id':pid})
-                self.assertEqual(restored.public()['tasks'][0]['status'],'unavailable')
-                self.assertIn('unavailable',restored.public()['error'])
-                saved=json.loads((storage/'state.json').read_text())
-                self.assertEqual(saved['projects'][pid]['tasks'][tid],raw)
-                self.assertEqual(restored.provider.calls,[])
+
+
+if __name__ == '__main__':
+    unittest.main()

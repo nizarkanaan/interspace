@@ -477,7 +477,7 @@ def _final(decision, rule=None):
 
 class Scheduler:
     def __init__(self, *, max_running, runtime_factory, policy, audit, events, budget_gate, locks, clock,
-                 tasks, workspaces=None, legacy_active=None, interrupt_grace_s=INTERRUPT_GRACE_S,
+                 tasks, workspaces=None, interrupt_grace_s=INTERRUPT_GRACE_S,
                  monotonic=time.monotonic, tick_s=0.5, decide_options=None):
         self.max_running = validate_max_running(max_running)
         self.runtime_factory = runtime_factory
@@ -490,7 +490,6 @@ class Scheduler:
         self.store = tasks
         self.lock = tasks.lock
         self.workspaces = workspaces
-        self.legacy_active = legacy_active or (lambda: False)
         self.interrupt_grace_s = interrupt_grace_s
         self.monotonic = monotonic
         # Extra keyword arguments for policy.decide (coordinator ruling): app_data, home, temp_roots.
@@ -581,11 +580,6 @@ class Scheduler:
         self.pump()
         return self.max_running
 
-    def legacy_slot_free(self):
-        """Whether a legacy interaction may start now: it counts as one of the run slots."""
-        with self.lock:
-            return self.max_running - self._running_count() > 0
-
     def pump(self):
         with self.lock:
             started = False
@@ -608,8 +602,7 @@ class Scheduler:
                                 'lock': run.lock_key})
             queued = [{'task_id': t, 'project_id': self._runs[t].project_id, 'position': i + 1}
                       for i, t in enumerate(self._queue)]
-            return {'max_running': self.max_running, 'running': running, 'queued': queued,
-                    'legacy_active': bool(self.legacy_active())}
+            return {'max_running': self.max_running, 'running': running, 'queued': queued}
 
     def shutdown(self, timeout_s=30):
         with self.lock:
@@ -654,8 +647,7 @@ class Scheduler:
                 and approval.get('scope_version') == task['scope'].get('version'))
 
     def _running_count(self):
-        legacy = 1 if self.legacy_active() else 0
-        return legacy + sum(1 for run in self._runs.values() if run.thread is not None)
+        return sum(1 for run in self._runs.values() if run.thread is not None)
 
     def _free_slots(self):
         return self.max_running - self._running_count()
