@@ -9,7 +9,7 @@ Usage:
                                                       # account/login/completed (NEEDS USER APPROVAL)
   codex_account_probe.py --home DIR device-cancel     # start then account/login/cancel at once
 
-Never prints tokens: account/read only returns type/email/planType, and the probe drops email.
+Never prints tokens. account/read output is reduced to account type and planType.
 """
 import argparse, json, os, subprocess, sys, threading, queue
 
@@ -68,11 +68,15 @@ class Server:
 
 
 def redact(m):
-    s = json.dumps(m)
-    acct = (m.get('result') or {}).get('account') if isinstance(m.get('result'), dict) else None
-    if isinstance(acct, dict) and acct.get('email'):
-        s = s.replace(acct['email'], '<email>')
-    return s
+    """Keep account type and plan only: drop email, userId and workspaceRouting (account ids)."""
+    r = m.get('result')
+    if isinstance(r, dict) and ('account' in r or 'workspaceRouting' in r):
+        acct = r.get('account')
+        r = dict(r, account={k: acct.get(k) for k in ('type', 'planType')} if isinstance(acct, dict) else acct,
+                 userId='<redacted>' if r.get('userId') else None,
+                 workspaceRouting='<redacted>' if r.get('workspaceRouting') else None)
+        m = dict(m, result=r)
+    return json.dumps(m)
 
 
 def log(tag, m):

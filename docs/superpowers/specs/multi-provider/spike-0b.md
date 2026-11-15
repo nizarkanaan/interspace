@@ -16,7 +16,7 @@ Prototype scripts (both run against scratch folders only):
 |---|---|
 | Find the `codex` binary | Proven |
 | Status and sign-out on a scratch `CODEX_HOME` (CLI and app-server RPCs) | Proven, offline |
-| Device-auth sign-in shape (CLI flag and `account/login/start` RPC) | From `--help` and the generated JSON schema. A real sign-in was NOT run. It needs the user's approval. |
+| Device-auth sign-in through `account/login/start`, then sign-out | Proven live on 2026-11-15 with the user's approval, in a throwaway home that was deleted afterwards. See [Live sign-in](#live-sign-in-2026-11-15). |
 | Claude permission prompts for Edit, Write and Bash; allow, deny and rewritten replies | Proven with the real CLI and a fake model (no account, no real model call) |
 | Edits stay in the working directory | Proven: they do NOT, unless the host refuses them. See [Containment](#containment). |
 | Real Claude model call | Not run. The fake model covers the protocol. Needs approval if wanted. |
@@ -53,8 +53,9 @@ App-server form (no network):
 <- {"id":2,"result":{"account":null,"userId":null,"requiresOpenaiAuth":true,"workspaceRouting":null}}
 ```
 
-When signed in, `result.account` is `{"type":"chatgpt","email":...,"planType":...}` (from the schema and
-the earlier runtime spike). Interspace should keep only `type` and `planType`. Do not store or show the email.
+When signed in, `account/read` returns `account: {type:"chatgpt", email, planType, workspaceName}` plus
+`userId` and `workspaceRouting: {chatgptAccountId, backendOrigin, accountRoutingOverride}` (seen live).
+Interspace should keep only `type` and `planType`. Do not store or show the email, `userId` or account ids.
 
 ### Sign-in (device auth)
 
@@ -97,14 +98,38 @@ CODEX_HOME=<home> codex logout
   `account/updated {"authMode":null,"planType":null}`.
 - `codex app-server --startup-sign-out` also exists. Not needed.
 
+### Live sign-in (2026-11-15)
+
+The user approved one real sign-in. It ran in a throwaway home in the session scratchpad:
+`codex_account_probe.py --home <tmp>/ch device-login`, then `logout`, then the folder was deleted.
+
+```json
+<- {"id":2,"result":{"type":"chatgptDeviceCode","loginId":"<uuid>",
+     "verificationUrl":"https://auth.openai.com/codex/device","userCode":"XXXX-XXXXX"}}
+   ... the user approved in the browser (about 30 s) ...
+<- {"method":"account/login/completed","params":{"loginId":"<same uuid>","success":true,"error":null,"onboardingEntrypoint":null}}
+<- {"method":"account/updated","params":{"authMode":"chatgpt","planType":"pro"}}
+-> account/read  =>  account.type "chatgpt", planType "pro"
+```
+
+- `userCode` format: 4 + 5 characters with a dash. `verificationUrl` is fixed: `https://auth.openai.com/codex/device`.
+- The same app-server process stays usable after sign-in. No restart needed.
+- **Default token store is the file**: `auth.json` (mode `-rw-------`, about 4 KB) appeared in the home. Its
+  contents were never read.
+- After sign-in, `CODEX_HOME=<h> codex login status` prints `Logged in using ChatGPT`, exit code 0.
+- A new app-server started on a signed-in home sends `account/updated {"authMode":"chatgpt","planType":"pro"}`
+  right after `initialize`. The runtime can use it as the sign-in state, or ignore it.
+- `account/logout` returned `{}`, emitted `account/updated` with nulls and **deleted `auth.json`**.
+  `auth.json.lock` and `auth.lock` stay. `codex login status` then prints `Not logged in`, exit code 1.
+
 ### Credential storage (gotcha)
 
 `cli_auth_credentials_store` accepts `file`, `keyring`, `auto`, `ephemeral` (from the load error for a bad
-value). Recommendation: pin `-c cli_auth_credentials_store="file"` for every command on the app-owned home
-(login, status, logout, app-server). With `keyring` or `auto`, the token could go to the macOS keychain,
-where the app-owned home and the user's `~/.codex` might share or collide. Not verified which store the
-default picks. Check this after the first approved real sign-in by listing file NAMES in the home
-(`auth.json` present or not). Never open the file.
+value). The default wrote `auth.json` in the home (seen live). Still pin
+`-c cli_auth_credentials_store="file"` for every command on the app-owned home (login, status, logout,
+app-server). A user-level `~/.codex/config.toml` is not read under a custom `CODEX_HOME`, but pinning the
+store guards against a changed default. With `keyring` or `auto`, the token could go to the macOS keychain,
+where the app-owned home and the user's `~/.codex` might share or collide.
 
 Also useful: `-c forced_login_method="chatgpt"` (accepted values `chatgpt`, `api`) stops an API-key login
 in this home.
@@ -125,7 +150,7 @@ python3 spike-0b/codex_account_probe.py --home $S/ch logout   # account/logout {
 `initialize` is also followed by a `remoteControl/status/changed` notification (status `disabled`):
 the runtime must ignore it.
 
-Needs approval (real sign-in, then sign-out, in a throwaway home):
+Live (approved), in a throwaway home:
 
 ```bash
 python3 spike-0b/codex_account_probe.py --home <tmp>/ch device-login
@@ -265,9 +290,7 @@ Conclusions:
 
 ## Not done, needs the user's approval
 
-1. A real Codex device sign-in in a throwaway home: `codex_account_probe.py --home <tmp> device-login`.
-   Then `logout`, then delete the folder. This shows the real `verificationUrl` and `userCode` shapes, which
-   store the token lands in, and `account/read` after sign-in. Then repeat once in the real
-   `<storage>/codex-home` for actual use.
+1. Done 2026-11-15: a real sign-in in a throwaway home (see above). Still to do: the one real sign-in in
+   `<storage>/codex-home` for actual use. It should go through the app once `CodexProvider` sets `CODEX_HOME`.
 2. Optional: one real Claude turn in Snack Picker's worktree. This would only confirm model behaviour; the
    fake model already proved the protocol.
