@@ -47,33 +47,34 @@ Do not edit generated preview copies. Regenerate the standalone page and bundled
 
 ## Current Mac implementation
 
-`app/macos/main.swift` owns the native shell and restricted UI bridge. `app/backend/service.py` owns local state and bounded orchestration; `provider.py` owns Codex processes. `orchestration.py` owns bounded team policies and the supported team-v1/team-v2 run formats; `team.py` owns durable job reservations, dependency handoffs and synthesis. `sources.py` owns committed-source discovery, selection and team-v2 snapshot boundaries while delegating old snapshots to the unchanged pilot loader. `changes.py` owns editing policy/candidate evidence, `checks.py` the fixed restricted process adapter, `change_apply.py` guarded source writes/journals, and `change_team.py` the durable editing workflow. `ui/changes.js` renders these public states and dispatches only exact projected generation/check/application references. `ui/sources.js` owns project source drafts and scoped asynchronous replies; `ui/team.js` projects team records alongside legacy reports. `app/ui/index.html` renders state and sends enumerated intentions. `pilot/runner.py` remains the source snapshot/evidence helper. `scripts/build-macos-app.py` packages resources without user data. Do not add a local HTTP service: the current shell uses JSON-lines pipes. See app/README.md for limits.
+`app/macos/main.swift` owns the native shell and the restricted UI bridge. `app/backend/service.py` owns local state, the request router and project registry wiring. `projects.py` owns the project registry; `pilot/runner.py` remains a snapshot helper it uses. `tasks.py` owns task records, the agent task mode and the read-only history view of earlier tasks (`tasks.history()`). `codex_auth.py` owns the Codex connection check and sign-in. `timeutil.py` holds the shared ISO time helpers. `app/ui/index.html` renders state and sends enumerated intentions. `scripts/build-macos-app.py` packages resources without user data. Do not add a local HTTP service: the shell uses JSON-lines pipes. See app/README.md for limits.
 
-## Agentic Spaces boundaries (approved 2026-11-11, being built)
+## Multi-provider boundaries (approved 2026-11-15, being built)
 
-The roadmap `docs/superpowers/plans/2026-11-11-agentic-spaces-roadmap.md` adds the modules below. Their interfaces are frozen in `docs/superpowers/specs/agentic-spaces/`. This table is the planned ownership; update it as each part is merged.
+The plan `docs/superpowers/plans/2026-11-15-multi-provider.md` replaces the Agentic Spaces roadmap; connected apps were removed. Interfaces are frozen in `docs/superpowers/specs/multi-provider/`, plus the kept parts of `docs/superpowers/specs/agentic-spaces/` (events, scheduler, scope). This table is the ownership map; update it as each part is merged.
 
 | Location | Owns |
 | --- | --- |
-| `app/backend/spaces/__init__.py`, `spaces/base.py` | App registry, connector error types, the `Http` client, Keychain-backed `Credentials`, the write journal interface and generated agent tool descriptors |
-| `app/backend/spaces/<app>.py` | One connector per app (Notion, GitHub, Google Drive, Zotero): auth status, sign-in and sign-out, browse/search/read, typed write actions, change listing |
 | `app/backend/scope.py` | Scope validation, digest, edits and the pure `decide` policy function (allow, ask, deny) |
-| `app/backend/audit.py` | Append-only audit log and the durable connector write journal |
-| `app/backend/scheduler.py` | Concurrent agentic tasks, per-task cancel and deadlines, queueing, project and resource locks |
-| `app/backend/runtime/` | Provider runtime adapters (`codex app-server`, later Claude Code) and the Interspace-owned MCP bridge for connector tools |
-| `app/ui/stream.js` | Agent event stream rendering: messages, tool calls, diffs, app actions, ask prompts |
-| `app/ui/spaces/<app>.js` | Spaces sidebar panels, one per app |
+| `app/backend/audit.py` | Append-only audit log |
+| `app/backend/budget.py` | Per-task token budget gate and ledger; charge rules come from the provider registry |
+| `app/backend/scheduler.py` | Concurrent agent runs, per-run cancel and deadlines, queueing, project locks, task workspaces (`Workspaces`), child runs of a team |
+| `app/backend/runtime/` | Provider runtime adapters (`codex app-server`, Claude Code stream-json), the provider registry (`registry.py`, Wave 1A) and the Interspace-owned MCP bridge that carries the Orchestrator's tools |
+| `app/backend/orchestrator.py` (Wave 1B) | Orchestration tools, team proposals and approval, child task creation, report collection |
+| `app/backend/routing.py` (Wave 1A) | Per-role routing defaults and their validation |
+| `app/backend/worktree_merge.py` (Wave 1D) | Review summaries and the explicit merge of a task branch, in a temporary worktree |
+| `app/ui/stream.js` | Agent event stream rendering: messages, tool calls, diffs, asks, team and subagent cards |
 
-Dependency rules for these modules:
+Dependency rules:
 
-- Connectors know nothing about tasks, scopes, budgets or the UI. They reach the network only through `spaces.base.Http`, and credentials only through `Credentials`.
-- `scope.decide` is pure: no I/O except path resolution, no clock except the one passed in. Every file, command, network and app action of an agent passes through the runtime context's `authorize`, which calls `decide` and writes the audit record before the action runs. Fail closed when policy or audit fails.
-- Runtimes never call connectors, the Keychain or the audit log directly; they go through the run context. They start providers only in sandboxed, approval-requesting modes and pass every setting explicitly.
-- The UI dispatches enumerated intentions only. It never decides policy, holds credentials or reconstructs a scope digest it did not display.
-- Credentials cross only the Swift Keychain bridge (`keychain` and `keychain_reply` pipe messages), which the WebView can neither see nor send.
-- Still no local HTTP service for the UI. Two narrow exceptions are allowed once their Wave 0 spikes confirm them: a single-use `127.0.0.1` OAuth redirect listener that exists only during a sign-in, and the Interspace-owned MCP server that the provider starts for connector tools, reaching the backend through a Unix socket in Application Support. Neither accepts connections from other hosts.
+- `scope.decide` is pure: no I/O except path resolution, no clock except the one passed in. Every file, command and network action of an agent passes through the run context's `authorize`, which calls `decide` and writes the audit record before the action runs. Fail closed when policy or audit fails.
+- Runtimes never call the audit log, the budget or other tasks directly; they go through the run context. They start providers only in sandboxed, approval-requesting modes and pass every setting explicitly. A provider's file-editing tools that its own sandbox does not contain (Claude Edit/Write/NotebookEdit) are checked by Interspace against the agent's workspace before `authorize` (spike 0B).
+- Only the registry names providers. Other modules ask the registry; no hard-coded provider lists.
+- The Orchestrator reaches children only through its tools; children never see each other or the Orchestrator's session. Child output reaches the Orchestrator wrapped as untrusted content.
+- The UI dispatches enumerated intentions only. It never decides policy, holds credentials or reconstructs a scope or team digest it did not display.
+- Still no local HTTP service for the UI. The one allowed exception is the Interspace-owned MCP server that a provider starts, reaching the backend through a private Unix socket in Application Support.
 
-Testing for these modules: connectors use the fake-HTTP harness (`tests/spaces/fakehttp.py`) with invented fixtures, in-memory credentials and journal; the scheduler uses a fake runtime and a controlled clock; the UI uses fixture event streams. Routine tests never contact the user's real apps, the Keychain or a model provider. Live checks against the user's own accounts are separate, explicitly approved steps, and are reported separately from unit tests.
+Testing: the scheduler and orchestrator use a fake runtime and a controlled clock; runtimes use the fake Codex and Claude CLIs in `tests/runtime/fixtures/`; the UI uses fixture event streams. Routine tests never contact a model provider or the user's sign-ins. Live checks are separate, explicitly approved steps, reported separately from unit tests.
 
 ## Broader application organization
 
@@ -143,8 +144,6 @@ Keep unit tests alongside the behavior they protect. Add folders only when code 
 Use small coherent commits. Explain the problem, resulting behavior, relevant evidence, and limits in change descriptions. Keep dependencies justified and locked. Record architectural decisions when they change ownership, persistence, permissions, or distribution. Keep this document current as the actual implementation replaces proposed structure.
 
 
-## Controlled Python editing boundaries
+## Removed workflows
 
-Use the dedicated `change` / `change-v1` policy without changing read-only approval meanings. Presentation never reconstructs write/check approval refs; preserve every field from `action_refs` and `can_*` gates. Read-only evidence after Apply may use the immutable selected project/task/run/plan/candidate/artifact identity, including fresh reopen. Guard both captured handlers and late evidence/action responses against owner and artifact changes.
-
-Only app-owned copies execute. Generated checks are the fixed three-phase recipe, reserved at most once per phase with signed runtime identity, strict process limits and fail-closed macOS restrictions. Application alone writes the exact reviewed source paths using supported same-filesystem exchange/exclusive creation and retained originals/journal. Recovery is inspection-only. Scope/application/canary tests use disposable fixtures, with real OS canaries required outside a nested development sandbox (`INTERSPACE_REQUIRE_OS_CHECKS=1`). Run Python 3.14 and Apple 3.9 suites sequentially. See `docs/controlled-editing-validation.md`; fixture/browser passes are separate from coordinator-owned live native acceptance.
+The controlled Python editing preset, read-only team reviews, project sources, Workspace advice, the Observatory and connected apps were removed on 2026-11-15. Their validation records under `docs/` are historical. Earlier tasks load read-only through `tasks.history()`; never reinterpret their saved approvals as permission for anything. Run Python 3.14 and Apple 3.9 suites sequentially.
