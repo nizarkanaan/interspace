@@ -1,12 +1,18 @@
 """Local app protocol and bounded read-only orchestration. Transport: JSON lines on pipes."""
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import copy
+import importlib
+import inspect
 import json
 import os
 from pathlib import Path
+import queue
 import sys
 import subprocess
 import threading
+import time
+from urllib.parse import urlsplit
 import uuid
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -24,6 +30,7 @@ import checks
 import change_apply
 import change_team
 import budget
+import scheduler
 
 CHAT_SCHEMA = {'type':'object','additionalProperties':False,
                'properties':{'reply':{'type':'string'},'action':{'type':'string','enum':['answer','propose_review','propose_revision']}},
@@ -35,13 +42,472 @@ RESULT_SCHEMA = {'type':'object','additionalProperties':False,'properties':{
     'summary':{'type':'string'},'proposal':{'type':'string'},'findings':{'type':'array','items':{'type':'object','additionalProperties':False,'properties':{'claim':{'type':'string'},'evidence':{'type':'array','items':CITATION}},'required':['claim','evidence']}}},'required':['summary','proposal','findings']}
 
 
+SPACES_APPS = ('notion', 'github', 'gdrive', 'zotero')
+AGENT_METHODS = ('agent_create', 'agent_message', 'agent_answer', 'agent_cancel', 'task_events', 'task_blob',
+                 'scope_get', 'scope_update', 'scope_approve', 'scope_default', 'scheduler_settings')
+KEYCHAIN_TIMEOUT_S = 10  # PROVISIONAL(0C-1)
+STATE_PUBLISH_INTERVAL_S = 0.25  # At most 4 coarse state updates per second (scheduler.md).
+
+
+def optional_module(name):
+    """A Wave 1 module another stream owns (scope, audit, spaces), or None until it is merged."""
+    try:
+        return importlib.import_module(name)
+    except ImportError:
+        return None
+
+
+try:
+    from spaces.base import CredentialStoreUnavailable
+except ImportError:  # 1A defines the real class in spaces/base.py; same name, code and base class.
+    class CredentialStoreUnavailable(ValueError):
+        code = 'credential_store_unavailable'
+
+
+class KeychainBridge:
+    """The backend side of the Swift Keychain bridge (connectors.md).
+
+    Nothing is ever sent before Swift's `bridge_hello`, so a shell without the bridge never receives a
+    `keychain` line it might forward to the WebView. Replies arrive on the stdin reader thread.
+    """
+
+    def __init__(self, emit, timeout_s=KEYCHAIN_TIMEOUT_S):
+        self.emit = emit
+        self.timeout_s = timeout_s
+        self.capabilities = {}
+        self._pending = {}
+        self._guard = threading.Lock()
+
+    def hello(self, value):
+        if isinstance(value, dict):
+            self.capabilities = {name: True for name in ('keychain', 'open_url') if value.get(name) == 1}
+
+    def reply(self, message):
+        with self._guard:
+            waiter = self._pending.get(message.get('keychain_reply'))
+        if waiter is None:
+            return False  # A reply with an unknown id is dropped.
+        waiter['reply'] = message
+        waiter['event'].set()
+        return True
+
+    def keychain(self, op, account, secret=None):
+        if not self.capabilities.get('keychain'):
+            raise CredentialStoreUnavailable('The macOS Keychain is not available to this app version. Update Interspace.')
+        if op not in ('read', 'write', 'delete') or account not in SPACES_APPS:
+            raise ValueError('Invalid Keychain request.')
+        identity = 'kc-' + uuid.uuid4().hex
+        waiter = {'event': threading.Event(), 'reply': None}
+        message = {'type': 'keychain', 'id': identity, 'op': op, 'account': account}
+        if op == 'write':
+            if not isinstance(secret, str):
+                raise ValueError('Invalid Keychain request.')
+            message['secret'] = secret
+        with self._guard:
+            self._pending[identity] = waiter
+        try:
+            self.emit(message)
+            if not waiter['event'].wait(self.timeout_s):
+                raise CredentialStoreUnavailable('The macOS Keychain did not answer. Try again.')
+        finally:
+            with self._guard:
+                self._pending.pop(identity, None)
+        return waiter['reply']
+
+    def open_url(self, url):
+        parts = urlsplit(url) if isinstance(url, str) else None
+        if parts is None or parts.scheme != 'https' or not parts.hostname:
+            raise ValueError('Only secure web addresses can be opened.')
+        if not self.capabilities.get('open_url'):
+            raise ValueError('This app version cannot open the browser for sign-in. Update Interspace.')
+        self.emit({'type': 'open_url', 'url': url})
+
+
+class BridgeCredentials:
+    """`Credentials` for one app over the Keychain bridge. The secret is a JSON object only its connector reads."""
+
+    def __init__(self, bridge, app):
+        self.bridge = bridge
+        self.app = app
+
+    def _check(self, reply, allow_missing=False):
+        if reply.get('ok') is True:
+            return True
+        if allow_missing and reply.get('error') == 'not_found':
+            return False
+        if reply.get('error') == 'denied':
+            raise CredentialStoreUnavailable('Keychain access was refused. Allow Interspace in the Keychain prompt and try again.')
+        raise CredentialStoreUnavailable('The macOS Keychain is unavailable. Try again.')
+
+    def get(self):
+        reply = self.bridge.keychain('read', self.app)
+        if not self._check(reply, allow_missing=True):
+            return None
+        try:
+            secret = json.loads(reply.get('secret'))
+        except (TypeError, ValueError):
+            secret = None
+        if not isinstance(secret, dict):
+            raise CredentialStoreUnavailable('The saved sign-in is unreadable. Sign in again.')
+        return secret
+
+    def set(self, secret):
+        if not isinstance(secret, dict):
+            raise ValueError('Invalid credentials.')
+        self._check(self.bridge.keychain('write', self.app, json.dumps(secret, separators=(',', ':'))))
+
+    def delete(self):
+        self._check(self.bridge.keychain('delete', self.app), allow_missing=True)
+
+
+class ScopeAdapter:
+    """The scope.py functions the scheduler and the scope methods call (1E). One place to reconcile names."""
+
+    def __init__(self, module):
+        self.module = module
+
+    def _need(self):
+        if self.module is None:
+            raise ValueError('Agent tasks need the scope engine, which is not in this build yet.')
+        return self.module
+
+    def validate(self, document, *, project_ids=None):
+        result = self._need().validate(document, project_ids=project_ids)
+        return document if result is None else result
+
+    def digest(self, scope):
+        return self._need().digest(scope)
+
+    def default(self, task, project_ids):
+        return self._need().default(task, project_ids)
+
+    def decide(self, scope, approval, request, *, workspace_roots, now, **options):
+        return self._need().decide(scope, approval, request, workspace_roots=workspace_roots, now=now, **options)
+
+    def request_digest(self, request):
+        return self._need().request_digest(request)
+
+    def apply_answer(self, document, approval, ask, answer, *, now):
+        """scope.apply_answer: binds the answer to the exact ask and applies add_to_scope (README answer path)."""
+        return self._need().apply_answer(document, approval, ask, answer, now=now)
+
+    def merge_patch(self, scope, patch):
+        """The patched copy with `version` unchanged; the scheduler increments it."""
+        return self._need().merge_patch(scope, patch)
+
+
+class AuditAdapter:
+    """Audit writes. `log` is 1E's `audit.AuditLog` (or a test fake) with `append(record)`, which raises
+    when the record is not durable. Without it every write fails, so agent actions fail closed."""
+
+    def __init__(self, log):
+        self.log = log
+
+    def append(self, record):
+        if self.log is None:
+            raise OSError('The audit log is not in this build yet.')
+        return self.log.append(record)
+
+
+class AgentStore:
+    """The task store the scheduler uses, over `Application.state` and its lock."""
+
+    def __init__(self, app):
+        self.app = app
+        self.lock = app.lock
+
+    @property
+    def state(self):
+        return self.app.state
+
+    def agent_tasks(self):
+        for project in self.app.state['projects'].values():
+            saved = project.get('tasks') if isinstance(project, dict) else None
+            for task in (saved.values() if isinstance(saved, dict) else ()):  # Damaged saved data is skipped.
+                if isinstance(task, dict) and task.get('mode') == 'agent':
+                    yield task
+
+    def task(self, task_id):
+        if isinstance(task_id, str):
+            for project in self.app.state['projects'].values():
+                saved = project.get('tasks')
+                task = saved.get(task_id) if isinstance(saved, dict) else None
+                if task is not None:
+                    return tasks.validate(task, task_id)
+        raise ValueError('Unknown task.')
+
+    def project(self, project_id):
+        return self.app.state['projects'].get(project_id)
+
+    def changed(self, task_id=None):
+        self.app.persist()
+        self.app.publish_soon()
+
+
+class SpacesHub:
+    """Spaces UI requests (connectors.md). Runs on the Spaces pool; holds no lock across a connector call."""
+
+    def __init__(self, app, connector_factory):
+        self.app = app
+        self.factory = connector_factory
+        self._connectors = {}
+        self._sign_ins = {}
+        self._guard = threading.Lock()
+
+    def connector(self, name):
+        if name not in SPACES_APPS:
+            raise ValueError('Unknown app.')
+        with self._guard:
+            if name not in self._connectors:
+                self._connectors[name] = self.factory(name)
+            return self._connectors[name]
+
+    def _remember(self, name, status):
+        with self.app.lock:
+            self.app.state.setdefault('spaces', {}).setdefault('apps', {})[name] = copy.deepcopy(status)
+            self.app.persist()
+        self.app.publish_soon()
+        return status
+
+    def _audit(self, kind, **fields):
+        record = {'v': 1, 'actor': 'user', 'kind': kind,
+                  'task_id': None, 'project_id': None, 'turn_id': None, 'call_id': None, 'request': None,
+                  'decision': None, 'rule': None, 'scope_version': None, 'scope_digest': None, 'outcome': None,
+                  'idempotency_key': None, 'detail': None}
+        record.update(fields)
+        self.app.audit.append(record)
+
+    def _auth_changed(self, name, status):
+        try:
+            self._audit('auth', detail={'app': name, 'state': status.get('state')})
+        except Exception:
+            pass  # A sign-in already happened in the app; the status is still reported honestly.
+        self.app.emit({'type': 'spaces_auth', 'app': name, 'status': status})
+        return self._remember(name, status)
+
+    def status(self, name):
+        try:
+            return self.connector(name).status()
+        except ValueError as error:
+            return {'v': 1, 'app': name, 'state': 'unavailable', 'account': None, 'granted': [],
+                    'detail': str(error), 'checked_at': scheduler.iso_time(time.time())}
+
+    def handle(self, method, params):
+        if method == 'spaces_status':
+            return {'apps': [self._remember(name, self.status(name)) for name in SPACES_APPS]}
+        if method == 'spaces_changes':
+            return self.changes()
+        name = params.get('app')
+        connector = self.connector(name)
+        if method == 'spaces_sign_in':
+            return self.sign_in(name, connector)
+        if method == 'spaces_complete_sign_in':
+            extra = set(params) - {'app', 'token', 'write_key'}
+            if extra:
+                raise ValueError('Unexpected sign-in fields.')
+            cancel = threading.Event()
+            with self._guard:
+                self._sign_ins[name] = cancel
+            status = connector.complete_sign_in({k: params[k] for k in ('token', 'write_key') if k in params}, cancel)
+            return self._auth_changed(name, status)
+        if method == 'spaces_cancel_sign_in':
+            with self._guard:
+                cancel = self._sign_ins.pop(name, None)
+            if cancel is not None:
+                cancel.set()
+            return {'cancelled': True}
+        if method == 'spaces_sign_out':
+            return self._auth_changed(name, connector.sign_out())
+        if method == 'spaces_browse':
+            return connector.browse(params.get('parent'), params.get('cursor'), params.get('limit', 50))
+        if method == 'spaces_search':
+            return connector.search(params.get('query'), params.get('kinds'), params.get('cursor'), params.get('limit', 25))
+        if method == 'spaces_read':
+            return connector.read(params.get('ref'), params.get('cursor'))
+        if method == 'spaces_actions':
+            return {'actions': connector.actions()}
+        if method == 'spaces_write':
+            return self.write(name, connector, params)
+        raise ValueError('Unknown method')
+
+    def sign_in(self, name, connector):
+        step = connector.begin_sign_in({})
+        if not isinstance(step, dict) or step.get('kind') not in ('device_code', 'browser', 'token_entry', 'local_check'):
+            raise ValueError('Sign-in could not start.')
+        if step['kind'] in ('device_code', 'browser'):
+            if step['kind'] == 'browser':
+                self.app.bridge.open_url(step.get('url'))
+            cancel = threading.Event()
+            with self._guard:
+                previous = self._sign_ins.get(name)
+                self._sign_ins[name] = cancel
+            if previous is not None:
+                previous.set()
+
+            def complete():
+                try:
+                    status = connector.complete_sign_in({}, cancel)
+                except Exception as error:
+                    status = self.status(name)
+                    status = dict(status, detail=str(error) if isinstance(error, ValueError) else 'Sign-in failed.')
+                with self._guard:
+                    if self._sign_ins.get(name) is cancel:
+                        del self._sign_ins[name]
+                self._auth_changed(name, status)
+            threading.Thread(target=complete, daemon=True, name='sign-in-' + name).start()
+        return step
+
+    def write(self, name, connector, params):
+        action, ref, values, key = (params.get(k) for k in ('action', 'ref', 'params', 'idempotency_key'))
+        if not isinstance(ref, str) or not isinstance(values, dict) or not isinstance(key, str):
+            raise ValueError('Invalid write request.')
+        request = {'category': 'app', 'app': name, 'action': action, 'ref': ref}
+        lock = 'app:' + ref
+        self.app.locks.acquire(lock, None, None)  # The same lock agents take, so edits never interleave.
+        try:
+            try:
+                result = connector.write(action, ref, values, key)
+                outcome = 'succeeded'
+            except Exception as error:
+                outcome = 'outcome_unknown' if getattr(error, 'code', None) == 'outcome_unknown' else 'failed'
+                raise
+            finally:
+                try:
+                    # One record with the outcome: a user_write record requires it (audit.py).
+                    self._audit('user_write', request=request, idempotency_key=key, outcome=outcome)
+                except Exception:
+                    pass  # The write already happened or failed; it is never re-sent to make the record.
+        finally:
+            self.app.locks.release(lock, None)
+        return result
+
+    def changes(self):
+        found = {}
+        for name in SPACES_APPS:
+            with self.app.lock:
+                status = self.app.state.get('spaces', {}).get('apps', {}).get(name) or {}
+                cursor = self.app.state.get('spaces', {}).get('cursors', {}).get(name)
+            if status.get('state') != 'signed_in':
+                continue
+            items, complete = [], False
+            while not complete:
+                batch = self.connector(name).changes(cursor)
+                items += batch.get('items', [])
+                cursor, complete = batch.get('cursor'), batch.get('complete', True) is not False
+            with self.app.lock:
+                self.app.state.setdefault('spaces', {}).setdefault('cursors', {})[name] = cursor
+                self.app.persist()
+            found[name] = items
+        return {'apps': found}
+
+
+def default_connector_factory(app):
+    """Real connectors once 1A (spaces) and 1E (audit.FileJournal) are merged; a clear refusal until then."""
+    def build(name):
+        spaces = optional_module('spaces')
+        base = optional_module('spaces.base')
+        audit = optional_module('audit')
+        if spaces is None or base is None or audit is None or not hasattr(audit, 'FileJournal'):
+            raise ValueError('Connected apps are not available in this build yet.')
+        with app.lock:
+            if app.journal is None:
+                app.journal = audit.FileJournal(app.storage / 'spaces' / 'writes.jsonl')
+        return spaces.connector(name, base.Http(), BridgeCredentials(app.bridge, name), app.journal)
+    return build
+
+
+def reply_for(line, app):
+    """Answer one request line exactly as the original single-threaded stdin loop did."""
+    request = None
+    try:
+        request = json.loads(line) if isinstance(line, (str, bytes)) else line
+        if not isinstance(request, dict):
+            raise ValueError('Request must be an object')
+        return {'id': request.get('id'), 'result': app.handle(request.get('method'), request.get('params', {}))}
+    except Exception as error:
+        return {'id': request.get('id') if isinstance(request, dict) else None,
+                'error': str(error) if isinstance(error, (ValueError, ProviderError)) else 'Request failed. Check repository and provider access.'}
+
+
+class Router:
+    """The stdin side of the bridge (connectors.md, routing).
+
+    One reader thread reads every line. `keychain_reply` lines go to the waiting Keychain call and
+    `bridge_hello` (accepted only as the first line) sets the handshake; neither reaches request handling.
+    Legacy methods run on one dispatcher thread in arrival order, exactly as before. `spaces_*` requests
+    and agent, scope and event requests run on their own small pools, so they never wait behind a task.
+    """
+
+    def __init__(self, app, emit, spaces_workers=4, agent_workers=2):
+        self.app = app
+        self.emit = emit
+        self.legacy = queue.Queue()
+        self.spaces = ThreadPoolExecutor(max_workers=spaces_workers, thread_name_prefix='spaces')
+        self.agents = ThreadPoolExecutor(max_workers=agent_workers, thread_name_prefix='agent')
+        self.first = True
+        self.dispatcher = threading.Thread(target=self._dispatch, daemon=True, name='legacy-dispatch')
+        self.dispatcher.start()
+
+    def route(self, line):
+        first, self.first = self.first, False
+        try:
+            message = json.loads(line)
+        except ValueError:
+            message = None
+        if isinstance(message, dict):
+            if 'keychain_reply' in message:
+                self.app.bridge.reply(message)
+                return 'keychain'
+            if 'bridge_hello' in message:
+                if first:
+                    self.app.bridge.hello(message['bridge_hello'])
+                return 'hello'
+            method = message.get('method')
+            if isinstance(method, str) and method.startswith('spaces_'):
+                self.spaces.submit(self._answer, message)
+                return 'spaces'
+            if method in AGENT_METHODS:
+                self.agents.submit(self._answer, message)
+                return 'agent'
+        self.legacy.put(line)
+        return 'legacy'
+
+    def _answer(self, request):
+        self.emit(reply_for(request, self.app))
+
+    def _dispatch(self):
+        while True:
+            line = self.legacy.get()
+            if line is None:
+                return
+            self.emit(reply_for(line, self.app))
+
+    def serve(self, stream, closed):
+        for line in stream:
+            self.route(line)
+            if closed.is_set():
+                break
+
+    def close(self, timeout_s=30):
+        self.legacy.put(None)
+        self.dispatcher.join(timeout_s)
+        self.agents.shutdown(wait=False)
+        self.spaces.shutdown(wait=False)
+
+
 class Application:
-    def __init__(self, storage, provider=None, emit=None):
+    def __init__(self, storage, provider=None, emit=None, *, scope_api=None, audit_api=None, runtime_factory=None,
+                 connector_factory=None, interrupt_grace_s=scheduler.INTERRUPT_GRACE_S):
         self.storage = Path(storage).resolve()
         self.storage.mkdir(parents=True, exist_ok=True)
         self.provider = provider or CodexProvider()
         self.emit = emit or (lambda message: None)
         self.lock = threading.RLock()
+        self._publish_guard = threading.Lock()
+        self._last_publish = 0.0
+        self._publish_timer = None
+        self.bridge = KeychainBridge(self.emit)
+        self.journal = None
         self.cancel = threading.Event()
         self.worker = None
         self.current_run = None
@@ -95,7 +561,106 @@ class Application:
                         runner.save(run/'run.json',record)
                 except SNAPSHOT_ERRORS:
                     continue
+        self.setup_agents(scope_api, audit_api, runtime_factory, connector_factory, interrupt_grace_s)
         self.persist()
+
+    def setup_agents(self, scope_api, audit_api, runtime_factory, connector_factory, interrupt_grace_s):
+        """Agentic tasks (scheduler.md) and Spaces (connectors.md), beside the unchanged legacy slot."""
+        self.scope = ScopeAdapter(scope_api if scope_api is not None else optional_module('scope'))
+        if audit_api is None:
+            module = optional_module('audit')
+            audit_api = module.AuditLog(self.storage/'audit') if module is not None and hasattr(module,'AuditLog') else None
+        self.audit = AuditAdapter(audit_api)
+        self.events = scheduler.EventLog(self.storage/'tasks', forward=lambda event: self.emit({'type':'event','event':event}))
+        self.store = AgentStore(self)
+        self.locks = scheduler.Locks()
+        scheduler.recover(self.store, self.events)
+        settings = self.state.get('scheduler_settings')
+        try:
+            max_running = scheduler.validate_max_running(settings.get('max_running'))
+        except (AttributeError, ValueError):
+            max_running = scheduler.DEFAULT_MAX_RUNNING
+        self.spaces = SpacesHub(self, connector_factory or default_connector_factory(self))
+        extra = {}
+        if 'tool_catalog' in inspect.signature(scheduler.Scheduler).parameters:
+            extra['tool_catalog'] = self.tool_catalog  # RunContext.tools() (2A); older schedulers take none.
+        self.scheduler = scheduler.Scheduler(**extra,
+            max_running=max_running, runtime_factory=runtime_factory or self.default_runtime_factory(), policy=self.scope,
+            audit=self.audit, events=self.events, budget_gate=scheduler.BudgetGate(self.store), locks=self.locks,
+            clock=time.time, tasks=self.store, workspaces=scheduler.Workspaces(self.storage/'workspaces'),
+            app_tools=self.agent_tool, legacy_active=lambda: bool(self.state['active']),
+            interrupt_grace_s=interrupt_grace_s, decide_options={'app_data':str(self.storage)})
+
+    def default_runtime_factory(self):
+        """2A's `runtime.make_factory(app)` -> `runtime_factory(task_id)`; `no_runtime` while it is absent or broken.
+
+        The factory reads the task's `provider` (codex or claude) and `model` from `app.store.task(task_id)`.
+        """
+        module = optional_module('runtime')
+        make = getattr(module, 'make_factory', None)
+        if not callable(make):
+            return self.no_runtime
+        try:
+            factory = make(self)
+        except Exception:
+            return self.no_runtime  # Agent turns then fail closed with runtime_unavailable; the app still opens.
+        return factory if callable(factory) else self.no_runtime
+
+    @staticmethod
+    def no_runtime(task_id):
+        raise ValueError('The agent runtime is not in this build yet.')
+
+    def tool_catalog(self, name):
+        """Connector tool descriptors for one app (`spaces.base.tools`), for RunContext.tools().
+
+        Only a signed-in app lists tools; an unknown, signed-out or failing app gives an empty list.
+        """
+        base = optional_module('spaces.base')
+        if base is None or name not in SPACES_APPS:
+            return []
+        try:
+            connector = self.spaces.connector(name)
+            if (connector.status() or {}).get('state') != 'signed_in':
+                return []
+            return list(base.tools(connector))
+        except Exception:
+            return []
+
+    def agent_tool(self, name):
+        """Connector tool descriptor and connector for `RunContext.app_tool` (spaces.base.tools, 1A)."""
+        base = optional_module('spaces.base')
+        if base is None or not isinstance(name, str):
+            return None
+        for app_name in SPACES_APPS:
+            if name.startswith(app_name + '_'):
+                try:
+                    connector = self.spaces.connector(app_name)
+                except ValueError:
+                    return None
+                descriptor = next((d for d in base.tools(connector) if d.get('name') == name), None)
+                return (descriptor, connector) if descriptor else None
+        return None
+
+    def publish_soon(self):
+        """Coarse state updates for agent tasks, at most 4 per second; the last change is always published."""
+        if getattr(self, 'scheduler', None) is None:
+            return  # Startup recovery: the first state is sent when the UI asks for it.
+        with self._publish_guard:
+            wait = self._last_publish + STATE_PUBLISH_INTERVAL_S - time.monotonic()
+            if wait > 0:
+                if self._publish_timer is None:
+                    self._publish_timer = threading.Timer(wait, self._timed_publish)
+                    self._publish_timer.daemon = True
+                    self._publish_timer.start()
+                return
+            self._last_publish = time.monotonic()
+        self.emit({'type':'state','state':self.public()})
+
+    def _timed_publish(self):
+        with self._publish_guard:
+            self._publish_timer = None
+            self._last_publish = time.monotonic()
+        self.emit({'type':'state','state':self.public()})
 
     def recover_change(self, run, record):
         # Inspection only: recovery never launches checks/providers or resumes a source write.
@@ -172,10 +737,13 @@ class Application:
                 if task['run_ids']:status=self.run_summary(project,task['run_ids'][-1])['stage']
                 if task['pending']:status='plan_ready'
                 if task.get('error'):status=task.get('error_status') or 'failed'
+                if task.get('mode')=='agent':status=task['agent'].get('state') or 'draft'
                 if self.state['active_project_id']==project['id'] and self.state.get('active_task_id')==identity and self.state['active']:
                     status='active'
-                result.append(dict(id=identity,title=task['title'],specialist_limit=task['specialist_limit'],
-                                   mode=task.get('mode','review'),status=status,run_count=len(task['run_ids']),has_pending_plan=bool(task['pending'])))
+                row=dict(id=identity,title=task['title'],specialist_limit=task['specialist_limit'],
+                         mode=task.get('mode','review'),status=status,run_count=len(task['run_ids']),has_pending_plan=bool(task['pending']))
+                if row['mode']=='agent':row.update(provider=tasks.provider(task),model=task.get('model'))
+                result.append(row)
             except ValueError:
                 result.append(dict(id=identity,title='Unavailable saved task',specialist_limit=None,
                                    status='unavailable',run_count=0,has_pending_plan=False))
@@ -194,7 +762,8 @@ class Application:
             data.update(active_task_id=self.state.get('active_task_id'),error_task_id=self.state.get('error_task_id'),
                         task_id=project.get('selected_task_id') if project and isinstance(project.get('selected_task_id'),str) else None,
                         task=dict({k:task[k] for k in ('id','title','specialist_limit')},draft=task.get('draft',''),mode=task.get('mode','review'),
-                                  token_budget=task.get('token_budget'),tokens=self.token_summary(task)) if task else None,
+                                  token_budget=task.get('token_budget'),tokens=self.token_summary(task),
+                                  agent=self.agent_summary(task)) if task else None,
                         tasks=self.task_summaries(project) if project else [],
                         project_id=project['id'] if project else None,project=project['name'] if project else None,
                         projects=self.summaries(),pending=copy.deepcopy(owner['pending']) if owner else None,
@@ -202,6 +771,8 @@ class Application:
                                  'project':copy.deepcopy(project['thread']) if project else [],
                                  'task':copy.deepcopy(task['thread']) if task else []},
                         runs=[self.run_summary(project,r) for r in reversed(owner['run_ids'])] if owner else [],run=None)
+            data['scheduler']=self.scheduler.snapshot()
+            data['spaces']={'apps':copy.deepcopy(self.state.get('spaces',{}).get('apps',{}))}
             data['source_selection']=None
             data['plan_budget']=None
             data['source_error']=''
@@ -261,6 +832,18 @@ class Application:
                 public['action_refs']['apply_changes']=ref;public['can_apply_changes']=True
         except (ValueError,KeyError,TypeError) as error:public['change_error']=str(error)
 
+    def agent_summary(self, task):
+        """Agent run state and scope approval for the task view; the scope itself comes from scope_get."""
+        if task.get('mode')!='agent':return None
+        scope=task.get('scope') or {}
+        try:approved=self.scheduler.approved(task)
+        except (KeyError,TypeError,ValueError):approved=False
+        agent=task['agent']
+        return {'state':agent.get('state'),'detail':agent.get('detail',''),'reason':agent.get('reason'),
+                'provider':tasks.provider(task),'model':task.get('model'),
+                'scope_version':scope.get('version'),'scope_approved':approved,'project_id':agent['project_id'],
+                'last_seq':self.events.last_seq(task['id'])}
+
     def token_summary(self, task):
         totals=budget.ledger(self.state,task['id'],task.get('token_budget'))
         return {k:v for k,v in totals.items() if k!='entries'}
@@ -289,6 +872,10 @@ class Application:
     def handle(self, method, params):
         if not isinstance(params, dict):
             raise ValueError('request params must be an object')
+        if method in AGENT_METHODS:
+            return self.handle_agent(method, params)
+        if isinstance(method, str) and method.startswith('spaces_'):
+            return self.spaces.handle(method, params)
         with self.lock:
             if method == 'state':
                 return self.public()
@@ -344,12 +931,14 @@ class Application:
                 raise ValueError('Unknown method')
             if self.state['active']:
                 raise ValueError('An interaction is active. Stop it before starting another.')
+            self.refuse_agent_owner(method, params)
             if method in ('create_task','update_task'):
                 project=projects.selected(self.state,params)
                 if method=='create_task':
                     if not isinstance(project.get('tasks',{}),dict):raise ValueError('Saved tasks are unavailable; preserve app data before recovery.')
                     token_budget=params.get('token_budget',budget.DEFAULT_BUDGET)
                     if token_budget is None:raise ValueError('New tasks need a token budget.')
+                    if params.get('mode')=='agent':raise ValueError('Create agent tasks with their scope (agent_create).')
                     task=tasks.create(params.get('title','New task'),params.get('specialist_limit',6),draft=params.get('draft',''),mode=params.get('mode','review'),token_budget=token_budget)
                     project.setdefault('tasks',{})[task['id']]=task
                     project['selected_task_id']=task['id']
@@ -540,7 +1129,144 @@ class Application:
             revisions.validate_reference(record,reference)
         return run,record
 
+    def refuse_agent_owner(self, method, params):
+        """Legacy plan, review and editing flows never run for an agent task: its approval is its scope."""
+        if method in ('add_project','select_project','sign_in'):return
+        project=self.state['projects'].get(self.state['selected_project_id'])
+        task=None
+        if project:
+            try:task=tasks.selected(project)
+            except ValueError:return  # The legacy handler reports the unavailable task itself.
+        if task is None or task.get('mode')!='agent':return
+        if method=='update_task':
+            if any(key in params for key in ('token_budget','specialist_limit')):
+                raise ValueError('Change an agent task budget or limits in its scope.')
+            return
+        if method in ('chat','start_review','start_plan','revise_run','accept_report','start_change','approve_checks','apply_changes'):
+            raise ValueError('Agent tasks take messages through the task stream, not this action.')
+
+    def handle_agent(self, method, params):
+        if method=='scheduler_settings':
+            if 'max_running' in params:
+                value=self.scheduler.set_max_running(params['max_running'])
+                with self.lock:
+                    self.state['scheduler_settings']={'max_running':value}
+                    self.publish()
+            return {'max_running':self.scheduler.max_running}
+        if method=='agent_create':
+            return self.agent_create(params)
+        if method=='scope_default':
+            return self.scope_default(params)
+        task_id=params.get('task_id')
+        with self.lock:
+            task=self.store.task(task_id)
+            if task.get('mode')!='agent':raise ValueError('This is not an agent task.')
+            project_id=task['agent']['project_id']
+        if method=='agent_message':
+            result=self.scheduler.submit(task_id,project_id,params.get('text'),params.get('client_id'))
+            return {'state':result['state'],'position':result['position']}
+        if method=='agent_answer':
+            return self.scheduler.answer(task_id,params.get('ask_id'),params.get('decision'),text=params.get('text'),
+                                         scope_digest=params.get('scope_digest'),request_digest=params.get('request_digest'))
+        if method=='agent_cancel':
+            return {'cancellation_requested':self.scheduler.cancel(task_id)}
+        if method=='task_events':
+            return self.events.read(task_id,params.get('after_seq'),params.get('limit',500))
+        if method=='task_blob':
+            return self.events.blob(task_id,params.get('blob_id'))
+        with self.lock:
+            if method=='scope_get':
+                return {'scope':copy.deepcopy(task['scope']),'scope_digest':self.scope.digest(task['scope']),
+                        'scope_approval':copy.deepcopy(task.get('scope_approval'))}
+            if method=='scope_update':
+                return self.scope_update(task,params)
+            if method=='scope_approve':
+                return self.scope_approve(task,params)
+        raise ValueError('Unknown method')
+
+    def audit_scope(self, task, before, after, before_digest, after_digest):
+        record={'v':1,'actor':'user','kind':'scope',
+                'task_id':task['id'],'project_id':task['agent']['project_id'],'turn_id':None,'call_id':None,'request':None,
+                'decision':None,'rule':None,'scope_version':after['version'],'scope_digest':after_digest,'outcome':None,
+                'idempotency_key':None,'detail':{'from_version':before['version'] if before else None,'to_version':after['version'],
+                                                 'from_digest':before_digest,'to_digest':after_digest}}
+        try:
+            self.audit.append(record)
+        except Exception:
+            raise ValueError('Could not record the scope change in the audit log, so nothing was changed.') from None
+
+    def scope_event(self, task, change, summary):
+        self.events.append(task['id'],task['agent']['project_id'],'scope',
+                           {'scope_version':task['scope']['version'],'scope_digest':self.scope.digest(task['scope']),
+                            'change':change,'by':'user','summary':summary})
+
+    def scope_default(self, params):
+        """The starting scope for the new agent task form; creates nothing (README coordinator ruling)."""
+        with self.lock:
+            project_id=params.get('project_id')
+            project=self.state['projects'].get(project_id) if isinstance(project_id,str) else None
+            if project is None:raise ValueError('Unknown project.')
+            try:limit=budget.validate(project.get('token_budget'))
+            except ValueError:limit=None  # A damaged saved project budget falls back to the default.
+            builder=getattr(self.scope.module,'project_default',None) if self.scope.module is not None else None
+            if builder is None:raise ValueError('Agent tasks need the scope engine, which is not in this build yet.')
+            return {'scope':builder(project_id,token_budget=limit,project_ids=list(self.state['projects']))}
+
+    def agent_create(self, params):
+        with self.lock:
+            project_id=params.get('project_id')
+            project=self.state['projects'].get(project_id) if isinstance(project_id,str) else None
+            if project is None:raise ValueError('Unknown project.')
+            if not isinstance(project.get('tasks',{}),dict):raise ValueError('Saved tasks are unavailable; preserve app data before recovery.')
+            runtime=tasks.validate_provider(params.get('provider',tasks.DEFAULT_PROVIDER))
+            task=tasks.create(params.get('title','New agent task'),mode='agent',project_id=project_id,
+                              provider=runtime,model=tasks.validate_model(params.get('model')))
+            proposed=params.get('scope')
+            document=self.scope.default(task,[project_id]) if proposed is None else copy.deepcopy(proposed)
+            if not isinstance(document,dict):raise ValueError('Scope must be an object.')
+            document.update(v=1,task_id=task['id'],version=1)
+            self.scope.validate(document,project_ids=list(self.state['projects']))
+            task.update(scope=document,token_budget=budget.validate(document['limits']['token_budget']))
+            digest=self.scope.digest(document)
+            self.audit_scope(task,None,document,None,digest)
+            project.setdefault('tasks',{})[task['id']]=task
+            project['selected_task_id']=task['id']
+            self.scope_event(task,'edited','Scope drafted; approve it to start.')
+            self.publish()
+            return {'task_id':task['id'],'scope_digest':digest}
+
+    def scope_update(self, task, params):
+        current=task['scope']
+        if type(params.get('base_version')) is not int or params['base_version']!=current['version']:
+            raise ValueError('The scope changed since you opened it. Reload it and edit again.')
+        if not isinstance(params.get('scope'),dict):raise ValueError('Scope must be an object.')
+        document=copy.deepcopy(params['scope'])
+        document.update(v=1,task_id=task['id'],version=current['version']+1)
+        self.scope.validate(document,project_ids=list(self.state['projects']))
+        limit=budget.validate(document['limits']['token_budget'])
+        digest=self.scope.digest(document)
+        self.audit_scope(task,current,document,self.scope.digest(current),digest)
+        task.update(scope=document,scope_approval=None,token_budget=limit)
+        self.scope_event(task,'edited','Scope edited; approve it before the task continues.')
+        self.scheduler.scope_changed(task['id'])
+        self.publish()
+        return {'scope':copy.deepcopy(document),'scope_digest':digest}
+
+    def scope_approve(self, task, params):
+        current=task['scope'];digest=self.scope.digest(current)
+        if params.get('scope_version')!=current['version'] or params.get('scope_digest')!=digest:
+            raise ValueError('The scope changed since it was shown. Review it again before approving.')
+        self.audit_scope(task,current,current,digest,digest)
+        task['scope_approval']={'v':1,'scope_version':current['version'],'scope_digest':digest,
+                                'approved_at':scheduler.iso_time(time.time()),'by':'user'}
+        self.scope_event(task,'approved','Scope approved.')
+        self.scheduler.scope_changed(task['id'])
+        self.publish()
+        return {'scope_approval':copy.deepcopy(task['scope_approval'])}
+
     def launch(self, stage, action, project_id=None, task_id=None):
+        if not self.scheduler.legacy_slot_free():
+            raise ValueError('All run slots are busy with agent tasks. Wait for one to finish or stop one, then try again.')
         self.cancel.clear()
         self.current_run = None
         project=self.state['projects'].get(project_id)
@@ -580,6 +1306,7 @@ class Application:
                 with self.lock:
                     self.state.update(active=None,active_project_id=None,active_run_id=None,active_task_id=None)
                     self.publish()
+                self.scheduler.pump()  # The legacy slot is free for a queued agent task.
         self.worker = threading.Thread(target=execute,daemon=True)
         self.worker.start()
 
@@ -825,23 +1552,17 @@ def main():
     except BlockingIOError:
         emit({'type':'fatal','error':'Interspace is already running with this workspace. Return to its existing window.'})
         return
+    router = None
     try:
         app = Application(args.data_root,emit=emit)
-        for line in sys.stdin:
-            try:
-                request = json.loads(line)
-                if not isinstance(request,dict):
-                    raise ValueError('Request must be an object')
-                result = app.handle(request.get('method'),request.get('params',{}))
-                emit({'id':request.get('id'),'result':result})
-            except Exception as error:
-                emit({'id':request.get('id') if isinstance(locals().get('request'),dict) else None,
-                      'error':str(error) if isinstance(error,(ValueError,ProviderError)) else 'Request failed. Check repository and provider access.'})
-            if output_closed.is_set():
-                break
+        router = Router(app,emit)
+        router.serve(sys.stdin,output_closed)
     finally:
+        if router:
+            router.close()
         if app:
             app.cancel.set()
+            app.scheduler.shutdown()
             app.wait()
         instance_lock.close()
 

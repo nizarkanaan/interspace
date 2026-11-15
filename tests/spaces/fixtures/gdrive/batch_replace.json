@@ -1,0 +1,13 @@
+{
+ "documentId": "docDraft000000001",
+ "replies": [
+  {
+   "replaceAllText": {
+    "occurrencesChanged": 2
+   }
+  }
+ ],
+ "writeControl": {
+  "requiredRevisionId": "ALm37BV-example2"
+ }
+}

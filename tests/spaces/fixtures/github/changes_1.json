@@ -1,0 +1,48 @@
+[
+ {
+  "body": "Invented body.",
+  "closed_at": null,
+  "comments": 0,
+  "created_at": "2026-11-01T09:00:00Z",
+  "html_url": "https://github.com/octo/notes/issues/41",
+  "id": 900041,
+  "labels": [],
+  "number": 41,
+  "repository_url": "https://api.github.com/repos/octo/notes",
+  "state": "open",
+  "title": "Track reading list",
+  "updated_at": "2026-11-11T10:05:00Z",
+  "url": "https://api.github.com/repos/octo/notes/issues/41",
+  "user": {
+   "html_url": "https://github.com/octocat",
+   "id": 583231,
+   "login": "octocat",
+   "type": "User"
+  }
+ },
+ {
+  "body": "Invented body.",
+  "closed_at": null,
+  "comments": 0,
+  "created_at": "2026-11-11T10:03:00Z",
+  "html_url": "https://github.com/octo-lab/papers/pull/3",
+  "id": 900003,
+  "labels": [],
+  "number": 3,
+  "pull_request": {
+   "html_url": "https://github.com/octo-lab/papers/pull/3",
+   "url": "https://api.github.com/repos/octo-lab/papers/pulls/3"
+  },
+  "repository_url": "https://api.github.com/repos/octo-lab/papers",
+  "state": "open",
+  "title": "Fresh idea",
+  "updated_at": "2026-11-11T10:03:00Z",
+  "url": "https://api.github.com/repos/octo-lab/papers/issues/3",
+  "user": {
+   "html_url": "https://github.com/octocat",
+   "id": 583231,
+   "login": "octocat",
+   "type": "User"
+  }
+ }
+]

@@ -1,0 +1,105 @@
+{
+ "object": "list",
+ "results": [
+  {
+   "object": "page",
+   "id": "11111111-2222-4333-8444-000000000002",
+   "created_time": "2026-11-01T08:00:00.000Z",
+   "last_edited_time": "2026-11-09T10:00:00.000Z",
+   "created_by": {
+    "object": "user",
+    "id": "11111111-2222-4333-8444-000000000902"
+   },
+   "last_edited_by": {
+    "object": "user",
+    "id": "11111111-2222-4333-8444-000000000902"
+   },
+   "cover": null,
+   "icon": null,
+   "parent": {
+    "type": "workspace",
+    "workspace": true
+   },
+   "in_trash": false,
+   "properties": {
+    "title": {
+     "id": "title",
+     "type": "title",
+     "title": [
+      {
+       "type": "text",
+       "text": {
+        "content": "Projects",
+        "link": null
+       },
+       "plain_text": "Projects",
+       "href": null,
+       "annotations": {
+        "bold": false,
+        "italic": false,
+        "strikethrough": false,
+        "underline": false,
+        "code": false,
+        "color": "default"
+       }
+      }
+     ]
+    }
+   },
+   "url": "https://www.notion.so/Example-11111111222243338444000000000002",
+   "public_url": null
+  },
+  {
+   "object": "page",
+   "id": "11111111-2222-4333-8444-000000000003",
+   "created_time": "2026-11-01T08:00:00.000Z",
+   "last_edited_time": "2026-11-08T07:00:00.000Z",
+   "created_by": {
+    "object": "user",
+    "id": "11111111-2222-4333-8444-000000000902"
+   },
+   "last_edited_by": {
+    "object": "user",
+    "id": "11111111-2222-4333-8444-000000000902"
+   },
+   "cover": null,
+   "icon": null,
+   "parent": {
+    "type": "page_id",
+    "page_id": "11111111-2222-4333-8444-000000000001"
+   },
+   "in_trash": false,
+   "properties": {
+    "title": {
+     "id": "title",
+     "type": "title",
+     "title": [
+      {
+       "type": "text",
+       "text": {
+        "content": "Week 45",
+        "link": null
+       },
+       "plain_text": "Week 45",
+       "href": null,
+       "annotations": {
+        "bold": false,
+        "italic": false,
+        "strikethrough": false,
+        "underline": false,
+        "code": false,
+        "color": "default"
+       }
+      }
+     ]
+    }
+   },
+   "url": "https://www.notion.so/Example-11111111222243338444000000000003",
+   "public_url": null
+  }
+ ],
+ "next_cursor": null,
+ "has_more": false,
+ "type": "page_or_data_source",
+ "page_or_data_source": {}
+}

@@ -29,6 +29,17 @@ class BudgetPolicyTests(unittest.TestCase):
         self.assertIsNone(budget.charge({}))
         self.assertIsNone(budget.charge({'input_tokens': 10}))
 
+    def test_claude_charge_counts_all_four_disjoint_fields(self):
+        # Anthropic's input excludes cache writes and reads, so all four counts are added.
+        usage = {'input_tokens': 120, 'cache_creation_input_tokens': 3000, 'cache_read_input_tokens': 9000,
+                 'output_tokens': 450}
+        self.assertEqual(budget.charge(usage, 'claude'), 12570)
+        self.assertIsNone(budget.charge({'input_tokens': 120, 'output_tokens': 450}, 'claude'))
+        self.assertIsNone(budget.charge(dict(usage, output_tokens=-1), 'claude'))
+        self.assertIsNone(budget.charge(dict(usage, cache_read_input_tokens=True), 'claude'))
+        # The Codex rule is unchanged by the Claude one.
+        self.assertEqual(budget.charge({'input_tokens': 10, 'output_tokens': 5}), 15)
+
     def test_estimate_over_estimates_and_grows_with_prompt(self):
         small, large = budget.estimate('x' * 300, 'Reviewer'), budget.estimate('x' * 30000, 'Reviewer')
         self.assertGreater(large, small)

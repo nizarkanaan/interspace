@@ -1,0 +1,13 @@
+{
+ "kind": "drive#file",
+ "id": "docDraft000000001",
+ "name": "Draft chapter",
+ "mimeType": "application/vnd.google-apps.document",
+ "parents": [
+  "0AExampleRootFolder00"
+ ],
+ "modifiedTime": "2026-11-10T18:02:11.123Z",
+ "version": "17",
+ "trashed": false,
+ "webViewLink": "https://docs.google.com/document/d/docDraft000000001/edit"
+}
