@@ -24,6 +24,9 @@ AGENT_METHODS = ('agent_create', 'agent_message', 'agent_answer', 'agent_cancel'
                  'scope_get', 'scope_update', 'scope_approve', 'scope_default', 'scheduler_settings')
 APP_METHODS = ('state', 'connection', 'cancel', 'sign_in', 'switch_project', 'select_task', 'add_project',
                'select_project', 'update_project')
+# Wave 1 streams register backend methods here instead of editing this file. Each module may define
+# METHODS = {'method_name': handler(app, params)}; handlers run on the agent pool and must return JSON-safe data.
+EXTENSIONS = ('providers_api', 'orchestrator', 'worktree_merge')
 STATE_PUBLISH_INTERVAL_S = 0.25  # At most 4 coarse state updates per second (scheduler.md).
 
 
@@ -33,6 +36,23 @@ def optional_module(name):
         return importlib.import_module(name)
     except ImportError:
         return None
+
+
+def extension_methods(names=None):
+    """Backend methods from the extension modules that exist. A module that fails for any other reason fails startup."""
+    table = {}
+    for name in EXTENSIONS if names is None else names:
+        try:
+            module = importlib.import_module(name)
+        except ModuleNotFoundError as error:
+            if error.name == name:
+                continue
+            raise
+        for method, handler in getattr(module, 'METHODS', {}).items():
+            if method in table or method in AGENT_METHODS or method in APP_METHODS:
+                raise RuntimeError('Duplicate backend method: ' + method)
+            table[method] = handler
+    return table
 
 
 class ScopeAdapter:
@@ -154,7 +174,7 @@ class Router:
             message = None
         if isinstance(message, dict):
             method = message.get('method')
-            if method in AGENT_METHODS:
+            if method in AGENT_METHODS or method in getattr(self.app, 'extensions', {}):
                 self.agents.submit(self._answer, message)
                 return 'agent'
         self.legacy.put(line)
@@ -190,6 +210,7 @@ class Application:
         self.storage = Path(storage).resolve()
         self.storage.mkdir(parents=True, exist_ok=True)
         self.provider = provider or CodexAuth()
+        self.extensions = extension_methods()
         self.emit = emit or (lambda message: None)
         self.lock = threading.RLock()
         self._publish_guard = threading.Lock()
@@ -351,6 +372,8 @@ class Application:
             raise ValueError('request params must be an object')
         if method in AGENT_METHODS:
             return self.handle_agent(method, params)
+        if method in self.extensions:
+            return self.extensions[method](self, params)
         if method not in APP_METHODS:
             raise ValueError('Unknown method')
         with self.lock:

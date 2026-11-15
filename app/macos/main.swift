@@ -7,6 +7,9 @@ let allowedMethods: Set<String> = [
     // Agentic tasks (scheduler.md, events.md, scope.md)
     "agent_create", "agent_message", "agent_answer", "agent_cancel", "task_events", "task_blob",
     "scope_get", "scope_update", "scope_approve", "scope_default", "scheduler_settings",
+    // Multi-provider extensions (docs/superpowers/specs/multi-provider): providers, teams, review and merge
+    "providers_list", "provider_sign_in", "provider_status", "routing_update", "team_answer",
+    "review_summary", "review_merge", "review_branches",
 ]
 
 final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNavigationDelegate, NSWindowDelegate {
