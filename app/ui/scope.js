@@ -1,7 +1,6 @@
 /* Task scope chips and editor (docs/superpowers/specs/agentic-spaces/scope.md).
    The UI edits a copy of the displayed document; the backend versions it and computes every digest. */
 (()=>{
-const APPS={notion:'Notion',github:'GitHub',gdrive:'Google Drive',zotero:'Zotero'};
 const MAX_LIST=64,MAX_PATTERN=256;
 const el=(tag,cls,text,parent)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=String(text);if(parent)parent.append(e);return e;};
 const tokens=n=>Number(n||0).toLocaleString('en-US');
@@ -16,7 +15,6 @@ function chips(list,info,projectName){
  for(const p of s.projects||[]){el('li','chip',projectName(p.project_id)+': '+p.access+' '+(p.access==='write'?(p.write||[]):(p.read||[])).join(', '),list);if(p.deny?.length)el('li','chip','Never: '+p.deny.join(', '),list);}
  if(s.commands)el('li','chip','Commands: '+s.commands.workspace+' in workspace'+(s.commands.allow?.length?' · '+s.commands.allow.length+' allowed':'')+(s.commands.deny?.length?' · '+s.commands.deny.length+' blocked':''),list);
  if(s.network)el('li','chip',networkLabel(s.network)+(s.network.allow_hosts?.length?' · '+s.network.allow_hosts.join(', '):''),list);
- for(const a of s.apps||[])el('li','chip',(APPS[a.app]||a.app)+': '+a.access+' '+(a.resources==='all'?'all resources':a.resources.length+' resource'+(a.resources.length===1?'':'s')),list);
  el('li','chip','Web search: '+s.web_search,list);
  if(s.limits){el('li','chip',tokens(s.limits.token_budget)+' tokens',list);el('li','chip',Math.round(s.limits.time_limit_s/60)+' min',list);}
 }
@@ -46,15 +44,6 @@ function editor(host,info,{projectName,onSave,onClose,saving,heading='Edit scope
  const cmd={workspace:select(cfs,'Commands in the workspace',uid+'-cmd',[['allow','Allow'],['ask','Ask'],['deny','Deny']],s.commands?.workspace||'ask'),allow:area(cfs,'Always allowed commands',uid+'-cmd-allow',(s.commands?.allow||[]).map(a=>a.join(' ')),'One command prefix per line, for example git status'),deny:area(cfs,'Never allowed commands',uid+'-cmd-deny',(s.commands?.deny||[]).map(a=>a.join(' ')))};
  const nfs=el('fieldset','',null,form);el('legend','','Network for commands',nfs);
  const net={default:select(nfs,'Command network',uid+'-net',[['ask','Ask per host'],['deny','Off']],s.network?.default||'ask'),allow:area(nfs,'Allowed hosts',uid+'-net-allow',s.network?.allow_hosts||[]),deny:area(nfs,'Blocked hosts',uid+'-net-deny',s.network?.deny_hosts||[])};
- const apps=(s.apps||[]).map((a,i)=>{const fs=el('fieldset','',null,form);el('legend','',APPS[a.app]||a.app,fs);const id=uid+'-a'+i;
-  const access=select(fs,'Access',id+'-access',[['read','Read only'],['write','Read and write']],a.access);
-  const all=document.createElement('input');all.type='checkbox';all.checked=a.resources==='all';const allLabel=el('label','check',null,fs);allLabel.append(all,' All resources this account reaches');
-  const list=el('ul','resource-list',null,fs);const rows=a.resources==='all'?[]:a.resources.map(r=>({...r}));
-  const draw=()=>{list.replaceChildren();list.hidden=all.checked;rows.forEach((r,j)=>{const li=el('li','',null,list);el('span','mono',r.ref,li);const c=document.createElement('input');c.type='checkbox';c.checked=!!r.include_children;c.onchange=()=>{r.include_children=c.checked;};const cl=el('label','check',null,li);cl.append(c,' Include children');const b=el('button','quiet','Remove',li);b.type='button';b.setAttribute('aria-label','Remove '+r.ref);b.onclick=()=>{rows.splice(j,1);draw();};});};
-  all.onchange=draw;draw();
-  const add=document.createElement('input');add.placeholder=a.app+':page:…';field(fs,'Add a resource reference',add,id+'-add');
-  const addButton=el('button','','Add resource',fs);addButton.type='button';addButton.onclick=()=>{const ref=add.value.trim();if(ref&&!rows.some(r=>r.ref===ref)){rows.push({ref,include_children:false});add.value='';draw();}};
-  return {a,access,all,rows};});
  const gfs=el('fieldset','',null,form);el('legend','','Search and limits',gfs);
  const web=select(gfs,'Web search',uid+'-web',[['allow','Allow'],['ask','Ask'],['deny','Deny']],s.web_search||'ask');
  const budget=number(gfs,'Token budget',uid+'-budget',s.limits?.token_budget??250000,1);
@@ -68,7 +57,6 @@ function editor(host,info,{projectName,onSave,onClose,saving,heading='Edit scope
    globErrors(p.read,'Read paths',errors);globErrors(p.write,'Write paths',errors);globErrors(p.deny,'Never paths',errors);}
   if(s.commands){s.commands.workspace=cmd.workspace.value;s.commands.allow=argvList(cmd.allow.value,'Always allowed commands',errors);s.commands.deny=argvList(cmd.deny.value,'Never allowed commands',errors);}
   if(s.network){s.network.default=net.default.value;s.network.allow_hosts=lines(net.allow.value);s.network.deny_hosts=lines(net.deny.value);hostErrors(s.network.allow_hosts,'Allowed hosts',errors);hostErrors(s.network.deny_hosts,'Blocked hosts',errors);}
-  for(const x of apps){x.a.access=x.access.value;x.a.resources=x.all.checked?'all':x.rows.map(r=>({ref:r.ref,include_children:!!r.include_children}));if(x.a.resources!=='all'&&!x.a.resources.length)errors.push((APPS[x.a.app]||x.a.app)+': choose at least one resource or All resources.');}
   s.web_search=web.value;
   const b=Number(budget.value),t=Number(minutes.value);
   if(!Number.isSafeInteger(b)||b<1)errors.push('Token budget must be a positive whole number.');

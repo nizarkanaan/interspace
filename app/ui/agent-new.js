@@ -56,7 +56,7 @@ function render(nextState){
  $('propose-task').disabled=loading||!(state.projects||[]).length;
  $('new-sources').hidden=!formError;$('new-sources').textContent=formError;
  if(!s){editor.replaceChildren();delete editor.dataset.step;$('new-agent-error').textContent='';return;}
- $('new-agent-scope-note').textContent='“'+s.title+'” · '+projectName(s.project_id)+' · '+RUNTIMES[s.provider]+(s.model?' · '+s.model:'')+'. This is the starting scope: the project workspace only, no apps, no network. Change it here; after Create task, approve it on the task before the first message.';
+ $('new-agent-scope-note').textContent='“'+s.title+'” · '+projectName(s.project_id)+' · '+RUNTIMES[s.provider]+(s.model?' · '+s.model:'')+'. This is the starting scope: the project workspace only, no network. Change it here; after Create task, approve it on the task before the first message.';
  $('new-agent-error').textContent=s.error;
  if(editor.dataset.step!==String(s.id)){editor.dataset.step=String(s.id);Scope.editor(editor,{scope:s.scope},{projectName,heading:'Review scope',note:'Nothing is created until you choose Create task.',submitLabel:'Create task',closeLabel:'Back',saving:s.saving,onSave:create,onClose:back});}
  const submit=editor.querySelector('button[type=submit]');if(submit)submit.disabled=s.saving;

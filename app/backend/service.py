@@ -3,7 +3,6 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor
 import copy
 import importlib
-import inspect
 import json
 import os
 from pathlib import Path
@@ -12,7 +11,6 @@ import sys
 import subprocess
 import threading
 import time
-from urllib.parse import urlsplit
 import uuid
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -42,122 +40,17 @@ RESULT_SCHEMA = {'type':'object','additionalProperties':False,'properties':{
     'summary':{'type':'string'},'proposal':{'type':'string'},'findings':{'type':'array','items':{'type':'object','additionalProperties':False,'properties':{'claim':{'type':'string'},'evidence':{'type':'array','items':CITATION}},'required':['claim','evidence']}}},'required':['summary','proposal','findings']}
 
 
-SPACES_APPS = ('notion', 'github', 'gdrive', 'zotero')
 AGENT_METHODS = ('agent_create', 'agent_message', 'agent_answer', 'agent_cancel', 'task_events', 'task_blob',
                  'scope_get', 'scope_update', 'scope_approve', 'scope_default', 'scheduler_settings')
-KEYCHAIN_TIMEOUT_S = 10  # PROVISIONAL(0C-1)
 STATE_PUBLISH_INTERVAL_S = 0.25  # At most 4 coarse state updates per second (scheduler.md).
 
 
 def optional_module(name):
-    """A Wave 1 module another stream owns (scope, audit, spaces), or None until it is merged."""
+    """An optional backend module (scope, audit, runtime), or None when it cannot be imported."""
     try:
         return importlib.import_module(name)
     except ImportError:
         return None
-
-
-try:
-    from spaces.base import CredentialStoreUnavailable
-except ImportError:  # 1A defines the real class in spaces/base.py; same name, code and base class.
-    class CredentialStoreUnavailable(ValueError):
-        code = 'credential_store_unavailable'
-
-
-class KeychainBridge:
-    """The backend side of the Swift Keychain bridge (connectors.md).
-
-    Nothing is ever sent before Swift's `bridge_hello`, so a shell without the bridge never receives a
-    `keychain` line it might forward to the WebView. Replies arrive on the stdin reader thread.
-    """
-
-    def __init__(self, emit, timeout_s=KEYCHAIN_TIMEOUT_S):
-        self.emit = emit
-        self.timeout_s = timeout_s
-        self.capabilities = {}
-        self._pending = {}
-        self._guard = threading.Lock()
-
-    def hello(self, value):
-        if isinstance(value, dict):
-            self.capabilities = {name: True for name in ('keychain', 'open_url') if value.get(name) == 1}
-
-    def reply(self, message):
-        with self._guard:
-            waiter = self._pending.get(message.get('keychain_reply'))
-        if waiter is None:
-            return False  # A reply with an unknown id is dropped.
-        waiter['reply'] = message
-        waiter['event'].set()
-        return True
-
-    def keychain(self, op, account, secret=None):
-        if not self.capabilities.get('keychain'):
-            raise CredentialStoreUnavailable('The macOS Keychain is not available to this app version. Update Interspace.')
-        if op not in ('read', 'write', 'delete') or account not in SPACES_APPS:
-            raise ValueError('Invalid Keychain request.')
-        identity = 'kc-' + uuid.uuid4().hex
-        waiter = {'event': threading.Event(), 'reply': None}
-        message = {'type': 'keychain', 'id': identity, 'op': op, 'account': account}
-        if op == 'write':
-            if not isinstance(secret, str):
-                raise ValueError('Invalid Keychain request.')
-            message['secret'] = secret
-        with self._guard:
-            self._pending[identity] = waiter
-        try:
-            self.emit(message)
-            if not waiter['event'].wait(self.timeout_s):
-                raise CredentialStoreUnavailable('The macOS Keychain did not answer. Try again.')
-        finally:
-            with self._guard:
-                self._pending.pop(identity, None)
-        return waiter['reply']
-
-    def open_url(self, url):
-        parts = urlsplit(url) if isinstance(url, str) else None
-        if parts is None or parts.scheme != 'https' or not parts.hostname:
-            raise ValueError('Only secure web addresses can be opened.')
-        if not self.capabilities.get('open_url'):
-            raise ValueError('This app version cannot open the browser for sign-in. Update Interspace.')
-        self.emit({'type': 'open_url', 'url': url})
-
-
-class BridgeCredentials:
-    """`Credentials` for one app over the Keychain bridge. The secret is a JSON object only its connector reads."""
-
-    def __init__(self, bridge, app):
-        self.bridge = bridge
-        self.app = app
-
-    def _check(self, reply, allow_missing=False):
-        if reply.get('ok') is True:
-            return True
-        if allow_missing and reply.get('error') == 'not_found':
-            return False
-        if reply.get('error') == 'denied':
-            raise CredentialStoreUnavailable('Keychain access was refused. Allow Interspace in the Keychain prompt and try again.')
-        raise CredentialStoreUnavailable('The macOS Keychain is unavailable. Try again.')
-
-    def get(self):
-        reply = self.bridge.keychain('read', self.app)
-        if not self._check(reply, allow_missing=True):
-            return None
-        try:
-            secret = json.loads(reply.get('secret'))
-        except (TypeError, ValueError):
-            secret = None
-        if not isinstance(secret, dict):
-            raise CredentialStoreUnavailable('The saved sign-in is unreadable. Sign in again.')
-        return secret
-
-    def set(self, secret):
-        if not isinstance(secret, dict):
-            raise ValueError('Invalid credentials.')
-        self._check(self.bridge.keychain('write', self.app, json.dumps(secret, separators=(',', ':'))))
-
-    def delete(self):
-        self._check(self.bridge.keychain('delete', self.app), allow_missing=True)
 
 
 class ScopeAdapter:
@@ -244,178 +137,6 @@ class AgentStore:
         self.app.publish_soon()
 
 
-class SpacesHub:
-    """Spaces UI requests (connectors.md). Runs on the Spaces pool; holds no lock across a connector call."""
-
-    def __init__(self, app, connector_factory):
-        self.app = app
-        self.factory = connector_factory
-        self._connectors = {}
-        self._sign_ins = {}
-        self._guard = threading.Lock()
-
-    def connector(self, name):
-        if name not in SPACES_APPS:
-            raise ValueError('Unknown app.')
-        with self._guard:
-            if name not in self._connectors:
-                self._connectors[name] = self.factory(name)
-            return self._connectors[name]
-
-    def _remember(self, name, status):
-        with self.app.lock:
-            self.app.state.setdefault('spaces', {}).setdefault('apps', {})[name] = copy.deepcopy(status)
-            self.app.persist()
-        self.app.publish_soon()
-        return status
-
-    def _audit(self, kind, **fields):
-        record = {'v': 1, 'actor': 'user', 'kind': kind,
-                  'task_id': None, 'project_id': None, 'turn_id': None, 'call_id': None, 'request': None,
-                  'decision': None, 'rule': None, 'scope_version': None, 'scope_digest': None, 'outcome': None,
-                  'idempotency_key': None, 'detail': None}
-        record.update(fields)
-        self.app.audit.append(record)
-
-    def _auth_changed(self, name, status):
-        try:
-            self._audit('auth', detail={'app': name, 'state': status.get('state')})
-        except Exception:
-            pass  # A sign-in already happened in the app; the status is still reported honestly.
-        self.app.emit({'type': 'spaces_auth', 'app': name, 'status': status})
-        return self._remember(name, status)
-
-    def status(self, name):
-        try:
-            return self.connector(name).status()
-        except ValueError as error:
-            return {'v': 1, 'app': name, 'state': 'unavailable', 'account': None, 'granted': [],
-                    'detail': str(error), 'checked_at': scheduler.iso_time(time.time())}
-
-    def handle(self, method, params):
-        if method == 'spaces_status':
-            return {'apps': [self._remember(name, self.status(name)) for name in SPACES_APPS]}
-        if method == 'spaces_changes':
-            return self.changes()
-        name = params.get('app')
-        connector = self.connector(name)
-        if method == 'spaces_sign_in':
-            return self.sign_in(name, connector)
-        if method == 'spaces_complete_sign_in':
-            extra = set(params) - {'app', 'token', 'write_key'}
-            if extra:
-                raise ValueError('Unexpected sign-in fields.')
-            cancel = threading.Event()
-            with self._guard:
-                self._sign_ins[name] = cancel
-            status = connector.complete_sign_in({k: params[k] for k in ('token', 'write_key') if k in params}, cancel)
-            return self._auth_changed(name, status)
-        if method == 'spaces_cancel_sign_in':
-            with self._guard:
-                cancel = self._sign_ins.pop(name, None)
-            if cancel is not None:
-                cancel.set()
-            return {'cancelled': True}
-        if method == 'spaces_sign_out':
-            return self._auth_changed(name, connector.sign_out())
-        if method == 'spaces_browse':
-            return connector.browse(params.get('parent'), params.get('cursor'), params.get('limit', 50))
-        if method == 'spaces_search':
-            return connector.search(params.get('query'), params.get('kinds'), params.get('cursor'), params.get('limit', 25))
-        if method == 'spaces_read':
-            return connector.read(params.get('ref'), params.get('cursor'))
-        if method == 'spaces_actions':
-            return {'actions': connector.actions()}
-        if method == 'spaces_write':
-            return self.write(name, connector, params)
-        raise ValueError('Unknown method')
-
-    def sign_in(self, name, connector):
-        step = connector.begin_sign_in({})
-        if not isinstance(step, dict) or step.get('kind') not in ('device_code', 'browser', 'token_entry', 'local_check'):
-            raise ValueError('Sign-in could not start.')
-        if step['kind'] in ('device_code', 'browser'):
-            if step['kind'] == 'browser':
-                self.app.bridge.open_url(step.get('url'))
-            cancel = threading.Event()
-            with self._guard:
-                previous = self._sign_ins.get(name)
-                self._sign_ins[name] = cancel
-            if previous is not None:
-                previous.set()
-
-            def complete():
-                try:
-                    status = connector.complete_sign_in({}, cancel)
-                except Exception as error:
-                    status = self.status(name)
-                    status = dict(status, detail=str(error) if isinstance(error, ValueError) else 'Sign-in failed.')
-                with self._guard:
-                    if self._sign_ins.get(name) is cancel:
-                        del self._sign_ins[name]
-                self._auth_changed(name, status)
-            threading.Thread(target=complete, daemon=True, name='sign-in-' + name).start()
-        return step
-
-    def write(self, name, connector, params):
-        action, ref, values, key = (params.get(k) for k in ('action', 'ref', 'params', 'idempotency_key'))
-        if not isinstance(ref, str) or not isinstance(values, dict) or not isinstance(key, str):
-            raise ValueError('Invalid write request.')
-        request = {'category': 'app', 'app': name, 'action': action, 'ref': ref}
-        lock = 'app:' + ref
-        self.app.locks.acquire(lock, None, None)  # The same lock agents take, so edits never interleave.
-        try:
-            try:
-                result = connector.write(action, ref, values, key)
-                outcome = 'succeeded'
-            except Exception as error:
-                outcome = 'outcome_unknown' if getattr(error, 'code', None) == 'outcome_unknown' else 'failed'
-                raise
-            finally:
-                try:
-                    # One record with the outcome: a user_write record requires it (audit.py).
-                    self._audit('user_write', request=request, idempotency_key=key, outcome=outcome)
-                except Exception:
-                    pass  # The write already happened or failed; it is never re-sent to make the record.
-        finally:
-            self.app.locks.release(lock, None)
-        return result
-
-    def changes(self):
-        found = {}
-        for name in SPACES_APPS:
-            with self.app.lock:
-                status = self.app.state.get('spaces', {}).get('apps', {}).get(name) or {}
-                cursor = self.app.state.get('spaces', {}).get('cursors', {}).get(name)
-            if status.get('state') != 'signed_in':
-                continue
-            items, complete = [], False
-            while not complete:
-                batch = self.connector(name).changes(cursor)
-                items += batch.get('items', [])
-                cursor, complete = batch.get('cursor'), batch.get('complete', True) is not False
-            with self.app.lock:
-                self.app.state.setdefault('spaces', {}).setdefault('cursors', {})[name] = cursor
-                self.app.persist()
-            found[name] = items
-        return {'apps': found}
-
-
-def default_connector_factory(app):
-    """Real connectors once 1A (spaces) and 1E (audit.FileJournal) are merged; a clear refusal until then."""
-    def build(name):
-        spaces = optional_module('spaces')
-        base = optional_module('spaces.base')
-        audit = optional_module('audit')
-        if spaces is None or base is None or audit is None or not hasattr(audit, 'FileJournal'):
-            raise ValueError('Connected apps are not available in this build yet.')
-        with app.lock:
-            if app.journal is None:
-                app.journal = audit.FileJournal(app.storage / 'spaces' / 'writes.jsonl')
-        return spaces.connector(name, base.Http(), BridgeCredentials(app.bridge, name), app.journal)
-    return build
-
-
 def reply_for(line, app):
     """Answer one request line exactly as the original single-threaded stdin loop did."""
     request = None
@@ -430,42 +151,27 @@ def reply_for(line, app):
 
 
 class Router:
-    """The stdin side of the bridge (connectors.md, routing).
+    """The stdin side of the backend.
 
-    One reader thread reads every line. `keychain_reply` lines go to the waiting Keychain call and
-    `bridge_hello` (accepted only as the first line) sets the handshake; neither reaches request handling.
-    Legacy methods run on one dispatcher thread in arrival order, exactly as before. `spaces_*` requests
-    and agent, scope and event requests run on their own small pools, so they never wait behind a task.
+    One reader thread reads every line. Other methods run on one dispatcher thread in arrival order. Agent,
+    scope and event requests run on their own small pool, so they never wait behind other requests.
     """
 
-    def __init__(self, app, emit, spaces_workers=4, agent_workers=2):
+    def __init__(self, app, emit, agent_workers=2):
         self.app = app
         self.emit = emit
         self.legacy = queue.Queue()
-        self.spaces = ThreadPoolExecutor(max_workers=spaces_workers, thread_name_prefix='spaces')
         self.agents = ThreadPoolExecutor(max_workers=agent_workers, thread_name_prefix='agent')
-        self.first = True
         self.dispatcher = threading.Thread(target=self._dispatch, daemon=True, name='legacy-dispatch')
         self.dispatcher.start()
 
     def route(self, line):
-        first, self.first = self.first, False
         try:
             message = json.loads(line)
         except ValueError:
             message = None
         if isinstance(message, dict):
-            if 'keychain_reply' in message:
-                self.app.bridge.reply(message)
-                return 'keychain'
-            if 'bridge_hello' in message:
-                if first:
-                    self.app.bridge.hello(message['bridge_hello'])
-                return 'hello'
             method = message.get('method')
-            if isinstance(method, str) and method.startswith('spaces_'):
-                self.spaces.submit(self._answer, message)
-                return 'spaces'
             if method in AGENT_METHODS:
                 self.agents.submit(self._answer, message)
                 return 'agent'
@@ -492,12 +198,11 @@ class Router:
         self.legacy.put(None)
         self.dispatcher.join(timeout_s)
         self.agents.shutdown(wait=False)
-        self.spaces.shutdown(wait=False)
 
 
 class Application:
     def __init__(self, storage, provider=None, emit=None, *, scope_api=None, audit_api=None, runtime_factory=None,
-                 connector_factory=None, interrupt_grace_s=scheduler.INTERRUPT_GRACE_S):
+                 interrupt_grace_s=scheduler.INTERRUPT_GRACE_S):
         self.storage = Path(storage).resolve()
         self.storage.mkdir(parents=True, exist_ok=True)
         self.provider = provider or CodexProvider()
@@ -506,8 +211,6 @@ class Application:
         self._publish_guard = threading.Lock()
         self._last_publish = 0.0
         self._publish_timer = None
-        self.bridge = KeychainBridge(self.emit)
-        self.journal = None
         self.cancel = threading.Event()
         self.worker = None
         self.current_run = None
@@ -561,11 +264,11 @@ class Application:
                         runner.save(run/'run.json',record)
                 except SNAPSHOT_ERRORS:
                     continue
-        self.setup_agents(scope_api, audit_api, runtime_factory, connector_factory, interrupt_grace_s)
+        self.setup_agents(scope_api, audit_api, runtime_factory, interrupt_grace_s)
         self.persist()
 
-    def setup_agents(self, scope_api, audit_api, runtime_factory, connector_factory, interrupt_grace_s):
-        """Agentic tasks (scheduler.md) and Spaces (connectors.md), beside the unchanged legacy slot."""
+    def setup_agents(self, scope_api, audit_api, runtime_factory, interrupt_grace_s):
+        """Agentic tasks (scheduler.md), beside the unchanged legacy slot."""
         self.scope = ScopeAdapter(scope_api if scope_api is not None else optional_module('scope'))
         if audit_api is None:
             module = optional_module('audit')
@@ -580,15 +283,11 @@ class Application:
             max_running = scheduler.validate_max_running(settings.get('max_running'))
         except (AttributeError, ValueError):
             max_running = scheduler.DEFAULT_MAX_RUNNING
-        self.spaces = SpacesHub(self, connector_factory or default_connector_factory(self))
-        extra = {}
-        if 'tool_catalog' in inspect.signature(scheduler.Scheduler).parameters:
-            extra['tool_catalog'] = self.tool_catalog  # RunContext.tools() (2A); older schedulers take none.
-        self.scheduler = scheduler.Scheduler(**extra,
+        self.scheduler = scheduler.Scheduler(
             max_running=max_running, runtime_factory=runtime_factory or self.default_runtime_factory(), policy=self.scope,
             audit=self.audit, events=self.events, budget_gate=scheduler.BudgetGate(self.store), locks=self.locks,
             clock=time.time, tasks=self.store, workspaces=scheduler.Workspaces(self.storage/'workspaces'),
-            app_tools=self.agent_tool, legacy_active=lambda: bool(self.state['active']),
+            legacy_active=lambda: bool(self.state['active']),
             interrupt_grace_s=interrupt_grace_s, decide_options={'app_data':str(self.storage)})
 
     def default_runtime_factory(self):
@@ -609,37 +308,6 @@ class Application:
     @staticmethod
     def no_runtime(task_id):
         raise ValueError('The agent runtime is not in this build yet.')
-
-    def tool_catalog(self, name):
-        """Connector tool descriptors for one app (`spaces.base.tools`), for RunContext.tools().
-
-        Only a signed-in app lists tools; an unknown, signed-out or failing app gives an empty list.
-        """
-        base = optional_module('spaces.base')
-        if base is None or name not in SPACES_APPS:
-            return []
-        try:
-            connector = self.spaces.connector(name)
-            if (connector.status() or {}).get('state') != 'signed_in':
-                return []
-            return list(base.tools(connector))
-        except Exception:
-            return []
-
-    def agent_tool(self, name):
-        """Connector tool descriptor and connector for `RunContext.app_tool` (spaces.base.tools, 1A)."""
-        base = optional_module('spaces.base')
-        if base is None or not isinstance(name, str):
-            return None
-        for app_name in SPACES_APPS:
-            if name.startswith(app_name + '_'):
-                try:
-                    connector = self.spaces.connector(app_name)
-                except ValueError:
-                    return None
-                descriptor = next((d for d in base.tools(connector) if d.get('name') == name), None)
-                return (descriptor, connector) if descriptor else None
-        return None
 
     def publish_soon(self):
         """Coarse state updates for agent tasks, at most 4 per second; the last change is always published."""
@@ -772,7 +440,6 @@ class Application:
                                  'task':copy.deepcopy(task['thread']) if task else []},
                         runs=[self.run_summary(project,r) for r in reversed(owner['run_ids'])] if owner else [],run=None)
             data['scheduler']=self.scheduler.snapshot()
-            data['spaces']={'apps':copy.deepcopy(self.state.get('spaces',{}).get('apps',{}))}
             data['source_selection']=None
             data['plan_budget']=None
             data['source_error']=''
@@ -874,8 +541,6 @@ class Application:
             raise ValueError('request params must be an object')
         if method in AGENT_METHODS:
             return self.handle_agent(method, params)
-        if isinstance(method, str) and method.startswith('spaces_'):
-            return self.spaces.handle(method, params)
         with self.lock:
             if method == 'state':
                 return self.public()

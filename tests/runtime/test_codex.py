@@ -17,8 +17,8 @@ import runtime  # noqa: E402
 from runtime import codex, mcp_bridge  # noqa: E402
 
 FAKE = Path(__file__).resolve().parent / 'fixtures' / 'codex' / 'fake_app_server.py'
-TOOLS = [{'v': 1, 'name': 'notion_read', 'app': 'notion', 'title': 'Read', 'description': 'Read a page.',
-          'input_schema': {'type': 'object'}, 'effect': 'read', 'action': None, 'ref_param': 'ref'}]
+TOOLS = [{'v': 1, 'name': 'example_read', 'title': 'Read', 'description': 'Read an item.',
+          'input_schema': {'type': 'object'}, 'effect': 'read'}]
 
 
 def started(item):
@@ -71,10 +71,11 @@ class FakeContext:
         self.requests = []
         self.observations = []
         self.usages = []
-        self.app_calls = []
+        self.tool_calls = []
+        self.tool_list = list(TOOLS)
 
     def tools(self):
-        return list(TOOLS)
+        return list(self.tool_list)
 
     def authorize(self, request, call_id):
         self.requests.append((request, call_id))
@@ -88,8 +89,8 @@ class FakeContext:
     def emit(self, kind, data, *, turn_id=None, item_id=None):
         self.events.append((kind, data, item_id))
 
-    def app_tool(self, name, arguments, call_id):
-        self.app_calls.append((name, arguments, call_id))
+    def call_tool(self, name, arguments, call_id):
+        self.tool_calls.append((name, arguments, call_id))
         return {'ok': True, 'result': {}}
 
     def report_usage(self, value):
@@ -230,6 +231,16 @@ class LaunchTests(CodexCase):
         with self.assertRaises(runtime.RuntimeFailure) as caught:
             self.runtime({}).open(ctx)
         self.assertEqual(caught.exception.code, 'workspace_failed')
+
+    def test_no_tools_means_no_bridge_and_no_mcp_servers(self):
+        ctx = self.ctx()
+        ctx.tool_list = []
+        session, _ = self.open({'turns': [[{'complete': 'completed'}]]}, ctx)
+        self.assertIsNone(session.bridge)
+        self.assertNotIn('mcp_servers', self.sent('thread/start')[0]['params']['config'])
+        self.assertEqual(session.run_turn('x', ctx)['status'], 'completed')
+        session.close()
+        self.assertIsNotNone(session.process.poll())
 
     def test_close_stops_the_process_and_the_bridge(self):
         session, _ = self.open({})
@@ -400,8 +411,8 @@ class TurnTests(CodexCase):
                 'message': 'Allow?', 'requestedSchema': {'type': 'object', 'properties': {}}}}
         mcp_item = {'type': 'mcpToolCall', 'id': 'x1', 'server': 'other', 'tool': 'lookup', 'status': 'inProgress', 'arguments': {}}
         session, ctx = self.open({'turns': [[
-            elicitation('interspace', 'notion_read'),
-            completed({'type': 'mcpToolCall', 'id': 'i1', 'server': 'interspace', 'tool': 'notion_read',
+            elicitation('interspace', 'example_read'),
+            completed({'type': 'mcpToolCall', 'id': 'i1', 'server': 'interspace', 'tool': 'example_read',
                        'status': 'completed', 'arguments': {}, 'result': {'content': []}}),
             elicitation('interspace', 'not_a_tool'),
             started(mcp_item), elicitation('other', 'lookup'),
@@ -456,17 +467,17 @@ class TurnTests(CodexCase):
     def test_mcp_bridge_routes_to_this_turns_context(self):
         session, ctx = self.open({'turns': [[{'sleep': 0.5}, {'complete': 'completed'}]]})
         bridge = session.bridge
-        self.assertEqual(bridge.tool_names(), ['notion_read'])
+        self.assertEqual(bridge.tool_names(), ['example_read'])
         seen = []
         original = bridge._call
         bridge._call = lambda params: seen.append(bridge._ctx) or original(params)
         thread = threading.Thread(target=session.run_turn, args=('x', ctx))
         thread.start()
         time.sleep(0.2)
-        bridge._call({'name': 'notion_read', 'arguments': {'ref': 'r'}})
+        bridge._call({'name': 'example_read', 'arguments': {'ref': 'r'}})
         thread.join(5)
         self.assertIs(seen[0], ctx)
-        self.assertEqual(ctx.app_calls[0][:2], ('notion_read', {'ref': 'r'}))
+        self.assertEqual(ctx.tool_calls[0][:2], ('example_read', {'ref': 'r'}))
         self.assertIsNone(bridge._ctx)  # Unbound between turns.
 
 
@@ -582,19 +593,6 @@ class FactoryTests(unittest.TestCase):
         with mock.patch.dict(sys.modules, {runtime.__name__ + '.claude': module}):
             result = runtime.make_factory(app)('c')
         self.assertEqual((result.name, made), ('claude', [app]))
-
-    def test_tool_catalog_uses_the_spaces_connectors(self):
-        class Connector:
-            app = 'notion'
-            kinds = ('page',)
-
-            def actions(self):
-                return []
-        app = self.App({})
-        app.spaces = type('Hub', (), {'connector': staticmethod(lambda name: Connector())})()
-        names = [d['name'] for d in runtime.tool_catalog(app)('notion')]
-        self.assertEqual(names, ['notion_search', 'notion_browse', 'notion_read'])
-
 
 class UnwrapTests(unittest.TestCase):
     def test_unwrap_shell(self):

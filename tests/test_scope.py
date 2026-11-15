@@ -24,12 +24,7 @@ def base_scope():
                       'read': ['**'], 'write': ['src/**', 'tests/**'], 'deny': ['secrets/**']}],
         'commands': {'workspace': 'allow', 'allow': [['git', 'status']], 'deny': [['git', 'push']]},
         'network': {'default': 'ask', 'allow_hosts': ['pypi.org'], 'deny_hosts': []},
-        'apps': [
-            {'app': 'notion', 'access': 'write',
-             'resources': [{'ref': 'notion:page:root', 'include_children': True},
-                           {'ref': 'notion:page:solo', 'include_children': False}]},
-            {'app': 'zotero', 'access': 'read', 'resources': 'all'},
-        ],
+        'apps': [],
         'web_search': 'allow',
         'limits': {'token_budget': 250000, 'time_limit_s': 3600},
     }
@@ -84,12 +79,6 @@ def command(argv=None, text=None, cwd='.', sandbox='workspace', network=False):
             'sandbox': sandbox, 'network': network, 'project_id': PID}
 
 
-def app(op, ref, name='notion', action='notion.page.append', **extra):
-    request = {'category': 'app', 'app': name, 'op': op, 'action': action, 'ref': ref}
-    request.update(extra)
-    return request
-
-
 class ValidationTests(unittest.TestCase):
     def test_example_scope_is_valid_and_round_trips(self):
         document = base_scope()
@@ -122,11 +111,8 @@ class ValidationTests(unittest.TestCase):
             'host with port': lambda d: d['network'].update(allow_hosts=['pypi.org:443']),
             'host uppercase': lambda d: d['network'].update(allow_hosts=['PyPI.org']),
             'host scheme': lambda d: d['network'].update(allow_hosts=['https://pypi.org']),
-            'duplicate app': lambda d: d['apps'].append(copy.deepcopy(d['apps'][1])),
-            'five apps': lambda d: d.update(apps=[{'app': a, 'access': 'read', 'resources': 'all'} for a in 'abcde']),
-            'empty resources': lambda d: d['apps'][0].update(resources=[]),
-            'ref of other app': lambda d: d['apps'][0].update(resources=[{'ref': 'github:repo:o/r', 'include_children': False}]),
-            'malformed ref': lambda d: d['apps'][0].update(resources=[{'ref': 'notion-page', 'include_children': False}]),
+            'any app': lambda d: d.update(apps=[{'app': 'a', 'access': 'read', 'resources': 'all'}]),
+            'apps not a list': lambda d: d.update(apps=None),
             'bad web search': lambda d: d.update(web_search='maybe'),
             'short time limit': lambda d: d['limits'].update(time_limit_s=59),
             'long time limit': lambda d: d['limits'].update(time_limit_s=86401),
@@ -451,60 +437,12 @@ class NetworkAndSearchTests(Fixture):
                          'scope.default_deny')
 
 
-class AppDecisionTests(Fixture):
-    def test_app_reads_and_writes_inside_scope(self):
-        self.assertDecision(self.decide(app('read', 'notion:page:root', action='notion.read')), 'allow', 'apps[0].read')
-        self.assertDecision(self.decide(app('update', 'notion:page:solo')), 'allow', 'apps[0].write')
-        self.assertDecision(self.decide(app('create', 'notion:page:root', action='notion.page.comment')), 'allow', 'apps[0].write')
-        self.assertDecision(self.decide(app('read', 'zotero:item:anything', name='zotero', action='zotero.read')),
-                            'allow', 'apps[1].read')
-
-    def test_include_children_follows_reported_parent_chain(self):
-        child = app('update', 'notion:page:child', parents=['notion:page:mid', 'notion:page:root'])
-        self.assertDecision(self.decide(child), 'allow', 'apps[0].write')
-        not_child_of_solo = app('update', 'notion:page:x', parents=['notion:page:solo'])
-        self.assertEqual(self.decide(not_child_of_solo)['decision'], 'ask')
-        self.assertEqual(self.decide(app('update', 'notion:page:child'))['decision'], 'ask')
-        bad_parents = app('update', 'notion:page:child', parents='notion:page:root')
-        self.assertDecision(self.decide(bad_parents), 'deny', 'policy.invalid_request')
-
-    def test_write_needing_more_access_asks_with_patch(self):
-        result = self.decide(app('update', 'zotero:item:1', name='zotero', action='zotero.item.add_tags'))
-        self.assertDecision(result, 'ask', 'apps[1].write')
-        self.assertEqual(result['ask']['scope_patch'], {'apps': [{'app': 'zotero', 'access': 'write', 'resources': 'all'}]})
-        uncovered = self.decide(app('update', 'notion:page:other'))
-        self.assertEqual(uncovered['ask']['scope_patch'],
-                         {'apps': [{'app': 'notion', 'access': 'write',
-                                    'resources': [{'ref': 'notion:page:other', 'include_children': False}]}]})
-        new_app = self.decide(app('read', 'github:repo:o/r', name='github', action='github.read'))
-        self.assertDecision(new_app, 'ask', 'apps')
-        self.assertEqual(new_app['ask']['scope_patch'],
-                         {'apps': [{'app': 'github', 'access': 'read',
-                                    'resources': [{'ref': 'github:repo:o/r', 'include_children': False}]}]})
-
-    def test_destructive_effects_always_ask(self):
-        for name, action, ref in (('notion', 'notion.page.archive', 'notion:page:root'),
-                                  ('zotero', 'zotero.item.trash', 'zotero:item:1')):
-            with self.subTest(action=action):
-                document = copy.deepcopy(self.scope)
-                document['apps'][1]['access'] = 'write'
-                result = self.decide(app('destructive', ref, name=name, action=action), document=document)
-                self.assertDecision(result, 'ask', 'always_ask.destructive')
-                self.assertEqual((result['ask']['reason'], result['ask']['options'], result['ask']['scope_patch'],
-                                  result['ask']['patched_scope_digest']),
-                                 ('destructive', ['allow_once', 'deny'], None, None))
-
-    def test_always_deny_app_routes(self):
-        self.assertDecision(self.decide(app('read', 'keychain:item:x', name='keychain', action='keychain.read')),
-                            'deny', 'always_deny.keychain')
-        for action in ('notion.page.share', 'github.repo.add_collaborator', 'gdrive.file.set_permissions',
-                       'notion.page.invite', 'gdrive.file.transfer_ownership', 'github.org.add_member'):
-            with self.subTest(action=action):
-                self.assertDecision(self.decide(app('update', 'notion:page:root', action=action)), 'deny', 'always_deny.sharing')
-        self.assertDecision(self.decide(app('update', 'interspace:scope:x', name='interspace', action='interspace.scope.update')),
-                            'deny', 'always_deny.scope_self_edit')
+class McpDecisionTests(Fixture):
+    def test_own_server_and_sharing_tools_are_denied(self):
         self.assertDecision(self.decide({'category': 'mcp', 'server': 'interspace', 'tool': 'scope_update'}),
                             'deny', 'always_deny.scope_self_edit')
+        self.assertDecision(self.decide({'category': 'mcp', 'server': 'interspace', 'tool': 'read_page'}),
+                            'deny', 'policy.invalid_request')
         self.assertDecision(self.decide({'category': 'mcp', 'server': 'other', 'tool': 'share_doc'}),
                             'deny', 'always_deny.sharing')
 
@@ -518,7 +456,7 @@ class MalformedRequestTests(Fixture):
     def test_malformed_requests_fail_closed_without_raising(self):
         for request in (None, {}, {'category': 'teleport'}, read(''), read(None), write(), {'category': 'file_write', 'project_id': PID, 'paths': 'src/a'},
                         command(None, None), command([]), command(['ls', 5]), command(['ls'], sandbox='nope'),
-                        app('read', 'notion-page'), app('read', 'github:repo:o/r'), app('grow', 'notion:page:root'),
+                        {'category': 'app', 'app': 'x', 'op': 'read', 'action': 'x.read', 'ref': 'x:page:1'},
                         {'category': 'network', 'host': 'a b', 'port': 1, 'via': 'command'},
                         {'category': 'web_search', 'query': 5}, {'category': 'mcp', 'server': '', 'tool': 'x'},
                         read('src/a\x00b')):
@@ -576,11 +514,11 @@ class AnswerTests(Fixture):
                     dict(good, decision='text'), dict(good, decision='cancel')):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 scope.apply_answer(self.scope, self.approval, ask, bad, now=NOW)
-        destructive = self.decide(app('destructive', 'notion:page:root', action='notion.page.archive'))['ask']
-        destructive = dict(destructive, ask_id='a1')
+        escalated = self.decide(command(['ls'], sandbox='escalated'))['ask']
+        escalated = dict(escalated, ask_id='a1')
         with self.assertRaises(ValueError):
-            scope.apply_answer(self.scope, self.approval, destructive,
-                               {'ask_id': 'a1', 'decision': 'add_to_scope', 'request_digest': destructive['request_digest'],
+            scope.apply_answer(self.scope, self.approval, escalated,
+                               {'ask_id': 'a1', 'decision': 'add_to_scope', 'request_digest': escalated['request_digest'],
                                 'scope_digest': None}, now=NOW)
 
     def test_allow_once_needs_live_approval(self):
@@ -595,23 +533,20 @@ class AnswerTests(Fixture):
             'projects': [{'project_id': PID, 'access': 'read', 'read': ['**', 'x'], 'deny': []}],
             'commands': {'allow': [['git', 'status'], ['make']]},
             'network': {'allow_hosts': ['example.com']},
-            'apps': [{'app': 'notion', 'access': 'read', 'resources': [{'ref': 'notion:page:solo', 'include_children': False},
-                                                                       {'ref': 'notion:page:new', 'include_children': True}]},
-                     {'app': 'zotero', 'access': 'write', 'resources': [{'ref': 'zotero:item:1', 'include_children': False}]}],
         })
         self.assertEqual(merged['projects'][0]['access'], 'write')
         self.assertEqual(merged['projects'][0]['read'], ['**', 'x'])
         self.assertEqual(merged['projects'][0]['deny'], ['secrets/**'])
         self.assertEqual(merged['commands']['allow'], [['git', 'status'], ['make']])
         self.assertEqual(merged['network']['allow_hosts'], ['pypi.org', 'example.com'])
-        self.assertEqual(merged['apps'][0]['access'], 'write')
-        self.assertEqual(len(merged['apps'][0]['resources']), 3)
-        self.assertEqual(merged['apps'][1], {'app': 'zotero', 'access': 'write', 'resources': 'all'})
+        self.assertEqual(merged['apps'], [])
         self.assertEqual(merged['version'], 3)
         with self.assertRaises(ValueError):
             scope.merge_patch(self.scope, {'version': 9})
         with self.assertRaises(ValueError):
             scope.merge_patch(self.scope, {'limits': {'token_budget': 1}})
+        with self.assertRaises(ValueError):
+            scope.merge_patch(self.scope, {'apps': [{'app': 'a', 'access': 'read', 'resources': 'all'}]})
 
 
 if __name__ == '__main__':

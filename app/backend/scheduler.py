@@ -7,10 +7,9 @@ provider itself. Every public method is thread-safe and returns quickly; long wo
 The task store passed as `tasks` provides: `lock` (the application RLock), `state` (with `usage`),
 `task(task_id)`, `project(project_id)`, `agent_tasks()` and `changed(task_id=None)` (persist, then publish
 state at a throttled rate). The scheduler holds `tasks.lock` only to read or change shared state, never
-across a runtime call, a connector call or a lock wait.
+across a runtime call or a lock wait.
 """
 import copy
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -24,31 +23,20 @@ import uuid
 
 import budget
 
-try:  # 1A writes spaces/base.py; these fallbacks are identical to the contract until it merges.
-    from spaces.base import agent_key, iso_time
-except ImportError:
-    def iso_time(t):
-        return time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime(t)) + '.%03dZ' % int(t % 1 * 1000)
-
-    def agent_key(task_id, turn_id, call_id):
-        return task_id + ':' + hashlib.sha256((turn_id + ':' + call_id).encode('utf-8')).hexdigest()[:32]
+from timeutil import iso_time
 
 shutil_which = shutil.which
 
 V = 1
 MAX_EVENT_BYTES = 64 * 1024
 MAX_BLOB_BYTES = 2 * 1024 * 1024
-MAX_TOOL_OUTPUT_CHARS = 16 * 1024
 MAX_PATCH_CHARS = 48 * 1024
-MAX_INPUT_CHARS = 8 * 1024
 MAX_MESSAGE_CHARS = 20000
 DEFAULT_MAX_RUNNING = 4
 MAX_RUNNING_RANGE = (1, 16)
 LOCK_TIMEOUT_S = 300
 INTERRUPT_GRACE_S = 10  # 0B measured turn/interrupt ending a turn in about 0.1 s; kill the process group after this long.
 GIT_TIMEOUT_S = 120
-MAX_PARENTS = 32
-MAX_KNOWN_PARENTS = 10000
 
 QUEUED = 'queued'
 COUNTED = ('starting', 'running', 'waiting_lock')  # Only these count against the time limit.
@@ -437,15 +425,17 @@ class RunContext:
             _runtime_id(item_id, 'item_id')
         return self._scheduler._emit(self._run, kind, data, turn_id=turn_id or self.turn_id, item_id=item_id)
 
-    def app_tool(self, name, arguments, call_id):
-        return self._scheduler._app_tool(self._run, name, arguments, _runtime_id(call_id, 'call_id'))
+    def call_tool(self, name, arguments, call_id):
+        """Run one Interspace tool from the MCP bridge. No tools are offered yet, so every name is unknown."""
+        _runtime_id(call_id, 'call_id')
+        raise ValueError('Unknown tool.')
 
     def report_usage(self, usage):
         self._scheduler._report_usage(self._run, usage)
 
     def tools(self):
-        """Connector tool descriptors for the apps in the task's live scope (for the MCP bridge)."""
-        return self._scheduler._tools(self._run)
+        """Tool descriptors for the MCP bridge. None yet: runtimes start a bridge only for a non-empty list."""
+        return []
 
     def observed(self, request, call_id):
         """Record an action the provider ran without asking; returns its final decision (`provider.sandbox`)."""
@@ -487,8 +477,8 @@ def _final(decision, rule=None):
 
 class Scheduler:
     def __init__(self, *, max_running, runtime_factory, policy, audit, events, budget_gate, locks, clock,
-                 tasks, workspaces=None, app_tools=None, legacy_active=None, interrupt_grace_s=INTERRUPT_GRACE_S,
-                 monotonic=time.monotonic, tick_s=0.5, decide_options=None, tool_catalog=None):
+                 tasks, workspaces=None, legacy_active=None, interrupt_grace_s=INTERRUPT_GRACE_S,
+                 monotonic=time.monotonic, tick_s=0.5, decide_options=None):
         self.max_running = validate_max_running(max_running)
         self.runtime_factory = runtime_factory
         self.policy = policy
@@ -500,14 +490,11 @@ class Scheduler:
         self.store = tasks
         self.lock = tasks.lock
         self.workspaces = workspaces
-        self.app_tools = app_tools
-        self.tool_catalog = tool_catalog  # app name -> [ToolDescriptor] (2C wires runtime.tool_catalog).
         self.legacy_active = legacy_active or (lambda: False)
         self.interrupt_grace_s = interrupt_grace_s
         self.monotonic = monotonic
         # Extra keyword arguments for policy.decide (coordinator ruling): app_data, home, temp_roots.
         self.decide_options = dict(decide_options or {})
-        self._parents = {}  # ref -> parent ref, as connectors reported them in listings.
         self._cond = threading.Condition(self.lock)
         self._runs = {}
         self._queue = []
@@ -1099,20 +1086,6 @@ class Scheduler:
 
     # -- runtime support ----------------------------------------------------------------------------
 
-    def _tools(self, run):
-        if self.tool_catalog is None:
-            return []
-        with self.lock:
-            apps = [a.get('app') for a in self._task(run.task_id)['scope'].get('apps', []) if isinstance(a, dict)]
-        found = []
-        for app_name in apps:
-            try:
-                descriptors = self.tool_catalog(app_name)
-            except Exception:
-                continue  # Signed out or unavailable: the agent simply has no tools for that app.
-            found += [copy.deepcopy(d) for d in descriptors or [] if isinstance(d, dict) and d.get('app') == app_name]
-        return found
-
     def _observed(self, run, request, call_id):
         with self.lock:
             scope = self._task(run.task_id)['scope']
@@ -1131,118 +1104,3 @@ class Scheduler:
         except Exception:
             self._error(run, 'audit_failed', 'An action the agent ran could not be recorded in the audit log.', True, call_id)
         return decision
-
-    # -- connector tools ----------------------------------------------------------------------------
-
-    def _app_tool(self, run, name, arguments, call_id):
-        def failure(code, message):
-            return {'ok': False, 'error': {'code': code, 'message': message}}
-        found = self.app_tools(name) if self.app_tools and isinstance(name, str) else None
-        if found is None or not isinstance(arguments, dict):
-            return failure('invalid_request', 'Unknown tool or invalid arguments.')
-        descriptor, connector = found
-        ref_param = descriptor.get('ref_param')
-        ref = arguments.get(ref_param) if ref_param else None
-        effect = descriptor['effect']
-        action = descriptor.get('action') or descriptor['name']
-        request = {'category': 'app', 'app': descriptor['app'], 'op': effect, 'action': action, 'ref': ref}
-        parents = self._ancestry(ref)
-        if parents:
-            request['parents'] = parents  # Without it, include_children matches the exact ref only.
-        decision = self._authorize(run, request, call_id)
-        title = (descriptor.get('title', name) + (' ' + ref if isinstance(ref, str) else ''))[:200]
-        if effect == 'read':
-            return self._app_read(run, descriptor, connector, name, arguments, call_id, title, decision, failure)
-        key = agent_key(run.task_id, run.turn_id, call_id)
-        card = {'call_id': call_id, 'app': descriptor['app'], 'action': action, 'effect': effect, 'ref': ref,
-                'title': title, 'idempotency_key': key, 'status': 'pending', 'result_ref': None, 'url': None,
-                'summary': None, 'error': None}
-        if decision['decision'] != 'allow':
-            self._emit(run, 'app_action', dict(card, status='denied'), turn_id=run.turn_id, item_id=call_id)
-            return failure('denied', 'The action was refused.')
-        params = {k: v for k, v in arguments.items() if k != ref_param}
-
-        def write():
-            self._emit(run, 'app_action', card, turn_id=run.turn_id, item_id=call_id)
-            try:
-                result = connector.write(action, ref, params, key)
-                final = dict(card, status='succeeded', result_ref=result.get('result_ref'), url=result.get('url'),
-                             summary=result.get('summary'))
-                outcome, reply = 'succeeded', {'ok': True, 'result': result}
-            except Exception as error:
-                code = getattr(error, 'code', 'unavailable')
-                message = str(error) if isinstance(error, ValueError) else 'The app call failed.'
-                outcome = 'outcome_unknown' if code == 'outcome_unknown' else 'failed'
-                final = dict(card, status=outcome, error={'code': code, 'message': message})
-                reply = failure(code, message)
-            try:
-                self._audit(run, 'action', call_id=call_id, request=request, decision='allow', outcome=outcome,
-                            idempotency_key=key)
-            except Exception:
-                self._error(run, 'audit_failed', 'The outcome of an app action could not be recorded.', True, call_id)
-            self._emit(run, 'app_action', final, turn_id=run.turn_id, item_id=call_id)
-            return reply
-        try:
-            return self._with_lock(run, 'app:' + (ref if isinstance(ref, str) else descriptor['app']), write)
-        except Cancelled:
-            return failure('cancelled', 'The task was stopped.')
-        except LockTimeout:
-            self._error(run, 'lock_timeout', 'Timed out waiting for another write to the same resource.', True, call_id)
-            return failure('lock_timeout', 'Timed out waiting for another write to the same resource.')
-
-    def _ancestry(self, ref):
-        """Ancestor refs, nearest first, from what connectors reported in browse and search results."""
-        chain = []
-        with self.lock:
-            current = self._parents.get(ref) if isinstance(ref, str) else None
-            while isinstance(current, str) and current not in chain and current != ref and len(chain) < MAX_PARENTS:
-                chain.append(current)
-                current = self._parents.get(current)
-        return chain
-
-    def _learn_parents(self, result):
-        items = result.get('items') if isinstance(result, dict) else None
-        with self.lock:
-            for item in items if isinstance(items, list) else ():
-                if isinstance(item, dict) and isinstance(item.get('ref'), str) and isinstance(item.get('parent'), str):
-                    if len(self._parents) >= MAX_KNOWN_PARENTS:
-                        self._parents.clear()  # Bounded memory; ancestry is learned again from later listings.
-                    self._parents[item['ref']] = item['parent']
-
-    def _app_read(self, run, descriptor, connector, name, arguments, call_id, title, decision, failure):
-        shown = json.dumps(arguments, ensure_ascii=False)
-        self._emit(run, 'tool_call', {'call_id': call_id, 'category': 'app', 'tool': name, 'app': descriptor['app'],
-                                      'title': title, 'input': arguments if len(shown) <= MAX_INPUT_CHARS else
-                                      {'truncated': shown[:MAX_INPUT_CHARS]}, 'decision': _final(decision)},
-                   turn_id=run.turn_id, item_id=call_id)
-        result_card = {'call_id': call_id, 'status': 'ok', 'exit_code': None, 'duration_ms': 0,
-                       'output': {'text': '', 'truncated': False, 'blob_id': None}, 'error': None}
-        if decision['decision'] != 'allow':
-            self._emit(run, 'tool_result', dict(result_card, status='denied'), turn_id=run.turn_id, item_id=call_id)
-            return failure('denied', 'The action was refused.')
-        started = time.monotonic()
-        verb = name.rsplit('_', 1)[-1]
-        args = {k: v for k, v in arguments.items() if k != descriptor.get('ref_param')}
-        try:
-            if verb == 'read':
-                result = connector.read(arguments.get(descriptor.get('ref_param')), **args)
-            elif verb == 'browse':
-                result = connector.browse(**arguments)  # ref_param is `parent`, passed as itself.
-            elif verb == 'search':
-                result = connector.search(**arguments)
-            else:
-                raise ValueError('Unknown read tool.')
-        except Exception as error:
-            code = getattr(error, 'code', 'unavailable')
-            message = str(error) if isinstance(error, ValueError) else 'The app call failed.'
-            self._emit(run, 'tool_result', dict(result_card, status='error', error={'code': code, 'message': message},
-                                                duration_ms=int((time.monotonic() - started) * 1000)),
-                       turn_id=run.turn_id, item_id=call_id)
-            return failure(code, message)
-        self._learn_parents(result)
-        text = json.dumps(result, ensure_ascii=False)
-        self._emit(run, 'tool_result', dict(result_card, duration_ms=int((time.monotonic() - started) * 1000),
-                                            output={'text': text[:MAX_TOOL_OUTPUT_CHARS],
-                                                    'truncated': len(text) > MAX_TOOL_OUTPUT_CHARS, 'blob_id': None}),
-                   turn_id=run.turn_id, item_id=call_id)
-        return {'ok': True, 'result': result}

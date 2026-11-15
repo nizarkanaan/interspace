@@ -12,8 +12,8 @@ sys.path.insert(0, str(ROOT / 'app/backend'))
 sys.path.insert(0, str(ROOT / 'tests'))
 
 import scheduler
-from agent_fakes import (FakeAudit, FakeConnector, FakeRuntime, FakeScope, FakeWorkspaces, MemoryStore,
-                         default_script, notion_tools, wait_for, wait_interrupt)
+from agent_fakes import (FakeAudit, FakeRuntime, FakeScope, FakeWorkspaces, MemoryStore,
+                         default_script, wait_for, wait_interrupt)
 
 
 class Clock:
@@ -30,7 +30,7 @@ class SchedulerCase(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name).resolve()
 
-    def make(self, max_running=4, script=default_script, legacy=None, grace=0.2, monotonic=None, tool_catalog=None, policy=None):
+    def make(self, max_running=4, script=default_script, legacy=None, grace=0.2, monotonic=None, policy=None):
         self.scope = FakeScope()
         self.audit = FakeAudit()
         self.store = MemoryStore(self.scope)
@@ -41,17 +41,14 @@ class SchedulerCase(unittest.TestCase):
         self.runtime = FakeRuntime(script)
         self.locks = scheduler.Locks()
         self.workspaces = FakeWorkspaces(self.root / 'workspaces')
-        self.connector = FakeConnector()
-        tools = notion_tools(self.connector)
         self.legacy = legacy or (lambda: False)
         self.sched = scheduler.Scheduler(
             max_running=max_running, runtime_factory=lambda task_id: self.runtime, policy=policy(self.scope) if policy else self.scope,
             audit=self.audit, events=self.events, budget_gate=scheduler.BudgetGate(self.store), locks=self.locks,
             clock=time.time, tasks=self.store, workspaces=self.workspaces,
-            app_tools=lambda name: (tools[name], self.connector) if name in tools else None,
             legacy_active=lambda: self.legacy(), interrupt_grace_s=grace,
             decide_options={'app_data': str(self.root / 'data')},
-            monotonic=monotonic or time.monotonic, tick_s=0.01, tool_catalog=tool_catalog)
+            monotonic=monotonic or time.monotonic, tick_s=0.01)
         self.addCleanup(self.sched.shutdown, 5)
         return self.sched
 
@@ -230,36 +227,6 @@ class LockTests(SchedulerCase):
         self.assertEqual(locks.holders(), {})
         with self.assertRaises(ValueError):
             locks.release('project:p1', 't1')
-
-    def test_resource_lock_contention_serialises_writes_and_shows_waiting_lock(self):
-        def script(session, text, ctx):
-            result = ctx.app_tool('notion_page_append', {'ref': 'notion:page:n1', 'markdown': text}, 'call-1')
-            ctx.emit('message', {'role': 'assistant', 'text': json.dumps(result['ok']), 'final': True}, item_id='m')
-            return {'status': 'completed', 'usage': {'input_tokens': 10, 'output_tokens': 1}, 'error': None}
-        self.make(script=script)
-        self.connector.gate = threading.Event()
-        self.task('a', rules={'app': 'allow'})
-        self.task('b', 'p2', rules={'app': 'allow'})
-        self.sched.submit('a', 'p1', 'one', None)
-        wait_for(lambda: self.connector.active == 1)
-        self.sched.submit('b', 'p2', 'two', None)
-        self.wait_state('b', 'waiting_lock')
-        waiting = [e for e in self.events.read('b', 0)['events'] if e['kind'] == 'status' and e['data']['state'] == 'waiting_lock']
-        self.assertEqual(waiting[-1]['data']['detail'], 'app:notion:page:n1')
-        running = {r['task_id']: r for r in self.sched.snapshot()['running']}
-        self.assertEqual(running['b']['lock'], 'app:notion:page:n1')
-        self.assertEqual(running['b']['state'], 'waiting_lock')
-        self.connector.gate.set()
-        self.wait_state('a', 'idle')
-        self.wait_state('b', 'idle')
-        self.assertEqual(self.connector.max_active, 1)
-        self.assertEqual(len(self.connector.writes), 2)
-        keys = [w[2] for w in self.connector.writes]
-        self.assertTrue(keys[0].startswith('a:') and keys[1].startswith('b:'))
-        actions = [e['data']['status'] for e in self.events.read('a', 0)['events'] if e['kind'] == 'app_action']
-        self.assertEqual(actions, ['pending', 'succeeded'])
-        self.assertEqual(self.locks.holders(), {})
-
 
 class CancelTests(SchedulerCase):
     def test_cancel_queued_task(self):
@@ -598,11 +565,11 @@ class AuthorizeTests(SchedulerCase):
                 self.sched.answer('a', ask['ask_id'], 'add_to_scope', request_digest=ask['request_digest'], scope_digest='sha256:bad')
             self.sched.answer('a', ask['ask_id'], 'add_to_scope', request_digest=ask['request_digest'],
                               scope_digest=ask['patched_scope_digest'])
-        decision = self.run_one({'app': 'ask'}, {'category': 'app', 'app': 'notion', 'op': 'update', 'ref': 'notion:page:n1'}, answer)
+        decision = self.run_one({'command': 'ask'}, {'category': 'command', 'argv': ['make']}, answer)
         self.assertEqual((decision['decision'], decision['rule']), ('allow', 'ask.add_to_scope'))
         task = self.store.task('a')
         self.assertEqual(task['scope']['version'], 2)
-        self.assertEqual(task['scope']['fake_rules']['app'], 'allow')
+        self.assertEqual(task['scope']['fake_rules']['command'], 'allow')
         self.assertEqual(task['scope_approval']['scope_digest'], self.scope.digest(task['scope']))
         self.assertEqual(task['scope_approval']['scope_version'], 2)
         scope_events = [e['data'] for e in self.events.read('a', 0)['events'] if e['kind'] == 'scope']
@@ -639,56 +606,15 @@ class AuthorizeTests(SchedulerCase):
         self.wait_state('a', 'idle')
         self.assertEqual(decisions[0]['decision'], 'allow')
 
-    def test_decide_gets_options_and_known_parents(self):
+    def test_decide_gets_options(self):
         def script(session, text, ctx):
-            ctx.app_tool('notion_page_append', {'ref': 'notion:page:child', 'markdown': 'x'}, 'c0')
-            ctx.app_tool('notion_browse', {'parent': 'notion:page:top'}, 'c1')
-            ctx.app_tool('notion_page_append', {'ref': 'notion:page:child', 'markdown': 'x'}, 'c2')
+            ctx.authorize({'category': 'command', 'argv': ['ls']}, 'c0')
             return {'status': 'completed', 'usage': None, 'error': None}
         self.make(script=script)
-        self.task('a', rules={'app': 'allow'})
+        self.task('a')
         self.sched.submit('a', 'p1', 'x', None)
         self.wait_state('a', 'idle')
-        requests = [call[0] for call in self.scope.calls]
-        self.assertNotIn('parents', requests[0], 'unknown ancestry: exact ref only')
-        self.assertEqual(requests[2]['parents'], ['notion:page:top'])
         self.assertEqual(self.scope.decide_options[0]['app_data'], str(self.root / 'data'))
-
-    def test_denied_app_write_emits_denied_card_and_never_writes(self):
-        results = []
-
-        def script(session, text, ctx):
-            results.append(ctx.app_tool('notion_page_append', {'ref': 'notion:page:n1', 'markdown': 'x'}, 'c1'))
-            results.append(ctx.app_tool('notion_read', {'ref': 'notion:page:n1'}, 'c2'))
-            results.append(ctx.app_tool('missing_tool', {}, 'c3'))
-            return {'status': 'completed', 'usage': None, 'error': None}
-        self.make(script=script)
-        self.task('a', rules={'app': 'deny'})
-        self.sched.submit('a', 'p1', 'x', None)
-        self.wait_state('a', 'idle')
-        self.assertEqual(self.connector.writes, [])
-        self.assertEqual([r['ok'] for r in results], [False, False, False])
-        events = self.events.read('a', 0)['events']
-        self.assertEqual([e['data']['status'] for e in events if e['kind'] == 'app_action'], ['denied'])
-        self.assertEqual([e['data']['status'] for e in events if e['kind'] == 'tool_result'], ['denied'])
-
-    def test_unknown_write_outcome_is_recorded_not_retried(self):
-        class OutcomeUnknown(ValueError):
-            code = 'outcome_unknown'
-
-        def script(session, text, ctx):
-            ctx.app_tool('notion_page_append', {'ref': 'notion:page:n1', 'markdown': 'x'}, 'c1')
-            return {'status': 'completed', 'usage': None, 'error': None}
-        self.make(script=script)
-        self.connector.fail_with = OutcomeUnknown('may have happened')
-        self.task('a', rules={'app': 'allow'})
-        self.sched.submit('a', 'p1', 'x', None)
-        self.wait_state('a', 'idle')
-        statuses = [e['data']['status'] for e in self.events.read('a', 0)['events'] if e['kind'] == 'app_action']
-        self.assertEqual(statuses, ['pending', 'outcome_unknown'])
-        outcome = [r for r in self.audit.records if r['kind'] == 'action'][0]
-        self.assertEqual(outcome['outcome'], 'outcome_unknown')
-        self.assertTrue(outcome['idempotency_key'].startswith('a:'))
 
 
 class FailureTests(SchedulerCase):
@@ -785,30 +711,22 @@ class RuntimeSupportTests(SchedulerCase):
         self.sched.cancel('a')
         self.wait_state('a', 'cancelled')
 
-    def test_tools_lists_descriptors_for_apps_in_the_live_scope(self):
+    def test_no_tools_are_offered_and_call_tool_refuses(self):
         seen = []
 
-        def catalog(app):
-            if app == 'github':
-                raise ValueError('signed out')
-            return [dict(d) for d in notion_tools(None).values()] + [{'name': 'zotero_read', 'app': 'zotero'}]
-        self.make(script=lambda session, text, ctx: seen.append(ctx.tools()) or default_script(session, text, ctx),
-                  tool_catalog=catalog)
-        task = self.task('a')
-        task['scope']['apps'] = [{'app': 'notion', 'access': 'read', 'resources': 'all'},
-                                 {'app': 'github', 'access': 'read', 'resources': 'all'}]
-        task['scope_approval']['scope_digest'] = self.scope.digest(task['scope'])
-        self.sched.submit('a', 'p1', 'x', None)
-        self.wait_state('a', 'idle')
-        self.assertEqual(sorted(d['name'] for d in seen[0]), ['notion_browse', 'notion_page_append', 'notion_read'])
-
-    def test_tools_without_a_catalog_is_empty(self):
-        seen = []
-        self.make(script=lambda session, text, ctx: seen.append(ctx.tools()) or default_script(session, text, ctx))
+        def script(session, text, ctx):
+            seen.append(ctx.tools())
+            with self.assertRaisesRegex(ValueError, 'Unknown tool'):
+                ctx.call_tool('anything', {}, 'c1')
+            with self.assertRaises(ValueError):
+                ctx.call_tool('anything', {}, 'bad id!')
+            seen.append('refused')
+            return default_script(session, text, ctx)
+        self.make(script=script)
         self.task('a')
         self.sched.submit('a', 'p1', 'x', None)
         self.wait_state('a', 'idle')
-        self.assertEqual(seen, [[]])
+        self.assertEqual(seen, [[], 'refused'])
 
     def test_observed_actions_are_audited_as_provider_sandbox(self):
         seen = []
@@ -886,23 +804,23 @@ class WorkspaceTests(unittest.TestCase):
             (repo / 'a.py').write_text('one\n')
             subprocess.run(git + ['-C', str(repo), 'add', '.'], check=True)
             subprocess.run(git + ['-C', str(repo), 'commit', '-qm', 'base'], check=True)
-            spaces = scheduler.Workspaces(root / 'workspaces')
-            info = spaces.prepare('a' * 32, 'p1', str(repo))
+            clones = scheduler.Workspaces(root / 'workspaces')
+            info = clones.prepare('a' * 32, 'p1', str(repo))
             work = Path(info['path'])
             self.assertEqual(info['branch'], 'interspace/task-aaaaaaaa')
             remotes = subprocess.run(['git', '-C', str(work), 'remote'], capture_output=True, text=True).stdout
             self.assertEqual(remotes.strip(), '')
-            self.assertEqual(spaces.prepare('a' * 32, 'p1', str(repo))['path'], info['path'])
+            self.assertEqual(clones.prepare('a' * 32, 'p1', str(repo))['path'], info['path'])
             (work / 'a.py').write_text('two\n')
             (work / 'b.py').write_text('new\n')
-            diff = spaces.diff(info)
+            diff = clones.diff(info)
             self.assertEqual(sorted((f['path'], f['change']) for f in diff['files']), [('a.py', 'modify'), ('b.py', 'add')])
             self.assertIn('+two', diff['patch'])
             subprocess.run(git + ['-C', str(work), 'commit', '-qam', 'agent'], check=True)
             subprocess.run(git + ['-C', str(repo), 'branch', 'interspace/task-aaaaaaaa'], check=True)  # Not ours.
-            published = spaces.publish(info, str(repo))
+            published = clones.publish(info, str(repo))
             self.assertEqual(published, 'interspace/task-aaaaaaaa-2')
-            self.assertEqual(spaces.publish(info, str(repo)), published, 'the chosen name is kept')
+            self.assertEqual(clones.publish(info, str(repo)), published, 'the chosen name is kept')
             head = subprocess.run(['git', '-C', str(repo), 'rev-parse', '--abbrev-ref', 'HEAD'], capture_output=True, text=True).stdout
             self.assertEqual(head.strip(), 'main')
             self.assertEqual((repo / 'a.py').read_text(), 'one\n')

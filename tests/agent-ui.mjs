@@ -1,10 +1,10 @@
-/* Agent task shell against fixture events only: no backend, runtime, provider or connector. */
+/* Agent task shell against fixture events only: no backend, runtime or provider. */
 import {readFileSync} from 'node:fs';
 export default async function check(page,url){
  const fixture=readFileSync('tests/fixtures/events/basic-task.jsonl','utf8').trim().split('\n').map(line=>JSON.parse(line));
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
  const assert=(v,m)=>{if(!v)throw Error(m);};
- const scope={v:1,task_id:'t1',version:1,projects:[{project_id:'p1',access:'write',read:['**'],write:['src/**','tests/**'],deny:[]}],commands:{workspace:'allow',allow:[],deny:[['git','push']]},network:{default:'ask',allow_hosts:[],deny_hosts:[]},apps:[{app:'notion',access:'read',resources:[{ref:'notion:page:n1',include_children:false}]}],web_search:'ask',limits:{token_budget:250000,time_limit_s:3600}};
+ const scope={v:1,task_id:'t1',version:1,projects:[{project_id:'p1',access:'write',read:['**'],write:['src/**','tests/**'],deny:[]}],commands:{workspace:'allow',allow:[],deny:[['git','push']]},network:{default:'ask',allow_hosts:[],deny_hosts:[]},apps:[],web_search:'ask',limits:{token_budget:250000,time_limit_s:3600}};
  const install=async()=>{
   await page.goto(url);
   if(!await page.evaluate(()=>!!document.getElementById('ispace').interspaceLab))await page.addScriptTag({path:'design/scene/lab-scene.js'});
@@ -55,11 +55,11 @@ export default async function check(page,url){
 
  // Scope chips summarise the displayed scope and its approval.
  const chips=await text(page.locator('#agent-view .scope-chips'));
- for(const part of ['src/**','tests/**','Notion','read','Network','ask','Web search','250,000','60 min','Approved'])assert(chips.includes(part),'Scope chip missing '+part+': '+chips);
+ for(const part of ['src/**','tests/**','write','Network','ask','Web search','250,000','60 min','Approved'])assert(chips.includes(part),'Scope chip missing '+part+': '+chips);
 
  // Streaming deltas, then the final message replaces them.
  await push(fixture.slice(0,6));
- assert((await text(stream)).includes('Fix the date parser and note it in the reading log.'),'User echo missing');
+ assert((await text(stream)).includes('Fix the date parser and refresh the pinned test data.'),'User echo missing');
  assert((await text(stream)).includes("I'll run the parser tests first."),'Delta not rendered');
  assert(await page.locator('#agent-view [data-item="m1"] .streaming').count()===1,'Streaming marker missing during deltas');
  await push(fixture.slice(6,7));
@@ -80,8 +80,8 @@ export default async function check(page,url){
  // Inline ask: Allow once sends the exact digest-bound answer without a scope digest.
  await push(fixture.slice(12,14));
  const ask=page.locator('#agent-view [data-item="a1"]');
- assert((await text(ask)).includes('Append to the Notion page "Reading log"?'),'Ask title missing');
- assert((await text(ask)).includes('notion:page:n1'),'Ask request detail missing');
+ assert((await text(ask)).includes('Run `pip download dateparser-data`?'),'Ask title missing');
+ assert((await text(ask)).includes('pip download dateparser-data'),'Ask request detail missing');
  assert((await text(page.locator('#agent-view .agent-status'))).includes('Needs your answer'),'Paused status missing');
  for(const name of ['Allow once','Add to scope','Deny'])assert(await ask.getByRole('button',{name,exact:true}).count()===1,'Ask option missing: '+name);
  await ask.getByRole('button',{name:'Allow once',exact:true}).click();
@@ -89,13 +89,13 @@ export default async function check(page,url){
  assert(answers.length===1&&JSON.stringify(answers[0].params)===JSON.stringify({task_id:'t1',ask_id:'a1',request_digest:fixture[12].data.request_digest,decision:'allow_once'}),'Allow once not exact: '+JSON.stringify(answers));
  assert(await ask.getByRole('button',{name:'Deny',exact:true}).isDisabled(),'Ask still answerable while sending');
 
- // App action pending then succeeded updates one card; the answer closes the ask.
+ // The allowed command runs then finishes in one card; the answer closes the ask.
  await push(fixture.slice(14,17));
- assert((await text(page.locator('#agent-view [data-item="c3"]'))).includes('Pending'),'Pending app action missing');
+ assert((await text(page.locator('#agent-view [data-item="c3"]'))).includes('Running'),'Running command card missing');
  await push(fixture.slice(17));
- assert(await page.locator('#agent-view [data-item="c3"]').count()===1,'App action split into two cards');
+ assert(await page.locator('#agent-view [data-item="c3"]').count()===1,'Command split into two cards');
  const c3=await text(page.locator('#agent-view [data-item="c3"]'));
- assert(c3.includes('Appended 1 block to "Reading log"')&&c3.includes('Succeeded'),'App action result missing: '+c3);
+ assert(c3.includes('Saved dateparser_data-1.0.tar.gz')&&c3.includes('Done'),'Command result missing: '+c3);
  assert((await text(ask)).includes('Allowed once')&&await ask.getByRole('button').count()===0,'Answered ask not closed');
  assert((await text(stream)).includes('Fixed parse_date to strip whitespace')||(await text(stream)).includes('Fixed `parse_date`')||(await stream.locator('code').filter({hasText:'parse_date'}).count())===1,'Final message missing');
  assert((await text(page.locator('#agent-view .agent-budget'))).includes('21,480 / 250,000'),'Budget header wrong: '+await text(page.locator('#agent-view .agent-budget')));
@@ -128,7 +128,6 @@ export default async function check(page,url){
  await page.keyboard.press('Enter');
  assert(await box.inputValue()==='Check @src/parser.py ','Mention not inserted: '+await box.inputValue());
  await page.keyboard.type('@read');
- assert((await text(menu)).includes('notion:page:n1'),'App mention from scope missing');
  await page.keyboard.press('Escape');
  assert(await menu.isHidden(),'Escape did not close menu');
  await page.keyboard.press('Shift+Enter');await page.keyboard.type('next line');
@@ -195,9 +194,9 @@ export default async function check(page,url){
  assert((await text(stream)).includes('FULL OUTPUT line 2'),'Full output not shown');
 
  // A failed answer re-enables the choices and shows the error inline.
- await push([ev(7,'ask',{ask_id:'q3',call_id:'x4',reason:'destructive',title:'Close GitHub issue #38?',detail:'Destructive app actions always ask.',request:{category:'app',app:'github',op:'destructive',action:'github.issue.close',ref:'github:issue:octo/notes#38'},options:['allow_once','deny'],scope_patch:null,patched_scope_digest:null,request_digest:'sha256:r3'},{item_id:'q3'})]);
+ await push([ev(7,'ask',{ask_id:'q3',call_id:'x4',reason:'escalation',title:'Run `make install` outside the sandbox?',detail:'Commands that leave the sandbox always ask.',request:{category:'command',argv:['make','install'],command:null,cwd:'.',sandbox:'escalated',network:false,project_id:'p1'},options:['allow_once','deny'],scope_patch:null,patched_scope_digest:null,request_digest:'sha256:r3'},{item_id:'q3'})]);
  const q3=page.locator('#agent-view [data-item="q3"]');
- assert(await q3.getByRole('button',{name:'Add to scope',exact:true}).count()===0,'Add to scope offered for destructive ask');
+ assert(await q3.getByRole('button',{name:'Add to scope',exact:true}).count()===0,'Add to scope offered for an escalation ask');
  await page.evaluate(()=>{window.agentFixture.hold.agent_answer=true;});
  await q3.getByRole('button',{name:'Deny',exact:true}).click();
  await page.evaluate(()=>{const f=window.agentFixture;f.fail(f.held.pop(),'The ask is no longer open.');f.hold.agent_answer=false;});
@@ -219,5 +218,5 @@ export default async function check(page,url){
  }}
  await page.emulateMedia({colorScheme:'light'});await page.setViewportSize({width:1280,height:1000});
  assert(!errors.length,'Page errors: '+errors.join(' | '));
- return {checks:'agent rows and legacy rows, history replay, streaming deltas, tool/diff/app-action cards, exact Allow once/Add to scope/Deny answers, failed answer recovery, duplicates/unknown kinds/versions, literal text, /commands and @mentions by keyboard, optimistic echo, running send gate, scope chips/editor/validation/exact edit/digest approval, gap recovery, truncated output blob, cancel, several running tasks at once, light/dark 320-1280 fit',responsiveStates:fits.length};
+ return {checks:'agent rows and legacy rows, history replay, streaming deltas, tool/diff/command cards, exact Allow once/Add to scope/Deny answers, failed answer recovery, duplicates/unknown kinds/versions, literal text, /commands and @mentions by keyboard, optimistic echo, running send gate, scope chips/editor/validation/exact edit/digest approval, gap recovery, truncated output blob, cancel, several running tasks at once, light/dark 320-1280 fit',responsiveStates:fits.length};
 }

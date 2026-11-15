@@ -1,6 +1,6 @@
 """`scope_default {project_id}`: the starting scope for a new agent task (README coordinator ruling, Wave 2C).
 
-Uses the real scope engine; the runtime and connectors are fakes. No provider, network or Keychain.
+Uses the real scope engine; the runtime is a fake. No provider, network or Keychain.
 """
 from pathlib import Path
 import json
@@ -72,7 +72,7 @@ class ServiceTests(unittest.TestCase):
         self.audit = FakeAudit()
         self.app = service.Application(root / 'data', provider=FakeProvider(), scope_api=scope, audit_api=self.audit,
                                        runtime_factory=lambda task_id: FakeRuntime(),
-                                       connector_factory=lambda name: None, interrupt_grace_s=0.2)
+                                       interrupt_grace_s=0.2)
         self.addCleanup(self.app.scheduler.shutdown, 5)
         project = projects.new_project(repo)
         with self.app.lock:

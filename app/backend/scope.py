@@ -11,27 +11,19 @@ import os
 import posixpath
 import re
 import shlex
-import time
 
 import budget
 
-try:  # spaces/base.py owns the shared time helpers once it exists (README conventions).
-    from spaces.base import iso_time
-except ImportError:  # pragma: no cover - exercised until stream 1A merges spaces/base.py
-    def iso_time(t):
-        return time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime(t)) + '.%03dZ' % int(t % 1 * 1000)
+from timeutil import iso_time
 
 
 VERSION = 1
 MAX_PROJECTS = 8
-MAX_APPS = 4
 MAX_PATTERNS = 64
 MAX_PATTERN_CHARS = 256
 MAX_PREFIX_ARGS = 8
 MAX_HOSTS = 64
-MAX_RESOURCES = 64
 MAX_ID_CHARS = 128
-MAX_REF_ID_CHARS = 512
 MAX_REQUEST_PATHS = 1000
 MAX_ARG_CHARS = 100000
 MIN_TIME_LIMIT_S = 60
@@ -40,7 +32,6 @@ DEFAULT_TIME_LIMIT_S = 3600
 
 ACCESS = ('read', 'write')
 TRISTATE = ('allow', 'ask', 'deny')
-APP_OPS = ('read', 'create', 'update', 'destructive')
 SANDBOXES = ('workspace', 'escalated')
 ANSWER_DECISIONS = ('allow_once', 'add_to_scope', 'deny', 'text', 'cancelled')
 TOP_LEVEL_KEYS = ('v', 'task_id', 'version', 'projects', 'commands', 'network', 'apps', 'web_search', 'limits')
@@ -78,7 +69,6 @@ BYPASS_FLAG_PAIRS = (('-a', 'never'), ('--ask-for-approval', 'never'))
 PRIVILEGE_PREFIXES = (('sudo',), ('su',), ('doas',), ('osascript',), ('launchctl',), ('csrutil',), ('spctl',),
                       ('tccutil',), ('systemsetup',), ('dscl',), ('defaults', 'write'))
 KEYCHAIN_COMMANDS = ('security',)
-KEYCHAIN_APPS = ('keychain',)
 SHARING_WORDS = frozenset(('share', 'shares', 'sharing', 'unshare', 'permission', 'permissions', 'invite', 'invites',
                            'invitation', 'collaborator', 'collaborators', 'member', 'members', 'membership', 'owner',
                            'ownership', 'impersonate', 'impersonation'))
@@ -93,7 +83,6 @@ GIT_GLOBAL_WITH_VALUE = ('-C', '-c')
 GIT_GLOBAL_FLAGS = ('--no-pager', '-P')
 GIT_GLOBAL_PREFIXES = ('--git-dir=', '--work-tree=', '--exec-path=')
 
-REF = re.compile(r'^([a-z][a-z0-9_]{0,31}):([a-z_]{1,32}):(.+)$', re.S)
 HOST = re.compile(r'^(\*\.)?[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$')
 DIGEST = re.compile(r'^sha256:[0-9a-f]{64}$')
 REDACT_FLAGS = ('--token', '--password', '--key', '-p')
@@ -112,15 +101,6 @@ def network_per_host():
     network request asks for "any host, this one command" and the host lists are not used.
     """
     return False
-
-
-def resource_ancestors(request):
-    """Parent chain of an app request's `ref`, nearest first, as the connector reported it.
-
-    `include_children` needs it; `decide` is pure, so the caller (RunContext.app_tool) supplies it as
-    the optional `parents` field. Without it only exact refs match. (Coordinator ruling, 2026-11-12.)
-    """
-    return request.get('parents') or []
 
 
 # ---------------------------------------------------------------- canonical JSON and digests
@@ -188,15 +168,6 @@ def _check_host(host):
         _fail('Hosts must be lowercase names without scheme or port, optionally starting with "*.".')
 
 
-def parse_ref(ref, app=None):
-    match = REF.match(ref) if isinstance(ref, str) else None
-    if not match or len(match.group(3)) > MAX_REF_ID_CHARS or any(ord(c) < 32 or ord(c) == 127 for c in ref):
-        _fail('Resource references must look like <app>:<kind>:<id>.')
-    if app is not None and match.group(1) != app:
-        _fail('A resource reference must belong to its app.')
-    return match.group(1), match.group(2), match.group(3)
-
-
 def _check_project(entry, project_ids):
     _check_keys(entry, ('project_id', 'access', 'read', 'write', 'deny'), 'Each project')
     _check_id(entry['project_id'], 'Project ID')
@@ -208,28 +179,6 @@ def _check_project(entry, project_ids):
         _check_list(entry[field], 'Project %s patterns' % field, MAX_PATTERNS, validate_pattern)
     if entry['write'] and entry['access'] != 'write':
         _fail('Write patterns need write access to the project.')
-
-
-def _check_app(entry):
-    _check_keys(entry, ('app', 'access', 'resources'), 'Each app')
-    if not isinstance(entry['app'], str) or not re.match(r'^[a-z][a-z0-9_]{0,31}$', entry['app']):
-        _fail('App names must be short lowercase names.')
-    if entry['access'] not in ACCESS:
-        _fail('App access must be read or write.')
-    resources = entry['resources']
-    if resources == 'all':
-        return
-    if not isinstance(resources, list) or not 1 <= len(resources) <= MAX_RESOURCES:
-        _fail('App resources must be "all" or 1 to %d resources.' % MAX_RESOURCES)
-    refs = set()
-    for resource in resources:
-        _check_keys(resource, ('ref', 'include_children'), 'Each app resource')
-        parse_ref(resource['ref'], entry['app'])
-        if type(resource['include_children']) is not bool:
-            _fail('include_children must be true or false.')
-        if resource['ref'] in refs:
-            _fail('An app resource is listed twice.')
-        refs.add(resource['ref'])
 
 
 def validate(document, *, project_ids=None):
@@ -256,10 +205,9 @@ def validate(document, *, project_ids=None):
         _fail('Network must be ask or deny.')
     _check_list(network['allow_hosts'], 'Allowed hosts', MAX_HOSTS, _check_host)
     _check_list(network['deny_hosts'], 'Denied hosts', MAX_HOSTS, _check_host)
-    apps = document['apps']
-    _check_list(apps, 'Apps', MAX_APPS, _check_app)
-    if len({entry['app'] for entry in apps}) != len(apps):
-        _fail('An app is listed twice in the scope.')
+    # Connected apps were removed (2026-11-15). The key stays, always empty, so saved scopes keep their digests.
+    if document['apps'] != []:
+        _fail('Connected apps are no longer supported; remove them from the scope.')
     if document['web_search'] not in TRISTATE:
         _fail('Web search must be allow, ask or deny.')
     limits = document['limits']
@@ -294,7 +242,7 @@ def project_default(project_id, *, token_budget=None, project_ids=None):
     """`scope_default {project_id}`: the scope the new agent task form starts from.
 
     The project's workspace is readable and writable and workspace commands run without asking.
-    No apps, no command network and no web search: the user widens the scope in the editor.
+    No command network and no web search: the user widens the scope in the editor.
     `token_budget` is the project's budget, or budget.DEFAULT_BUDGET when it has none.
     """
     _check_id(project_id, 'Project ID')
@@ -348,8 +296,8 @@ def merge_patch(document, patch):
     The version is unchanged; callers increment it. Raises ValueError for a patch outside the
     patchable fields or a result that is not a valid scope.
     """
-    if not isinstance(patch, dict) or not set(patch) <= {'projects', 'commands', 'network', 'apps'}:
-        _fail('A scope patch may only widen projects, commands, network hosts or apps.')
+    if not isinstance(patch, dict) or not set(patch) <= {'projects', 'commands', 'network'}:
+        _fail('A scope patch may only widen projects, commands or network hosts.')
     merged = copy.deepcopy(document)
     for entry in patch.get('projects', []):
         if not isinstance(entry, dict) or not set(entry) <= set(PATCH_PROJECT_FIELDS) or 'project_id' not in entry:
@@ -370,20 +318,6 @@ def merge_patch(document, patch):
     if not isinstance(network, dict) or not set(network) <= {'allow_hosts'}:
         _fail('A network patch may only add allowed hosts.')
     _append_missing(merged['network']['allow_hosts'], network.get('allow_hosts', []))
-    for entry in patch.get('apps', []):
-        if not isinstance(entry, dict) or not set(entry) <= {'app', 'access', 'resources'} or 'app' not in entry:
-            _fail('An app patch names an app and its widened fields.')
-        target = next((a for a in merged['apps'] if a['app'] == entry['app']), None)
-        if target is None:
-            target = {'app': entry['app'], 'access': 'read', 'resources': []}
-            merged['apps'].append(target)
-        if entry.get('access') == 'write':
-            target['access'] = 'write'
-        resources = entry.get('resources', [])
-        if resources == 'all':
-            target['resources'] = 'all'
-        elif target['resources'] != 'all':
-            _append_missing(target['resources'], resources)
     return validate(merged)
 
 
@@ -748,17 +682,6 @@ def _check_request(request):
         _need(_text(request.get('via'), 32))
     elif category == 'web_search':
         _need(_text(request.get('query'), 2000))
-    elif category == 'app':
-        app = request.get('app')
-        _need(_text(app, 32) and request.get('op') in APP_OPS and _text(request.get('action'), 64))
-        try:
-            parse_ref(request.get('ref'), app)
-            parents = request.get('parents', [])
-            _need(isinstance(parents, list) and len(parents) <= 256)
-            for parent in parents:
-                parse_ref(parent, app)
-        except ValueError:
-            raise _Invalid()
     elif category == 'mcp':
         _need(_text(request.get('server'), 128) and _text(request.get('tool'), 128))
     else:
@@ -831,8 +754,7 @@ def decide(scope, approval, request, *, workspace_roots, now, home=None, app_dat
                     'The task scope changed or is not approved yet.')
     category = request['category']
     handler = {'file_read': _decide_read, 'file_write': _decide_write, 'command': _decide_command,
-               'network': _decide_network, 'web_search': _decide_web_search, 'app': _decide_app,
-               'mcp': _decide_mcp}[category]
+               'network': _decide_network, 'web_search': _decide_web_search, 'mcp': _decide_mcp}[category]
     return handler(document, request, paths)
 
 
@@ -978,7 +900,7 @@ def _always_deny_command(document, request, normalized, paths, cwd):
     every_arg = [a for sequence in sequences for a in sequence] + normalized['git_config']
     for sequence in sequences:
         if any(_prefix_at(sequence, (name,)) >= 0 for name in KEYCHAIN_COMMANDS):
-            return _deny(document, DENY_KEYCHAIN, 'Only connectors reach the Keychain.')
+            return _deny(document, DENY_KEYCHAIN, 'Agents never use the Keychain.')
     for arg in every_arg:
         if any(marker in arg for marker in BYPASS_MARKERS):
             return _deny(document, DENY_BYPASS, 'Agents never run with the sandbox or approvals bypassed.')
@@ -1101,60 +1023,12 @@ def _changes_sharing(name):
     return bool(_words(name) & SHARING_WORDS)
 
 
-def _covers(resources, ref, ancestors):
-    if resources == 'all':
-        return True
-    for resource in resources:
-        if resource['ref'] == ref:
-            return True
-        if resource['include_children'] and resource['ref'] in ancestors:
-            return True
-    return False
-
-
-def _decide_app(document, request, paths):
-    app, op, action, ref = request['app'], request['op'], request['action'], request['ref']
-    # 2. Always deny.
-    if app in KEYCHAIN_APPS:
-        return _deny(document, DENY_KEYCHAIN, 'Only connectors reach the Keychain.')
-    if app == OWN_SERVER or action.startswith(OWN_SERVER + '.'):
-        return _deny(document, DENY_SCOPE_SELF_EDIT, 'Agents never change their own scope or limits.')
-    if _changes_sharing(action):
-        return _deny(document, DENY_SHARING, 'Agents never change sharing, permissions or ownership.')
-    # 4. Always ask.
-    if op == 'destructive':
-        return _ask(document, request, ASK_DESTRUCTIVE, 'destructive', 'Allow %s on %s?' % (action, _clip(ref, 120)),
-                    'Destructive app actions always ask, even inside the scope.')
-    # 5. Scope allow.
-    index = next((i for i, entry in enumerate(document['apps']) if entry['app'] == app), None)
-    title = 'Allow %s on %s?' % (action, _clip(ref, 120))
-    new_resource = [{'ref': ref, 'include_children': False}]
-    if index is None:
-        access = 'read' if op == 'read' else 'write'
-        return _ask(document, request, 'apps', 'outside_scope', title, 'The task scope does not include this app.',
-                    {'apps': [{'app': app, 'access': access, 'resources': new_resource}]})
-    entry = document['apps'][index]
-    covered = _covers(entry['resources'], ref, resource_ancestors(request))
-    needs_write = op != 'read'
-    rule = 'apps[%d].%s' % (index, 'write' if needs_write else 'read')
-    if covered and (not needs_write or entry['access'] == 'write'):
-        return _allow(document, rule)
-    # 6. Otherwise ask with the narrowest widening.
-    widened = {'app': app, 'access': 'write' if needs_write else entry['access']}
-    widened['resources'] = 'all' if entry['resources'] == 'all' else (new_resource if not covered else [])
-    if widened['resources'] == []:
-        del widened['resources']
-    detail = ('The scope gives read access to this app, not write.' if covered or entry['resources'] == 'all'
-              else 'The task scope does not cover this resource.')
-    return _ask(document, request, rule, 'outside_scope', title, detail, {'apps': [widened]})
-
-
 def _decide_mcp(document, request, paths):
     server, tool = request['server'], request['tool']
     if server == OWN_SERVER:
         if _words(tool) & SELF_EDIT_WORDS:
             return _deny(document, DENY_SCOPE_SELF_EDIT, 'Agents never change their own scope or limits.')
-        return _deny(document, RULE_INVALID, "Interspace's own tools are app requests, not MCP requests.")
+        return _deny(document, RULE_INVALID, "Interspace's own tools are not MCP requests.")
     if _changes_sharing(tool):
         return _deny(document, DENY_SHARING, 'Agents never change sharing, permissions or ownership.')
     return _ask(document, request, ASK_MCP, 'mcp_tool', 'Run MCP tool %s/%s?' % (_clip(server, 60), _clip(tool, 60)),

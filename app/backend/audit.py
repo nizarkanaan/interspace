@@ -1,8 +1,8 @@
-"""Append-only audit log and the durable connector write journal.
+"""Append-only audit log.
 
-Contracts: docs/superpowers/specs/agentic-spaces/scope.md (audit record) and connectors.md (Journal).
-Both files are JSON lines, written and fsynced one record at a time, and never rewritten. A crash
-can leave at most a torn last line; it is terminated, kept and skipped, never repaired in place.
+Contract: docs/superpowers/specs/agentic-spaces/scope.md (audit record). The log is JSON lines, written and
+fsynced one record at a time, and never rewritten. A crash can leave at most a torn last line; it is
+terminated, kept and skipped, never repaired in place. Records of removed kinds in older logs stay readable.
 """
 import hashlib
 import json
@@ -15,14 +15,11 @@ import uuid
 
 import scope
 
-try:  # spaces/base.py owns the shared time helpers once it exists (README conventions).
-    from spaces.base import iso_time
-except ImportError:  # pragma: no cover - exercised until stream 1A merges spaces/base.py
-    from scope import iso_time
+from timeutil import iso_time
 
 VERSION = 1
 ACTORS = ('agent', 'user', 'system')
-KINDS = ('decision', 'action', 'answer', 'scope', 'auth', 'user_write')
+KINDS = ('decision', 'action', 'answer', 'scope')
 DECISIONS = ('allow', 'ask', 'deny')
 OUTCOMES = ('succeeded', 'failed', 'outcome_unknown', 'cancelled')
 RECORD_FIELDS = ('v', 'id', 'at', 'prev', 'actor', 'kind', 'task_id', 'project_id', 'turn_id', 'call_id', 'request',
@@ -44,13 +41,11 @@ REQUEST_FIELDS = {
     'command': ('argv', 'command', 'cwd', 'sandbox', 'network', 'project_id'),
     'network': ('host', 'port', 'via'),
     'web_search': (),
-    'app': ('app', 'op', 'action', 'ref', 'parents', 'title'),
     'mcp': ('server', 'tool'),
 }
 DETAIL_FIELDS = {
     'answer': ('ask_id', 'request_digest'),
     'scope': ('from_version', 'to_version', 'from_digest', 'to_digest'),
-    'auth': ('app', 'state'),
 }
 
 
@@ -221,7 +216,7 @@ def _validate(record):
     if kind == 'decision':
         if request is None or decision not in DECISIONS or not isinstance(record.get('rule'), str):
             _fail('Decision records need the request, decision and rule.')
-    elif kind in ('action', 'user_write'):
+    elif kind == 'action':
         if request is None or outcome not in OUTCOMES:
             _fail('Action records need the request and a known outcome.')
     elif kind == 'answer':
@@ -230,8 +225,6 @@ def _validate(record):
     elif kind == 'scope':
         if request is not None:
             _fail('Scope records carry no request.')
-    if kind in ('auth', 'user_write') and actor != 'user':
-        _fail('Sign-in and Spaces UI writes are recorded for the user.')
     if outcome is not None and outcome not in OUTCOMES:
         _fail('Unknown action outcome.')
 
@@ -325,119 +318,3 @@ class AuditLog:
                     problems.append({'file': name, 'line': number, 'problem': 'prev_mismatch'})
                 previous = line
         return problems
-
-
-# ---------------------------------------------------------------- write journal
-
-JOURNAL_STATES = ('started', 'succeeded', 'failed', 'outcome_unknown')
-KEY = re.compile(r'^[A-Za-z0-9:_-]{1,128}$')
-DIGEST = re.compile(r'^sha256:[0-9a-f]{64}$')
-JOURNAL_FIELDS = ('v', 'at', 'key', 'app', 'action', 'ref', 'params_digest', 'state', 'result', 'error_code')
-
-
-class FileJournal:
-    """Durable `Journal` (connectors.md): `spaces/writes.jsonl` under Application Support.
-
-    Every transition appends a whole record; the last line for a key is its state. On startup,
-    every key still `started` gets an `outcome_unknown` line, and nothing re-sends it. A line that
-    names a key but cannot be read blocks that key as `outcome_unknown` (fail closed).
-    """
-
-    def __init__(self, path, *, clock=time.time):
-        self.path = str(path)
-        self.clock = clock
-        self._lock = threading.Lock()
-        self._records = {}
-        self._torn = False
-        with self._lock:
-            self._load()
-            for key, record in list(self._records.items()):
-                if record['state'] == 'started':
-                    self._write(dict(record, state='outcome_unknown'))
-
-    def _load(self):
-        try:
-            with open(self.path, 'rb') as handle:
-                data = handle.read()
-        except FileNotFoundError:
-            return
-        self._torn = bool(data) and not data.endswith(b'\n')
-        for line in data.split(b'\n'):
-            if not line:
-                continue
-            record = self._read_line(line)
-            if record is not None:
-                self._records[record['key']] = record
-
-    def _read_line(self, line):
-        try:
-            raw = json.loads(line.decode('utf-8'))
-        except (UnicodeDecodeError, ValueError):
-            return None
-        if not isinstance(raw, dict) or not isinstance(raw.get('key'), str):
-            return None
-        well_formed = (raw.get('v') == VERSION and set(raw) == set(JOURNAL_FIELDS)
-                       and raw.get('state') in JOURNAL_STATES)
-        if well_formed:
-            return raw
-        blocked = {field: raw.get(field) if field in ('key', 'app', 'action', 'ref', 'params_digest') else None
-                   for field in JOURNAL_FIELDS}
-        blocked.update(v=VERSION, state='outcome_unknown')
-        return blocked
-
-    def _write(self, record):
-        record = dict(record, v=VERSION, at=iso_time(self.clock()))
-        try:
-            _ensure_directory(os.path.dirname(os.path.abspath(self.path)))
-            _append_line(self.path, _encode(record), terminate_torn=self._torn)
-        except OSError:
-            # The line may have reached the disk without its fsync: block the key, never re-send.
-            self._torn = True
-            self._records[record['key']] = dict(record, state='outcome_unknown')
-            raise AuditFailed('The write journal could not be saved, so the write did not run.')
-        self._torn = False
-        self._records[record['key']] = record
-
-    def begin(self, key, app, action, ref, params_digest):
-        """Stored record for a known key (no write), or None after durably recording `started`."""
-        if not isinstance(key, str) or not KEY.match(key):
-            _fail('Write keys are 1 to 128 letters, digits, ":", "_" or "-".')
-        if not isinstance(params_digest, str) or not DIGEST.match(params_digest):
-            _fail('Write parameters need a sha256 digest.')
-        with self._lock:
-            stored = self._records.get(key)
-            if stored is not None:
-                return dict(stored)
-            self._write({'key': key, 'app': app, 'action': action, 'ref': ref, 'params_digest': params_digest,
-                         'state': 'started', 'result': None, 'error_code': None})
-        return None
-
-    def _transition(self, key, **changes):
-        with self._lock:
-            stored = self._records.get(key)
-            if stored is None or stored['state'] != 'started':
-                _fail('This write is not in progress.')
-            self._write(dict(stored, **changes))
-
-    def finish(self, key, result):
-        if not isinstance(result, dict):
-            _fail('A write result must be an object.')
-        self._transition(key, state='succeeded', result=result)
-
-    def fail(self, key, error_code):
-        if not isinstance(error_code, str) or not error_code:
-            _fail('A failed write needs an error code.')
-        self._transition(key, state='failed', error_code=error_code)
-
-    def unknown(self, key):
-        self._transition(key, state='outcome_unknown')
-
-    def get(self, key):
-        with self._lock:
-            stored = self._records.get(key)
-            return dict(stored) if stored is not None else None
-
-    def records(self):
-        """Latest record per key, oldest key first, for the UI's write history."""
-        with self._lock:
-            return [dict(record) for record in self._records.values()]

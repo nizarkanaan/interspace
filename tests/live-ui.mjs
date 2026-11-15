@@ -1,6 +1,6 @@
 /* Agent UI against the real backend: service.Router and Application with the real scope engine and audit log,
-   over the same JSON-lines protocol the Swift shell carries. The runtime and connectors are fakes:
-   no provider, model call, sign-in, Keychain or network. */
+   over the same JSON-lines protocol the Swift shell carries. The runtime is a fake:
+   no provider, model call, sign-in or network. */
 import {spawn} from 'node:child_process';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -36,28 +36,6 @@ class Provider:
     def sign_in(self, cancel, emit):
         pass
 
-class Connector:
-    def __init__(self, app):
-        self.app = app
-    def status(self):
-        signed = self.app == 'notion'
-        return {'v': 1, 'app': self.app, 'state': 'signed_in' if signed else 'signed_out',
-                'account': {'label': 'Harness workspace', 'id': 'w1'} if signed else None, 'granted': [],
-                'detail': '', 'checked_at': '2026-11-12T00:00:00.000Z'}
-    def browse(self, parent=None, cursor=None, limit=50):
-        items = [{'ref': 'notion:page:alpha', 'kind': 'page', 'title': 'Alpha plan', 'parent': None, 'url': None,
-                  'updated_at': None, 'has_children': False, 'meta': {}}] if parent is None else []
-        return {'v': 1, 'items': items, 'next_cursor': None}
-    def search(self, query, kinds=None, cursor=None, limit=25):
-        return self.browse()
-    def read(self, ref, cursor=None):
-        return {'v': 1, 'ref': ref, 'title': 'Alpha plan', 'format': 'markdown', 'text': 'Ship the parser fix.',
-                'truncated': False, 'next_cursor': None, 'version': None, 'url': None, 'meta': {}}
-    def actions(self):
-        return []
-    def changes(self, cursor=None, limit=100):
-        return {'v': 1, 'items': [], 'cursor': 'c', 'complete': True}
-
 def script(session, text, ctx):
     item = 'm-' + ctx.turn_id[:12]
     if 'wait' in text:
@@ -66,9 +44,9 @@ def script(session, text, ctx):
         return {'status': 'cancelled', 'usage': None, 'error': None}
     ctx.emit('message_delta', {'role': 'assistant', 'text_delta': 'Looking at '}, item_id=item)
     if 'ask' in text:
-        decision = ctx.authorize({'category': 'app', 'app': 'notion', 'op': 'read', 'action': 'notion.read',
-                                  'ref': 'notion:page:alpha'}, 'call-' + ctx.turn_id[:12])
-        ctx.emit('message', {'role': 'assistant', 'text': 'Notion read ' + decision['decision'] + ' (' + decision['rule'] + ')',
+        decision = ctx.authorize({'category': 'file_read', 'project_id': ctx.project_ids[0], 'path': 'parser.py'},
+                                 'call-' + ctx.turn_id[:12])
+        ctx.emit('message', {'role': 'assistant', 'text': 'File read ' + decision['decision'] + ' (' + decision['rule'] + ')',
                              'final': True}, item_id=item)
     else:
         ctx.emit('message', {'role': 'assistant', 'text': 'Done: ' + text, 'final': True}, item_id=item)
@@ -76,7 +54,7 @@ def script(session, text, ctx):
 
 runtime = FakeRuntime(script)
 app = service.Application(root / 'data', provider=Provider(), emit=emit, runtime_factory=lambda task_id: runtime,
-                          connector_factory=Connector, interrupt_grace_s=0.5)
+                          interrupt_grace_s=0.5)
 project = projects.new_project(repo)
 with app.lock:
     app.state['projects'][project['id']] = project
@@ -130,7 +108,7 @@ export default async function check(page,url){
   assert(calls('scope_default').length===0,'Invalid model reached the backend');
   await page.getByRole('button',{name:'Tasks',exact:true}).click();
 
-  await newAgent('Fix the parser','codex','','Please ask before reading Notion');
+  await newAgent('Fix the parser','codex','','Please ask before reading parser.py');
   const defaults=reply(calls('scope_default')[0]).result.scope;
   assert(defaults.network.default==='deny'&&defaults.apps.length===0&&defaults.web_search==='deny'&&defaults.projects[0].access==='write','Unexpected default scope '+JSON.stringify(defaults));
   assert((await page.locator('#new-agent-scope select').first().inputValue())==='write','Editor does not show the default scope');
@@ -140,16 +118,17 @@ export default async function check(page,url){
   assert(await page.locator('#new-task-form').isVisible()&&(await page.locator('#new-title').inputValue())==='Fix the parser','Back lost the draft');
   await page.getByRole('button',{name:'Review scope',exact:true}).click();
   await until(()=>page.locator('#new-agent-scope .scope-editor').isVisible(),'the scope editor again');
+  await page.locator('#new-agent-scope textarea').nth(0).fill('src/**');
   await page.locator('#new-agent-scope textarea').nth(2).fill('secrets/**');
   assert(calls('agent_create').length===0,'Task created before Create task');
   await page.getByRole('button',{name:'Create task',exact:true}).click();
   await until(()=>page.locator('#agent-view').isVisible(),'the new agent task');
   const create1=calls('agent_create')[0];
-  assert(create1.params.provider==='codex'&&create1.params.model===null&&create1.params.scope.projects[0].deny[0]==='secrets/**','agent_create params '+JSON.stringify(create1.params));
+  assert(create1.params.provider==='codex'&&create1.params.model===null&&create1.params.scope.projects[0].deny[0]==='secrets/**'&&create1.params.scope.projects[0].read[0]==='src/**','agent_create params '+JSON.stringify(create1.params));
   const taskA=reply(create1).result.task_id;
   await until(async()=>(await text(page.locator('#agent-view .scope-chips'))).includes('Needs approval'),'unapproved scope chips');
   assert((await text(page.locator('#agent-view .scope-chips'))).includes('Network: off'),'Network chip missing');
-  assert((await page.locator('#agent-message').inputValue())==='Please ask before reading Notion','First message not waiting in the composer');
+  assert((await page.locator('#agent-message').inputValue())==='Please ask before reading parser.py','First message not waiting in the composer');
   assert(await page.locator('#agent-send').isDisabled(),'Send enabled before approval');
   assert((await text(page.locator('#agent-head'))).includes('Runtime Codex · default model'),'Runtime line missing');
   // Approval binds the digest the backend returned.
@@ -162,13 +141,13 @@ export default async function check(page,url){
   await page.locator('#agent-message').press('Enter');
   await until(()=>page.locator('#agent-view .card.ask').isVisible(),'the ask prompt');
   const askCard=page.locator('#agent-view .card.ask');
-  assert((await text(askCard)).includes('notion:page:alpha')&&(await text(askCard)).includes('Outside the task scope'),'Ask card incomplete');
+  assert((await text(askCard)).includes('parser.py')&&(await text(askCard)).includes('Outside the task scope'),'Ask card incomplete');
   assert((await text(page.locator('#agent-view .agent-status'))).includes('Needs your answer'),'paused_ask status missing');
   await askCard.getByRole('button',{name:'Add to scope',exact:true}).click();
-  await until(async()=>(await text(page.locator('#agent-view .stream'))).includes('Notion read allow (ask.add_to_scope)'),'the amended turn to finish');
+  await until(async()=>(await text(page.locator('#agent-view .stream'))).includes('File read allow (ask.add_to_scope)'),'the amended turn to finish');
   const answer=calls('agent_answer')[0],askEvent=received.find(m=>m.type==='event'&&m.event.kind==='ask').event.data;
   assert(answer.params.request_digest===askEvent.request_digest&&answer.params.scope_digest===askEvent.patched_scope_digest&&answer.params.ask_id===askEvent.ask_id,'Answer digests not exact');
-  await until(async()=>(await text(page.locator('#agent-view .scope-chips'))).includes('Notion'),'the amended scope to reload');
+  await until(async()=>(await text(page.locator('#agent-view .scope-chips'))).includes('Approved · v2'),'the amended scope to reload');
   await until(async()=>(await text(page.locator('#agent-view .agent-status'))).includes('Waiting for your message'),'idle status');
 
   // A second task on Claude Code with a model.
@@ -212,13 +191,6 @@ export default async function check(page,url){
   assert(!(await text(page.locator('#agent-view .stream'))).includes('could not be loaded'),'Gap left unfilled');
   drop=null;
 
-  // Spaces sidebar through the real spaces_* methods.
-  await page.locator('[data-space="notion"]').click();
-  await until(async()=>(await text(page.locator('#space-panel'))).includes('Alpha plan'),'the Notion browse');
-  assert((await text(page.locator('#space-panel'))).includes('Connected to Harness workspace'),'Notion status missing');
-  assert(calls('spaces_browse').every(c=>c.params.app==='notion'),'Browse not app-scoped');
-  await until(async()=>(await text(page.locator('[data-space="notion"] small')))==='Harness workspace','sidebar account label');
-
   // Fit, light and dark, for the new form and the live views.
   const fits=[];
   for(const colorScheme of ['light','dark']){await page.emulateMedia({colorScheme});for(const width of [320,390,760,1024,1280]){await page.setViewportSize({width,height:900});
@@ -230,7 +202,7 @@ export default async function check(page,url){
    }}}
   await page.emulateMedia({colorScheme:'light'});await page.setViewportSize({width:1280,height:1000});
   assert(!errors.length,'Page errors: '+errors.join('; '));
-  return {checks:'real backend over JSON lines: new agent task form (title, project, runtime, model, validation), scope_default in the editor, edited scope on create, digest approval, ask answered through the real scope engine with Add to scope, several tasks running at once with separate streams, per-task cancel, gap recovery from task_events, Spaces browse through spaces_*, light/dark 320-1280 fit',responsiveStates:fits.length,requests:sent.length};
+  return {checks:'real backend over JSON lines: new agent task form (title, project, runtime, model, validation), scope_default in the editor, edited scope on create, digest approval, ask answered through the real scope engine with Add to scope, several tasks running at once with separate streams, per-task cancel, gap recovery from task_events, light/dark 320-1280 fit',responsiveStates:fits.length,requests:sent.length};
  }finally{
   child.stdin.end();await new Promise(resolve=>{const t=setTimeout(()=>{child.kill();resolve();},8000);child.on('exit',()=>{clearTimeout(t);resolve();});});
   rmSync(root,{recursive:true,force:true});

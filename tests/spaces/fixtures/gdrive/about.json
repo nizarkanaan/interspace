@@ -1,9 +1,0 @@
-{
- "kind": "drive#about",
- "user": {
-  "kind": "drive#user",
-  "displayName": "Example Person",
-  "permissionId": "01234567890123456789",
-  "me": true
- }
-}

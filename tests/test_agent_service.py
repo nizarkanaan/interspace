@@ -1,6 +1,5 @@
-"""Service wiring for agentic tasks: stdin routing, the Keychain bridge, agent and scope methods, Spaces
-requests, the legacy slot, and the agent-mode task and budget changes. Fakes only: no provider, no
-network, no Keychain."""
+"""Service wiring for agentic tasks: stdin routing, agent and scope methods, the legacy slot, and the
+agent-mode task and budget changes. Fakes only: no provider, no network, no Keychain."""
 import json
 from pathlib import Path
 import subprocess
@@ -22,9 +21,6 @@ import projects
 import scheduler
 import tasks
 from agent_fakes import FakeAudit, FakeRuntime, FakeScope, wait_for, wait_interrupt
-
-SECRET = 'canary-secret-value-7f3a'
-
 
 class Output:
     def __init__(self):
@@ -48,7 +44,6 @@ class Output:
 class StubApp:
     def __init__(self, emit):
         self.calls = []
-        self.bridge = service.KeychainBridge(emit, timeout_s=2)
         self.block = threading.Event()
         self.block.set()
 
@@ -56,8 +51,6 @@ class StubApp:
         self.calls.append(method)
         if method == 'slow':
             self.block.wait(5)
-        if method == 'spaces_secret':
-            return {'has_secret': service.BridgeCredentials(self.bridge, 'notion').get() is not None}
         if method == 'boom':
             raise RuntimeError('internal detail')
         return {'method': method}
@@ -70,22 +63,6 @@ class RouterTests(unittest.TestCase):
         self.router = service.Router(self.app, self.out)
         self.addCleanup(self.router.close, 5)
 
-    def test_keychain_replies_never_reach_request_handling_or_output(self):
-        self.assertEqual(self.router.route(json.dumps({'keychain_reply': 'kc-unknown', 'ok': True, 'secret': SECRET})), 'keychain')
-        self.assertEqual(self.router.route(json.dumps({'keychain_reply': 'kc-x', 'method': 'state', 'id': 1, 'secret': SECRET})), 'keychain')
-        time.sleep(0.05)
-        self.assertEqual(self.app.calls, [])
-        self.assertNotIn(SECRET, json.dumps(self.out.messages))
-
-    def test_bridge_hello_only_as_first_line(self):
-        self.assertEqual(self.router.route(json.dumps({'bridge_hello': {'keychain': 1, 'open_url': 1}})), 'hello')
-        self.assertEqual(self.app.bridge.capabilities, {'keychain': True, 'open_url': True})
-        other = service.Router(StubApp(self.out), self.out)
-        self.addCleanup(other.close, 5)
-        other.route(json.dumps({'id': 1, 'method': 'state'}))
-        self.assertEqual(other.route(json.dumps({'bridge_hello': {'keychain': 1}})), 'hello')
-        self.assertEqual(other.app.bridge.capabilities, {}, 'a late hello (for example from a confused sender) is ignored')
-
     def test_legacy_requests_keep_order_and_errors(self):
         for index, method in enumerate(['a', 'b', 'boom', 'c']):
             self.assertEqual(self.router.route(json.dumps({'id': index, 'method': method})), 'legacy')
@@ -97,111 +74,29 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(self.out.messages[2]['error'], 'Request failed. Check repository and provider access.')
         self.assertEqual(self.out.messages[5]['error'], 'Request must be an object')
 
-    def test_spaces_and_agent_requests_do_not_wait_behind_legacy(self):
+    def test_agent_requests_do_not_wait_behind_legacy(self):
         self.app.block.clear()
         self.router.route(json.dumps({'id': 'slow', 'method': 'slow'}))
         wait_for(lambda: 'slow' in self.app.calls)
-        self.assertEqual(self.router.route(json.dumps({'id': 's', 'method': 'spaces_status'})), 'spaces')
         self.assertEqual(self.router.route(json.dumps({'id': 'e', 'method': 'task_events'})), 'agent')
         self.assertEqual(self.router.route(json.dumps({'id': 'm', 'method': 'agent_message'})), 'agent')
-        wait_for(lambda: all(self.out.reply(i) for i in ('s', 'e', 'm')))
+        wait_for(lambda: all(self.out.reply(i) for i in ('e', 'm')))
         self.assertIsNone(self.out.reply('slow'))
         self.app.block.set()
         wait_for(lambda: self.out.reply('slow') is not None)
 
-    def test_credentials_call_inside_a_request_reads_its_reply_from_the_reader_thread(self):
-        self.router.route(json.dumps({'bridge_hello': {'keychain': 1, 'open_url': 1}}))
-        self.router.route(json.dumps({'id': 'q', 'method': 'spaces_secret'}))
-        wait_for(lambda: self.out.of_type('keychain'))
-        request = self.out.of_type('keychain')[0]
-        self.assertEqual((request['op'], request['account']), ('read', 'notion'))
-        self.assertNotIn('secret', request)
-        self.router.route(json.dumps({'keychain_reply': request['id'], 'ok': True, 'secret': json.dumps({'token': SECRET})}))
-        wait_for(lambda: self.out.reply('q') is not None)
-        self.assertEqual(self.out.reply('q'), {'id': 'q', 'result': {'has_secret': True}})
-        self.assertNotIn(SECRET, json.dumps(self.out.messages))
+    def test_former_bridge_lines_are_ordinary_requests(self):
+        for line in ({'keychain_reply': 'kc-1', 'ok': True}, {'bridge_hello': {'keychain': 1}}):
+            self.assertEqual(self.router.route(json.dumps(line)), 'legacy')
+        wait_for(lambda: len(self.app.calls) == 2)
+        self.assertEqual(self.app.calls, [None, None])
 
     def test_serve_reads_until_end_of_input(self):
         closed = threading.Event()
-        lines = [json.dumps({'id': 1, 'method': 'a'}) + '\n', json.dumps({'keychain_reply': 'kc-1', 'ok': False}) + '\n']
+        lines = [json.dumps({'id': 1, 'method': 'a'}) + '\n', json.dumps({'id': 2, 'method': 'b'}) + '\n']
         self.router.serve(iter(lines), closed)
-        wait_for(lambda: self.out.reply(1) is not None)
-        self.assertEqual(self.app.calls, ['a'])
-
-
-class BridgeTests(unittest.TestCase):
-    def test_nothing_is_sent_before_hello(self):
-        out = Output()
-        bridge = service.KeychainBridge(out, timeout_s=1)
-        started = time.monotonic()
-        with self.assertRaises(service.CredentialStoreUnavailable):
-            service.BridgeCredentials(bridge, 'github').get()
-        self.assertLess(time.monotonic() - started, 0.5)
-        with self.assertRaises(ValueError):
-            bridge.open_url('https://github.com/login/device')
-        self.assertEqual(out.messages, [])
-
-    def test_replies_timeouts_and_open_url(self):
-        out = Output()
-        bridge = service.KeychainBridge(out, timeout_s=0.1)
-        bridge.hello({'keychain': 1, 'open_url': 1})
-        with self.assertRaises(service.CredentialStoreUnavailable):
-            service.BridgeCredentials(bridge, 'github').get()
-        self.assertFalse(bridge.reply({'keychain_reply': out.of_type('keychain')[0]['id'], 'ok': True}), 'late reply is dropped')
-        with self.assertRaises(ValueError):
-            bridge.keychain('read', 'other-app')
-        bridge.timeout_s = 2
-        credentials = service.BridgeCredentials(bridge, 'github')
-
-        def answer(reply):
-            wait_for(lambda: len(out.of_type('keychain')) > answer.count)
-            message = out.of_type('keychain')[-1]
-            answer.count += 1
-            bridge.reply(dict(reply, keychain_reply=message['id']))
-        answer.count = 1
-        for reply, call, expected in (({'ok': False, 'error': 'not_found'}, credentials.get, None),
-                                      ({'ok': True}, lambda: credentials.set({'token': SECRET}), None),
-                                      ({'ok': True}, credentials.delete, None)):
-            thread = threading.Thread(target=answer, args=(reply,))
-            thread.start()
-            self.assertEqual(call(), expected)
-            thread.join(2)
-        write = out.of_type('keychain')[2]
-        self.assertEqual((write['op'], json.loads(write['secret'])), ('write', {'token': SECRET}))
-        thread = threading.Thread(target=answer, args=({'ok': False, 'error': 'denied'},))
-        thread.start()
-        with self.assertRaisesRegex(service.CredentialStoreUnavailable, 'refused'):
-            credentials.get()
-        thread.join(2)
-        for bad in ('http://example.com', 'javascript:alert(1)', 'file:///etc/passwd', None):
-            with self.assertRaises(ValueError):
-                bridge.open_url(bad)
-        bridge.open_url('https://github.com/login/device')
-        self.assertEqual(out.of_type('open_url'), [{'type': 'open_url', 'url': 'https://github.com/login/device'}])
-
-
-class FakeSpacesConnector:
-    def __init__(self, name):
-        self.app = name
-        self.writes = []
-
-    def status(self):
-        return {'v': 1, 'app': self.app, 'state': 'signed_in', 'account': {'label': 'me', 'id': '1'}, 'granted': [],
-                'detail': '', 'checked_at': '2026-11-12T00:00:00.000Z'}
-
-    def browse(self, parent=None, cursor=None, limit=50):
-        return {'v': 1, 'items': [], 'next_cursor': None}
-
-    def write(self, action, ref, params, key):
-        self.writes.append((action, ref, params, key))
-        return {'v': 1, 'ok': True, 'action': action, 'ref': ref, 'result_ref': ref, 'url': None, 'version': None,
-                'replayed': False, 'summary': 'Done.'}
-
-    def changes(self, cursor=None, limit=100):
-        if cursor is None:
-            return {'v': 1, 'items': [], 'cursor': 'c1', 'complete': True}
-        return {'v': 1, 'items': [{'ref': self.app + ':page:x', 'change': 'updated', 'at': 'x', 'title': 'X'}],
-                'cursor': 'c2', 'complete': True}
+        wait_for(lambda: self.out.reply(2) is not None)
+        self.assertEqual(self.app.calls, ['a', 'b'])
 
 
 class FakeProvider:
@@ -227,14 +122,12 @@ class ApplicationCase(unittest.TestCase):
         self.scope = FakeScope()
         self.audit = FakeAudit()
         self.runtime = FakeRuntime()
-        self.connectors = {}
 
     def open(self, data=None):
         self.out = Output()
-        factory = lambda name: self.connectors.setdefault(name, FakeSpacesConnector(name))
         app = service.Application(data or self.root / 'data', provider=FakeProvider(), emit=self.out,
                                   scope_api=self.scope, audit_api=self.audit, runtime_factory=lambda task_id: self.runtime,
-                                  connector_factory=factory, interrupt_grace_s=0.2)
+                                  interrupt_grace_s=0.2)
         self.addCleanup(app.scheduler.shutdown, 5)
         return app
 
@@ -424,36 +317,6 @@ class DecideOptionTests(ApplicationCase):
         self.assertEqual(self.scope.decide_options[0]['app_data'], str(app.storage))
 
 
-class SpacesMethodTests(ApplicationCase):
-    def test_status_write_and_changes(self):
-        app = self.open()
-        status = app.handle('spaces_status', {})
-        self.assertEqual([s['app'] for s in status['apps']], ['notion', 'github', 'gdrive', 'zotero'])
-        self.assertEqual(app.handle('state', {})['spaces']['apps']['github']['state'], 'signed_in')
-        with self.assertRaisesRegex(ValueError, 'Unknown app'):
-            app.handle('spaces_browse', {'app': 'dropbox'})
-        result = app.handle('spaces_write', {'app': 'notion', 'action': 'notion.page.append', 'ref': 'notion:page:n1',
-                                             'params': {'markdown': 'hi'}, 'idempotency_key': 'k1'})
-        self.assertTrue(result['ok'])
-        records = [r for r in self.audit.records if r['kind'] == 'user_write']
-        self.assertEqual([(r['actor'], r['outcome'], r['idempotency_key']) for r in records], [('user', 'succeeded', 'k1')])
-        self.assertEqual(app.locks.holders(), {})
-        self.audit.fail = True  # The write already happened; its result is still returned, never re-sent.
-        self.assertTrue(app.handle('spaces_write', {'app': 'notion', 'action': 'notion.page.append', 'ref': 'notion:page:n1',
-                                                    'params': {}, 'idempotency_key': 'k2'})['ok'])
-        self.assertEqual(len(self.connectors['notion'].writes), 2)
-        self.audit.fail = False
-        self.assertEqual(app.handle('spaces_changes', {})['apps']['notion'], [])
-        self.assertEqual(len(app.handle('spaces_changes', {})['apps']['notion']), 1)
-
-    def test_without_connectors_spaces_report_unavailable(self):
-        app = self.open()
-        app.spaces.factory = lambda name: (_ for _ in ()).throw(ValueError('Connected apps are not available in this build yet.'))
-        app.spaces._connectors = {}
-        status = app.handle('spaces_status', {})
-        self.assertEqual({s['state'] for s in status['apps']}, {'unavailable'})
-
-
 class AgentModeTests(unittest.TestCase):
     def test_agent_task_shape(self):
         with self.assertRaisesRegex(ValueError, 'project'):
@@ -485,8 +348,7 @@ class RuntimeWiringTests(ApplicationCase):
         self.addCleanup(restore)
         self.out = Output()
         app = service.Application(self.root / 'data', provider=FakeProvider(), emit=self.out, scope_api=self.scope,
-                                  audit_api=self.audit, connector_factory=lambda name: FakeSpacesConnector(name),
-                                  interrupt_grace_s=0.2)
+                                  audit_api=self.audit, interrupt_grace_s=0.2)
         self.addCleanup(app.scheduler.shutdown, 5)
         return app
 
@@ -529,40 +391,6 @@ class RuntimeWiringTests(ApplicationCase):
         task_id = self.create(app, project_id)
         app.handle('agent_message', {'task_id': task_id, 'text': 'go', 'client_id': 'c1'})
         wait_for(lambda: self.agent_state(app, task_id) == 'failed')
-
-
-class ToolCatalogTests(ApplicationCase):
-    """`tool_catalog(app) -> [ToolDescriptor]` for RunContext.tools() (scheduler.md, Wave 2A additions)."""
-
-    def test_catalog_lists_tools_of_signed_in_apps_only(self):
-        app = self.open()
-        base = service.optional_module('spaces.base')
-        with mock.patch.object(base, 'tools', lambda connector: [{'name': connector.app + '_browse'}]):
-            self.assertEqual(app.tool_catalog('notion'), [{'name': 'notion_browse'}])
-            self.assertEqual(app.tool_catalog('ghost'), [])
-            self.assertEqual(app.tool_catalog(None), [])
-            signed_out = FakeSpacesConnector('github')
-            signed_out.status = lambda: {'v': 1, 'app': 'github', 'state': 'signed_out'}
-            self.connectors['github'] = signed_out
-            self.assertEqual(app.tool_catalog('github'), [])
-            broken = FakeSpacesConnector('gdrive')
-            broken.status = mock.Mock(side_effect=OSError('offline'))
-            self.connectors['gdrive'] = broken
-            self.assertEqual(app.tool_catalog('gdrive'), [], 'a failing app is left out')
-        with mock.patch.object(base, 'tools', mock.Mock(side_effect=RuntimeError('bad descriptor'))):
-            self.assertEqual(app.tool_catalog('notion'), [])
-
-    def test_scheduler_gets_the_catalog_only_when_it_accepts_one(self):
-        received = {}
-
-        class Accepting(scheduler.Scheduler):
-            def __init__(self, *args, tool_catalog=None, **kwargs):
-                received['tool_catalog'] = tool_catalog
-                super().__init__(*args, **kwargs)
-        with mock.patch.object(scheduler, 'Scheduler', Accepting):
-            app = self.open()
-        self.assertEqual(received['tool_catalog'], app.tool_catalog)
-        self.assertIsInstance(self.open().scheduler, scheduler.Scheduler)  # Today's constructor: not passed.
 
 
 class ApplyAnswerAdapterTests(unittest.TestCase):

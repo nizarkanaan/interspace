@@ -13,7 +13,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / 'app' / 'backend') not in sys.path:
-    # Appended, not prepended: under discovery `spaces` must stay the tests/spaces package.
+    # Appended, not prepended, so the tests folder keeps priority under discovery.
     sys.path.append(str(ROOT / 'app' / 'backend'))
 
 
@@ -76,7 +76,7 @@ class FakeContext:
         self.decisions = decisions or {}
         self.authorized = []
         self.events = []
-        self.app_calls = []
+        self.tool_calls = []
         self.tool_list = []
         self.lock = threading.Lock()
 
@@ -95,10 +95,10 @@ class FakeContext:
         with self.lock:
             self.events.append((kind, data, item_id))
 
-    def app_tool(self, name, arguments, call_id):
+    def call_tool(self, name, arguments, call_id):
         with self.lock:
-            self.app_calls.append((name, arguments, call_id))
-        return {'ok': True, 'result': {'title': 'Reading log'}}
+            self.tool_calls.append((name, arguments, call_id))
+        return {'ok': True, 'result': {'title': 'Example item'}}
 
     def report_usage(self, usage):
         pass
@@ -110,7 +110,7 @@ class FakeContext:
 class FakeBridge:
     """Stands in for 2A's `mcp_bridge.start(tools)`: a token-checked unix socket the fake CLI calls.
 
-    Like the real bridge, it runs each call through the bound turn's `ctx.app_tool` with its own call_id.
+    Like the real bridge, it runs each call through the bound turn's `ctx.call_tool` with its own call_id.
     """
     TOKEN = 'tok-' + 'f' * 32
 
@@ -144,7 +144,7 @@ class FakeBridge:
             if call.get('token') != self.TOKEN or self.ctx is None:
                 reply = {'ok': False, 'error': {'code': 'invalid_request', 'message': 'not bound'}}
             else:
-                reply = self.ctx.app_tool(call['name'], call['arguments'], 'mcp_' + 'a' * 32)
+                reply = self.ctx.call_tool(call['name'], call['arguments'], 'mcp_' + 'a' * 32)
             conn.sendall((json.dumps(reply) + '\n').encode())
             conn.close()
 
@@ -204,7 +204,7 @@ class ClaudeCase(unittest.TestCase):
     def turn(self, scenario, ctx=None, text='Summarise the notes.', bridge=False, **options):
         ctx = ctx or FakeContext(self.root)
         if bridge:
-            ctx.tool_list = [{'name': 'notion_page_get', 'app': 'notion', 'effect': 'read', 'input_schema': {}}]
+            ctx.tool_list = [{'name': 'example_get', 'effect': 'read', 'input_schema': {}}]
         runtime = self.runtime(scenario, bridge=bridge, **options)
         session = runtime.open(ctx)
         self.addCleanup(session.close)
@@ -298,7 +298,7 @@ class LaunchTests(ClaudeCase):
         self.assertTrue(self.bridges[0].stopped)
         self.assertFalse(os.path.exists(path))
 
-    def test_no_connector_tools_no_bridge(self):
+    def test_no_tools_no_bridge(self):
         _, _, outcome = self.turn({'turns': [simple_turn()]})
         self.assertEqual(outcome['status'], 'completed', outcome)
         self.assertEqual(self.bridges, [])
@@ -518,22 +518,22 @@ class PermissionTests(ClaudeCase):
         self.assertEqual(outcome['error']['code'], 'runtime_protocol')
         self.assertEqual(ctx.authorized, [])
 
-    def test_connector_tool_runs_through_app_tool(self):
-        steps = [INIT, self.ask('mcp__interspace__notion_page_get', {'ref': 'notion:page:n1'}, 'toolu_7', no_result=True),
-                 {'mcp_call': {'name': 'notion_page_get', 'arguments': {'ref': 'notion:page:n1'}, 'tool_use_id': 'toolu_7'}},
+    def test_bridge_tool_runs_through_call_tool(self):
+        steps = [INIT, self.ask('mcp__interspace__example_get', {'ref': 'item-1'}, 'toolu_7', no_result=True),
+                 {'mcp_call': {'name': 'example_get', 'arguments': {'ref': 'item-1'}, 'tool_use_id': 'toolu_7'}},
                  assistant_text('ok'), result()]
         _, ctx, outcome = self.turn({'turns': [steps]}, bridge=True)
         self.assertEqual(outcome['status'], 'completed', outcome)
-        self.assertEqual(ctx.authorized, [])  # app_tool authorizes connector calls itself.
-        self.assertEqual(ctx.app_calls, [('notion_page_get', {'ref': 'notion:page:n1'}, 'mcp_' + 'a' * 32)])
+        self.assertEqual(ctx.authorized, [])  # call_tool authorizes bridge calls itself.
+        self.assertEqual(ctx.tool_calls, [('example_get', {'ref': 'item-1'}, 'mcp_' + 'a' * 32)])
         self.assertEqual(self.answers()[0]['behavior'], 'allow')
-        self.assertEqual(ctx.kinds(), ['message'])  # RunContext.app_tool emits connector events.
+        self.assertEqual(ctx.kinds(), ['message'])  # RunContext.call_tool emits bridge call events.
         replies = [e['mcp_reply'] for e in self.entries() if 'mcp_reply' in e]
-        self.assertEqual(replies, [{'ok': True, 'result': {'title': 'Reading log'}}])
+        self.assertEqual(replies, [{'ok': True, 'result': {'title': 'Example item'}}])
 
-    def test_connector_call_without_permission_prompt_fails_turn(self):
-        # app_tool still authorized the call itself; the unanswered tool_result then fails the turn.
-        steps = [INIT, {'mcp_call': {'name': 'notion_page_get', 'arguments': {'ref': 'notion:page:n1'},
+    def test_bridge_call_without_permission_prompt_fails_turn(self):
+        # call_tool still authorized the call itself; the unanswered tool_result then fails the turn.
+        steps = [INIT, {'mcp_call': {'name': 'example_get', 'arguments': {'ref': 'item-1'},
                                      'tool_use_id': 'toolu_x'}}, result()]
         _, ctx, outcome = self.turn({'turns': [steps]}, bridge=True)
         self.assertEqual(outcome['status'], 'failed')
@@ -565,7 +565,7 @@ class ProtocolTests(ClaudeCase):
 
     def test_init_is_checked(self):
         for override in ({'tools': list(claude.TOOLS) + ['Agent']}, {'model': 'claude-haiku-5-5'},
-                         {'permissionMode': 'bypassPermissions'}, {'mcp_servers': [{'name': 'github', 'status': 'connected'}]}):
+                         {'permissionMode': 'bypassPermissions'}, {'mcp_servers': [{'name': 'other', 'status': 'connected'}]}):
             self.log.unlink(missing_ok=True)
             self.assertProtocol([{'init': override}, assistant_text('x'), result()])
 

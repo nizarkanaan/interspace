@@ -55,10 +55,3 @@ def make_factory(app):
         return made[provider]
     return factory
 
-
-def tool_catalog(app):
-    """`tool_catalog(app_name) -> [ToolDescriptor]` for `Scheduler(tool_catalog=…)`, from the Spaces connectors."""
-    def catalog(app_name):
-        base = importlib.import_module('spaces.base')
-        return base.tools(app.spaces.connector(app_name))
-    return catalog

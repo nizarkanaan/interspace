@@ -2,8 +2,8 @@
    (scheduler.md, scope.md); every scope digest it sends was displayed from a backend reply. */
 (()=>{
 const S=window.interspaceStream,Scope=window.interspaceScope;
-const scopes=new Map(),drafts=new Map(),extraMentions=[];
-let host=null,state=null,view='tasks',current=null,lastAgent=null,shownDraftFor=null,clientCount=0;
+const scopes=new Map(),drafts=new Map();
+let host=null,state=null,view='tasks',current=null,shownDraftFor=null,clientCount=0;
 const $=id=>document.getElementById(id);
 const el=(tag,cls,text,parent)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=String(text);if(parent)parent.append(e);return e;};
 const tokens=n=>Number(n||0).toLocaleString('en-US');
@@ -35,22 +35,10 @@ const commands=()=>[
  {name:'scope',hint:'Edit this task’s scope',run:()=>{scopeInfo(current).editing=true;touch(current);}},
  {name:'approve',hint:'Approve the displayed scope',run:()=>approveScope(current)},
  {name:'stop',hint:'Stop this task',run:()=>cancel(current)},
- {name:'spaces',hint:'Browse connected apps',run:()=>host.navigate('space')},
  {name:'running',hint:'Show every running task',run:()=>host.navigate('running')},
  {name:'tasks',hint:'Back to the task desk',run:()=>host.navigate('tasks')}
 ];
-function mentions(){
- const info=scopeInfo(current),out=[...S.mentions(current)];
- for(const a of info.scope?.apps||[])if(Array.isArray(a.resources))for(const r of a.resources)out.push({value:r.ref,hint:S.appName(a.app)});
- return [...extraMentions,...out];
-}
-function insertMention(ref,label){
- if(!lastAgent)return {ok:false,text:'Open an agent task first, then mention this again.'};
- extraMentions.unshift({value:ref,hint:label||''});
- const draft=drafts.get(lastAgent)||'';drafts.set(lastAgent,draft+(draft&&!/\s$/.test(draft)?' ':'')+'@'+ref+' ');
- shownDraftFor=null;if(current===lastAgent&&view==='agent')$('agent-message').value=drafts.get(lastAgent);
- return {ok:true,text:'Added @'+ref+' to the message for “'+title(lastAgent)+'”.'};
-}
+const mentions=()=>S.mentions(current);
 
 function head(container,id){
  container.replaceChildren();
@@ -113,9 +101,9 @@ window.interspaceAgent={
   window.interspaceComposer.attach({input:$('agent-message'),menu:$('agent-menu'),form:$('agent-composer'),commands,mentions,onSend:send,onInput:text=>{if(current)drafts.set(current,text);}});
   $('agent-stop').onclick=()=>cancel(current);$('agent-back').onclick=()=>host.navigate('tasks');
  },
- isAgent,title:()=>title(current),insertMention,
+ isAgent,title:()=>title(current),
  setDraft(id,text){drafts.set(id,text);if(current===id)shownDraftFor=null;},
- open(id){current=id;lastAgent=id;S.sync(id);if(!scopes.has(id)||!scopeInfo(id).scope)loadScope(id);},
+ open(id){current=id;S.sync(id);if(!scopes.has(id)||!scopeInfo(id).scope)loadScope(id);},
  render(nextState,nextView){state=nextState;view=nextView;refresh();}
 };
 })();

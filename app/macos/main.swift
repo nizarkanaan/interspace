@@ -1,5 +1,4 @@
 import AppKit
-import Security
 import WebKit
 
 /// Methods the WebView may send to the backend. Everything else is refused here.
@@ -10,70 +9,7 @@ let allowedMethods: Set<String> = [
     // Agentic tasks (scheduler.md, events.md, scope.md)
     "agent_create", "agent_message", "agent_answer", "agent_cancel", "task_events", "task_blob",
     "scope_get", "scope_update", "scope_approve", "scope_default", "scheduler_settings",
-    // Spaces (connectors.md)
-    "spaces_status", "spaces_sign_in", "spaces_complete_sign_in", "spaces_cancel_sign_in", "spaces_sign_out",
-    "spaces_browse", "spaces_search", "spaces_read", "spaces_actions", "spaces_write", "spaces_changes",
 ]
-
-/// Connector credentials in the login keychain (connectors.md, Keychain bridge). Only this type calls Keychain APIs.
-/// One generic-password item per app: service `app.interspace.spaces`, account = app name. PROVISIONAL(0C-1)
-enum SpacesKeychain {
-    static let service = "app.interspace.spaces"
-    static let apps: [String: String] = ["notion": "Notion", "github": "GitHub", "gdrive": "Google Drive", "zotero": "Zotero"]
-    static let maxSecretBytes = 64 * 1024
-
-    static func query(_ account: String) -> [String: Any] {
-        [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account,
-         kSecAttrSynchronizable as String: kCFBooleanFalse!]
-    }
-
-    static func failure(_ status: OSStatus) -> String {
-        switch status {
-        case errSecItemNotFound: return "not_found"
-        case errSecUserCanceled, errSecAuthFailed, errSecInteractionNotAllowed: return "denied"
-        default: return "unavailable"
-        }
-    }
-
-    /// Handles one validated `keychain` line and returns the reply. Secrets never leave this function except in the reply.
-    static func handle(_ message: [String: Any]) -> [String: Any]? {
-        guard let id = message["id"] as? String, id.hasPrefix("kc-"), id.count <= 64 else { return nil }
-        guard let op = message["op"] as? String, let account = message["account"] as? String, let title = apps[account] else {
-            return ["keychain_reply": id, "ok": false, "error": "unavailable"]
-        }
-        switch op {
-        case "read":
-            var item = query(account)
-            item[kSecReturnData as String] = kCFBooleanTrue
-            item[kSecMatchLimit as String] = kSecMatchLimitOne
-            var result: CFTypeRef?
-            let status = SecItemCopyMatching(item as CFDictionary, &result)
-            guard status == errSecSuccess, let data = result as? Data, let secret = String(data: data, encoding: .utf8) else {
-                return ["keychain_reply": id, "ok": false, "error": status == errSecSuccess ? "unavailable" : failure(status)]
-            }
-            return ["keychain_reply": id, "ok": true, "secret": secret]
-        case "write":
-            guard let secret = message["secret"] as? String, let data = secret.data(using: .utf8), data.count <= maxSecretBytes else {
-                return ["keychain_reply": id, "ok": false, "error": "unavailable"]
-            }
-            // One item per app, replaced in a single update so a rotated refresh token is never lost.
-            var status = SecItemUpdate(query(account) as CFDictionary, [kSecValueData as String: data] as CFDictionary)
-            if status == errSecItemNotFound {
-                var item = query(account)
-                item[kSecValueData as String] = data
-                item[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-                item[kSecAttrLabel as String] = "Interspace: \(title)"
-                status = SecItemAdd(item as CFDictionary, nil)
-            }
-            return status == errSecSuccess ? ["keychain_reply": id, "ok": true] : ["keychain_reply": id, "ok": false, "error": failure(status)]
-        case "delete":
-            let status = SecItemDelete(query(account) as CFDictionary)
-            return status == errSecSuccess ? ["keychain_reply": id, "ok": true] : ["keychain_reply": id, "ok": false, "error": failure(status)]
-        default:
-            return ["keychain_reply": id, "ok": false, "error": "unavailable"]
-        }
-    }
-}
 
 final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNavigationDelegate, NSWindowDelegate {
     var window: NSWindow!
@@ -83,7 +19,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     var output: Pipe?
     var pending = Data()
     let readQueue = DispatchQueue(label: "interspace.backend.read")
-    let keychainQueue = DispatchQueue(label: "interspace.keychain")
     let writeLock = NSLock()
     var ready = false
     var queued: [[String: Any]] = []
@@ -152,11 +87,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
                 self?.deliver(["type": "fatal", "error": "Local backend stopped (\(process.terminationStatus)). Reopen Interspace to restore saved work."])
             }
         }
-        do {
-            try process.run(); backend = process
-            // The handshake is the first stdin line: the backend sends Keychain and open_url lines only after it.
-            writeLine(["bridge_hello": ["keychain": 1, "open_url": 1]])
-        }
+        do { try process.run(); backend = process }
         catch { deliver(["type": "fatal", "error": "Could not start the local backend. Check Python installation and reopen Interspace."]) }
     }
 
@@ -166,29 +97,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             let line = pending.prefix(upTo: newline)
             pending.removeSubrange(...newline)
             if let message = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any] {
-                // Bridge lines are consumed here, before deliver, and never reach the WebView.
-                if let type = message["type"] as? String, type == "keychain" || type == "open_url" {
-                    handleBridge(type, message)
-                    continue
-                }
                 DispatchQueue.main.async { [weak self] in self?.deliver(message) }
             }
         }
     }
 
-    func handleBridge(_ type: String, _ message: [String: Any]) {
-        if type == "keychain" {
-            keychainQueue.async { [weak self] in
-                if let reply = SpacesKeychain.handle(message) { self?.writeLine(reply) }
-            }
-            return
-        }
-        guard let text = message["url"] as? String, let url = URL(string: text), url.scheme == "https",
-              let host = url.host, !host.isEmpty else { return }
-        DispatchQueue.main.async { NSWorkspace.shared.open(url) }
-    }
-
-    /// Writes one JSON line to the backend. Serialised, because Keychain replies and UI requests come from different threads.
+    /// Writes one JSON line to the backend. Serialised, because requests can come from different threads.
     @discardableResult
     func writeLine(_ message: [String: Any]) -> Bool {
         guard let backend, backend.isRunning, let input, var bytes = try? JSONSerialization.data(withJSONObject: message) else { return false }
@@ -237,7 +151,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         guard allowedMethods.contains(method) else {
             deliver(["id": request["id"] ?? NSNull(), "error": "Unsupported app action."]); return
         }
-        // Forward only id, method and params, so the WebView can never smuggle a keychain_reply or bridge_hello.
+        // Forward only id, method and params, so the WebView can never add other fields to a backend line.
         send(["id": request["id"] ?? NSNull(), "method": method, "params": request["params"] ?? [String: Any]()])
     }
 

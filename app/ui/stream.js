@@ -1,14 +1,12 @@
 /* Agent event stream (docs/superpowers/specs/agentic-spaces/events.md): an ordered per-task store and text-only cards.
-   Model, app and event text is only ever inserted with textContent. */
+   Model and event text is only ever inserted with textContent. */
 (()=>{
 const TERMINAL=new Set(['completed','failed','cancelled','budget_exhausted','time_limit','interrupted']);
 const BUSY=new Set(['queued','starting','running','waiting_lock','paused_ask','paused_scope','cancelling']);
 const STATUS={queued:'Queued',starting:'Starting',running:'Running',waiting_lock:'Waiting for a lock',paused_ask:'Needs your answer',paused_scope:'Scope needs approval',idle:'Waiting for your message',cancelling:'Stopping',completed:'Completed',failed:'Failed',cancelled:'Cancelled',budget_exhausted:'Token budget exhausted',time_limit:'Time limit reached',interrupted:'Interrupted: the app quit mid-task and nothing resumes automatically'};
 const NOTABLE=new Set(['queued','waiting_lock','paused_scope','cancelling',...TERMINAL]);
-const CATEGORY={command:'Command',file_read:'Read file',file_write:'Write files',network:'Network',app:'App read',web_search:'Web search',mcp:'MCP tool'};
-const APPS={notion:'Notion',github:'GitHub',gdrive:'Google Drive',zotero:'Zotero'};
+const CATEGORY={command:'Command',file_read:'Read file',file_write:'Write files',network:'Network',web_search:'Web search',mcp:'MCP tool'};
 const RESULT={ok:'Done',error:'Failed',denied:'Denied',cancelled:'Cancelled'};
-const ACTION={pending:'Pending',succeeded:'Succeeded',failed:'Failed',outcome_unknown:'Outcome unknown',denied:'Denied'};
 const REASON={outside_scope:'Outside the task scope',destructive:'Destructive action: always asks',network_host:'Network host not in the scope',escalation:'Asks to run outside the sandbox',mcp_tool:'External MCP tool: always asks',agent_question:'The agent asks you'};
 const OPTION={allow_once:'Allow once',add_to_scope:'Add to scope',deny:'Deny'};
 const ANSWERED={allow_once:'Allowed once',add_to_scope:'Added to scope',deny:'Denied',text:'Replied',cancelled:'Closed: the task was cancelled'};
@@ -19,18 +17,17 @@ let request=()=>Promise.reject(Error('No bridge')),changed=()=>{};
 const el=(tag,cls,text,parent)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=String(text);if(parent)parent.append(e);return e;};
 const tokens=n=>Number(n||0).toLocaleString('en-US');
 function model(id){
- if(!tasks.has(id))tasks.set(id,{id,lastSeq:0,buffer:new Map(),fetching:false,items:new Map(),status:null,budget:null,scopeEvent:null,workspace:null,openAsk:null,paths:new Set(),refs:new Map(),loadError:''});
+ if(!tasks.has(id))tasks.set(id,{id,lastSeq:0,buffer:new Map(),fetching:false,items:new Map(),status:null,budget:null,scopeEvent:null,workspace:null,openAsk:null,paths:new Set(),loadError:''});
  return tasks.get(id);
 }
 function item(m,key){let it=m.items.get(key);if(!it){it={key,version:0};m.items.set(key,it);}it.version++;return it;}
 function row(m,e,kind,fields){Object.assign(item(m,'seq:'+e.seq),{row:kind},fields);}
 const valid=e=>e&&typeof e==='object'&&typeof e.task_id==='string'&&e.task_id&&Number.isSafeInteger(e.seq)&&e.seq>0&&typeof e.kind==='string';
 
-// Paths and refs seen in a task become @mention candidates.
+// Paths seen in a task become @mention candidates.
 function remember(m,data){
  const input=data?.input||{};for(const p of [input.path,...(Array.isArray(input.paths)?input.paths:[])])if(typeof p==='string'&&p)m.paths.add(p);
  for(const f of data?.files||[])if(typeof f?.path==='string')m.paths.add(f.path);
- if(typeof data?.ref==='string'&&(data.title||!m.refs.has(data.ref)))m.refs.set(data.ref,data.title||'');
 }
 function apply(m,e){
  const d=e.data&&typeof e.data==='object'?e.data:{},key=typeof e.item_id==='string'&&e.item_id?e.item_id:'seq:'+e.seq;
@@ -45,7 +42,6 @@ function apply(m,e){
   case 'tool_output_delta':{const it=item(m,key);it.output=(it.output||'')+(d.text||'');return;}
   case 'tool_result':item(m,key).result=d;return;
   case 'diff':{remember(m,d);m.workspace=d.workspace||m.workspace;if(d.cumulative){m.items.delete('cumulative');item(m,'cumulative').diff=d;}else item(m,key).diff=d;return;}
-  case 'app_action':item(m,key).action=d;remember(m,d);return;
   case 'ask':{const it=item(m,key);it.ask=d;it.sending=false;it.answerError='';m.openAsk=key;if(d.request)remember(m,d.request);return;}
   case 'answer':{const it=item(m,key);it.answer=d;it.sending=false;if(m.openAsk===key)m.openAsk=null;return;}
   case 'budget':m.budget=d;if(d.charge_kind!=='reserved')row(m,e,'budget',{text:(d.charge_kind==='estimated'?'Estimated ':'Reported ')+tokens(d.tokens)+' tokens'+(d.charge_kind==='estimated'?' (no counts returned)':'')+' · '+tokens(d.used)+' / '+tokens(d.budget)+' used'});return;
@@ -125,7 +121,7 @@ function askCard(m,it,card){
 function patchText(patch){const out=[];const walk=(v,path)=>{if(Array.isArray(v)){v.forEach(x=>typeof x==='object'&&x?walk(x,path):out.push(path+': '+x));}else if(v&&typeof v==='object'){for(const [k,x] of Object.entries(v))walk(x,path?path+'.'+k:k);}else out.push(path+': '+v);};walk(patch,'');return out.join('; ');}
 function toolCard(m,it,card){
  const c=it.call||{},r=it.result;card.classList.add('tool');
- const head=el('div','card-head',null,card);el('span','badge',c.app?APPS[c.app]||c.app:CATEGORY[c.category]||c.category||'Tool',head);el('strong','mono',c.title||c.tool||'Tool call',head);
+ const head=el('div','card-head',null,card);el('span','badge',CATEGORY[c.category]||c.category||'Tool',head);el('strong','mono',c.title||c.tool||'Tool call',head);
  el('span','state '+(r?r.status:'running'),r?(RESULT[r.status]||r.status)+(r.exit_code!=null?' · exit '+r.exit_code:'')+(r.duration_ms!=null?' · '+r.duration_ms+' ms':''):it.call?'Running':'Output',head);
  const input=c.input||{};
  if(Array.isArray(input.argv))el('p','mono command',input.argv.join(' ')+(input.cwd&&input.cwd!=='.'?'   (in '+input.cwd+')':''),card);
@@ -137,22 +133,11 @@ function toolCard(m,it,card){
  if(r?.error)el('p','error-text',(r.error.code?r.error.code+': ':'')+r.error.message,card);
  if(it.diff)diffBlock(m,it,it.diff,card);
 }
-function actionCard(it,card){
- const a=it.action;card.classList.add('app-action');
- const head=el('div','card-head',null,card);el('span','badge',APPS[a.app]||a.app,head);el('strong','',a.title||a.action,head);el('span','state '+a.status,ACTION[a.status]||a.status,head);
- el('p','footnote',a.effect+' · '+a.action+' · '+a.ref,card);
- if(a.summary)el('p','',a.summary,card);
- if(a.result_ref)el('p','mono',a.result_ref,card);
- if(a.url)el('p','mono',a.url,card);
- if(a.status==='outcome_unknown')el('p','error-text','This action may have happened. It will not be retried; check the app before trying again.',card);
- if(a.error)el('p','error-text',(a.error.code?a.error.code+': ':'')+(a.error.message||''),card);
-}
 function build(m,it){
  if(it.row){const r=el('p','row-event '+it.row,it.text);r.dataset.item=it.key;return r;}
  if(it.message){const msg=el('div','message '+it.message.role+(it.message.pending?' pending':''));msg.dataset.item=it.key;el('small','',it.message.role==='user'?'You':'Agent',msg);markdown(it.message.text,msg);if(!it.message.final&&!it.message.pending)el('span','streaming footnote','Writing…',msg);if(it.message.pending&&!it.message.failed)el('span','footnote','Sending…',msg);if(it.message.failed)el('p','error-text','Not sent: '+it.message.failed,msg);return msg;}
  const card=el('article','card');card.dataset.item=it.key;
  if(it.ask)askCard(m,it,card);
- else if(it.action)actionCard(it,card);
  else if(it.call||it.result||it.output!=null)toolCard(m,it,card);
  else if(it.diff){card.classList.add('diff-card');diffBlock(m,it,it.diff,card);}
  else if(it.reasoning!=null){const d=el('details','reasoning',null,card);el('summary','','Reasoning summary',d);markdown(it.reasoning,d);}
@@ -189,7 +174,6 @@ window.interspaceStream={
  has:id=>tasks.has(id)&&tasks.get(id).lastSeq>0,ids:()=>[...tasks.keys()],
  status:id=>tasks.get(id)?.status||null,budget:id=>tasks.get(id)?.budget||null,scopeEvent:id=>tasks.get(id)?.scopeEvent||null,workspace:id=>tasks.get(id)?.workspace||null,
  busy:s=>!!s&&BUSY.has(s.state),terminal:s=>!!s&&TERMINAL.has(s.state),
- mentions(id){const m=tasks.get(id);if(!m)return [];return [...[...m.paths].map(p=>({value:p,hint:'File'})),...[...m.refs].map(([ref,title])=>({value:ref,hint:title||APPS[ref.split(':')[0]]||''}))];},
- appName:app=>APPS[app]||app
+ mentions(id){const m=tasks.get(id);if(!m)return [];return [...m.paths].map(p=>({value:p,hint:'File'}));}
 };
 })();

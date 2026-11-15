@@ -1,6 +1,5 @@
-"""Fakes for scheduler and service tests: runtime, scope engine, audit, workspaces and connectors.
+"""Fakes for scheduler and service tests: runtime, scope engine, audit and workspaces.
 
-They stand in for 2A (runtime), 1E (scope.py, audit.py) and 1A (spaces) until those merge.
 Nothing here starts a provider, touches the network or the Keychain.
 """
 import copy
@@ -132,7 +131,7 @@ class FakeAudit:
         unknown = set(record) - set(self.FIELDS) - {'v'}
         if unknown:
             raise ValueError('The audit record has unknown fields: ' + ', '.join(sorted(unknown)))
-        if record['kind'] in ('action', 'user_write') and record.get('outcome') not in ('succeeded', 'failed', 'outcome_unknown', 'cancelled'):
+        if record['kind'] == 'action' and record.get('outcome') not in ('succeeded', 'failed', 'outcome_unknown', 'cancelled'):
             raise ValueError('Action records need a known outcome.')
         if record['kind'] == 'scope' and record.get('request') is not None:
             raise ValueError('Scope records carry no request.')
@@ -216,61 +215,6 @@ class FakeWorkspaces:
 
     def diff(self, info):
         return {'files': [], 'patch': ''}
-
-
-class FakeConnector:
-    """A connector whose write can be held open to create lock contention."""
-    app = 'notion'
-
-    def __init__(self):
-        self.gate = None
-        self.active = 0
-        self.max_active = 0
-        self.writes = []
-        self.lock = threading.Lock()
-        self.fail_with = None
-
-    def search(self, query, kinds=None, cursor=None, limit=25):
-        return {'v': 1, 'items': [], 'next_cursor': None}
-
-    def browse(self, parent=None, cursor=None, limit=50):
-        return {'v': 1, 'items': [{'ref': 'notion:page:child', 'kind': 'page', 'title': 'Child', 'parent': parent,
-                                   'url': None, 'updated_at': None, 'has_children': False, 'meta': {}}],
-                'next_cursor': None}
-
-    def read(self, ref, cursor=None):
-        return {'v': 1, 'ref': ref, 'title': 'Page', 'format': 'markdown', 'text': 'hello', 'truncated': False,
-                'next_cursor': None, 'version': None, 'url': None, 'meta': {}}
-
-    def write(self, action, ref, params, idempotency_key):
-        with self.lock:
-            self.active += 1
-            self.max_active = max(self.max_active, self.active)
-        try:
-            if self.gate is not None:
-                self.gate.wait(10)
-            if self.fail_with is not None:
-                raise self.fail_with
-            with self.lock:
-                self.writes.append((action, ref, idempotency_key))
-            return {'v': 1, 'ok': True, 'action': action, 'ref': ref, 'result_ref': ref, 'url': None,
-                    'version': None, 'replayed': False, 'summary': 'Appended.'}
-        finally:
-            with self.lock:
-                self.active -= 1
-
-
-def notion_tools(connector):
-    """Two descriptors, shaped like spaces.base.tools output."""
-    return {
-        'notion_browse': {'v': 1, 'name': 'notion_browse', 'app': 'notion', 'title': 'Browse', 'description': '',
-                          'input_schema': {}, 'effect': 'read', 'action': None, 'ref_param': 'parent'},
-        'notion_read': {'v': 1, 'name': 'notion_read', 'app': 'notion', 'title': 'Read', 'description': '',
-                        'input_schema': {}, 'effect': 'read', 'action': None, 'ref_param': 'ref'},
-        'notion_page_append': {'v': 1, 'name': 'notion_page_append', 'app': 'notion', 'title': 'Append to page',
-                               'description': '', 'input_schema': {}, 'effect': 'update',
-                               'action': 'notion.page.append', 'ref_param': 'ref'},
-    }
 
 
 class MemoryStore:
