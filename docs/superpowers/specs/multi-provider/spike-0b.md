@@ -127,7 +127,7 @@ The user approved one real sign-in. It ran in a throwaway home in the session sc
 `cli_auth_credentials_store` accepts `file`, `keyring`, `auto`, `ephemeral` (from the load error for a bad
 value). The default wrote `auth.json` in the home (seen live). Still pin
 `-c cli_auth_credentials_store="file"` for every command on the app-owned home (login, status, logout,
-app-server). A user-level `~/.codex/config.toml` is not read under a custom `CODEX_HOME`, but pinning the
+app-server). Pinning the
 store guards against a changed default. With `keyring` or `auto`, the token could go to the macOS keychain,
 where the app-owned home and the user's `~/.codex` might share or collide.
 
