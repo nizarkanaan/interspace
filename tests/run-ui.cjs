@@ -2,10 +2,13 @@
 const {chromium}=require('playwright');
 const path=require('path');
 const {pathToFileURL}=require('url');
+const fs=require('fs');
+// review-ui belongs to the review and merge stream; it runs once tests/review-ui.mjs exists.
+const SUITES=['task-desk-ui','project-ui','agent-ui','team-card-ui','providers-ui','live-ui',...(fs.existsSync(path.resolve('tests/review-ui.mjs'))?['review-ui']:[])];
 (async()=>{
  const browser=await chromium.launch({headless:true,executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'});
  try{
-  for(const name of process.argv.slice(2).length?process.argv.slice(2):['task-desk-ui','project-ui','agent-ui','live-ui']){
+  for(const name of process.argv.slice(2).length?process.argv.slice(2):SUITES){
    const page=await browser.newPage({viewport:{width:1280,height:1000},colorScheme:'light'});
    await page.route(/^https?:/,route=>route.abort());
    const check=(await import(pathToFileURL(path.resolve('tests/'+name+'.mjs')))).default;

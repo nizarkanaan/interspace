@@ -60,6 +60,19 @@ with app.lock:
     app.state['projects'][project['id']] = project
     app.state['selected_project_id'] = project['id']
     app.persist()
+# Provider registry stand-in: Settings and New task read providers_list, and the harness must never run a real
+# provider CLI for a status check, so this fake always answers (before and after the registry lands).
+def providers_list(app, params):
+    return {'providers': [
+        {'name': 'claude', 'title': 'Claude', 'models': ['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-haiku-5-5'],
+         'default_model': 'claude-sonnet-5-5', 'capabilities': {'write': True, 'web_search': True, 'approvals': True}},
+        {'name': 'codex', 'title': 'Codex', 'models': [], 'default_model': None,
+         'capabilities': {'write': True, 'web_search': True, 'approvals': True}}],
+        'status': [{'provider': 'claude', 'state': 'signed_in', 'account': 'Harness', 'detail': ''},
+                   {'provider': 'codex', 'state': 'signed_in', 'account': 'Harness', 'detail': ''}],
+        'routing': {'v': 1, 'orchestrator': {'provider': 'codex', 'model': None},
+                    'roles': {r: {'provider': 'claude', 'model': None} for r in ('researcher', 'implementer', 'reviewer', 'tester', 'writer')}}}
+app.extensions['providers_list'] = providers_list
 router = service.Router(app, emit)
 for line in sys.stdin:
     router.route(line)
@@ -92,7 +105,7 @@ export default async function check(page,url){
   const newAgent=async(title,provider,model,goal)=>{
    await page.getByRole('button',{name:'New task',exact:true}).click();
    assert(await page.locator('#new-agent-fields').isVisible()&&await page.locator('#new-mode').count()===0,'Agent fields not shown');
-   await page.locator('#new-title').fill(title);await page.locator('#new-runtime').selectOption(provider);await page.locator('#new-model').fill(model);
+   await page.locator('#new-title').fill(title);await page.locator('#new-provider').selectOption(provider);await page.locator('#new-model').fill(model);
    if(goal)await page.locator('#new-goal').fill(goal);
    await page.getByRole('button',{name:'Review scope',exact:true}).click();
    await until(()=>page.locator('#new-agent-scope .scope-editor').isVisible(),'the scope editor');
@@ -104,7 +117,8 @@ export default async function check(page,url){
   assert(calls('scope_default').length===0,'Invalid model reached the backend');
   await page.getByRole('button',{name:'Tasks',exact:true}).click();
 
-  await newAgent('Fix the parser','codex','','Please ask before reading parser.py');
+  await newAgent('Fix the parser','','','Please ask before reading parser.py');
+  assert((await page.locator('#new-provider option').first().textContent())==='Your default: Codex','Routing default not offered: '+await page.locator('#new-provider option').first().textContent());
   const defaults=reply(calls('scope_default')[0]).result.scope;
   assert(defaults.network.default==='deny'&&defaults.apps.length===0&&defaults.web_search==='deny'&&defaults.projects[0].access==='write','Unexpected default scope '+JSON.stringify(defaults));
   assert((await page.locator('#new-agent-scope select').first().inputValue())==='write','Editor does not show the default scope');
@@ -126,7 +140,7 @@ export default async function check(page,url){
   assert((await text(page.locator('#agent-view .scope-chips'))).includes('Network: off'),'Network chip missing');
   assert((await page.locator('#agent-message').inputValue())==='Please ask before reading parser.py','First message not waiting in the composer');
   assert(await page.locator('#agent-send').isDisabled(),'Send enabled before approval');
-  assert((await text(page.locator('#agent-head'))).includes('Runtime Codex · default model'),'Runtime line missing');
+  assert((await text(page.locator('#agent-head'))).includes('Orchestrator on Codex · default model'),'Orchestrator line missing: '+await text(page.locator('#agent-head')));
   // Approval binds the digest the backend returned.
   await page.getByRole('button',{name:'Approve scope',exact:true}).click();
   await until(async()=>(await text(page.locator('#agent-view .scope-chips'))).includes('Approved'),'approval');
@@ -152,12 +166,12 @@ export default async function check(page,url){
   await until(()=>page.locator('#agent-view').isVisible(),'the second task');
   const create2=calls('agent_create')[1],taskB=reply(create2).result.task_id;
   assert(create2.params.provider==='claude'&&create2.params.model==='claude-opus-5-5','Second create params');
-  assert((await text(page.locator('#agent-head'))).includes('Runtime Claude Code · claude-opus-5-5'),'Claude runtime line missing');
+  assert((await text(page.locator('#agent-head'))).includes('Orchestrator on Claude · claude-opus-5-5'),'Claude orchestrator line missing');
   await page.getByRole('button',{name:'Approve scope',exact:true}).click();
   await until(async()=>(await text(page.locator('#agent-view .scope-chips'))).includes('Approved'),'second approval');
   await page.getByRole('button',{name:'Tasks',exact:true}).click();
   const rows=await text(page.locator('#desk-tasks'));
-  assert(rows.includes('Agent task · Claude Code · claude-opus-5-5')&&rows.includes('Agent task · Codex'),'Desk rows miss the runtime: '+rows);
+  assert(rows.includes('Orchestrator on Claude · claude-opus-5-5')&&rows.includes('Orchestrator on Codex'),'Desk rows miss the provider: '+rows);
 
   // Several tasks at once: both wait inside their turns; each stream stays its own.
   const send=async(id,message)=>{await page.getByRole('button',{name:'Tasks',exact:true}).click();await page.locator('[data-open-task="'+id+'"]').click();await until(()=>page.locator('#agent-view').isVisible(),'agent view');await page.locator('#agent-message').fill(message);await page.locator('#agent-message').press('Enter');};
@@ -198,7 +212,7 @@ export default async function check(page,url){
    }}}
   await page.emulateMedia({colorScheme:'light'});await page.setViewportSize({width:1280,height:1000});
   assert(!errors.length,'Page errors: '+errors.join('; '));
-  return {checks:'real backend over JSON lines: new agent task form (title, project, runtime, model, validation), scope_default in the editor, edited scope on create, digest approval, ask answered through the real scope engine with Add to scope, several tasks running at once with separate streams, per-task cancel, gap recovery from task_events, light/dark 320-1280 fit',responsiveStates:fits.length,requests:sent.length};
+  return {checks:'real backend over JSON lines: new task form (title, project, Orchestrator provider from routing or overridden, model, validation), scope_default in the editor, edited scope on create, digest approval, ask answered through the real scope engine with Add to scope, several tasks running at once with separate streams, per-task cancel, gap recovery from task_events, light/dark 320-1280 fit',responsiveStates:fits.length,requests:sent.length};
  }finally{
   child.stdin.end();await new Promise(resolve=>{const t=setTimeout(()=>{child.kill();resolve();},8000);child.on('exit',()=>{clearTimeout(t);resolve();});});
   rmSync(root,{recursive:true,force:true});

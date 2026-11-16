@@ -33,7 +33,8 @@ export default async function check(page,url){
  const sidebar=await text('aside');
  for(const gone of ['Observatory','Workspace advice','Project conversation','Notion','Zotero','Google Drive'])assert(!sidebar.includes(gone),'Removed surface still in the sidebar: '+gone);
  const desk=await text('#desk-tasks');
- assert(desk.includes('Agent task · Claude Code · claude-opus-5-5'),'Agent row label missing: '+desk);
+ assert(desk.includes('Orchestrator on Claude · claude-opus-5-5 · own task branch'),'Agent row label missing: '+desk);
+ assert(await page.locator('#desk-tasks .provider-badge[data-provider=claude]').count()===1,'Provider badge missing on the desk row');
  assert(desk.includes('Earlier task (read-only) · Read-only review')&&desk.includes('Earlier task (read-only) · Fix & test (Python)'),'Earlier rows not labelled: '+desk);
 
  // New task is agent-only: no mode choice, no draft, straight to the scope review.
@@ -60,7 +61,7 @@ export default async function check(page,url){
  assert(JSON.stringify(buttons)===JSON.stringify(['← Tasks','Conversation','Plan','Result']),'Earlier task offers actions: '+JSON.stringify(buttons));
  assert(await page.locator('#task-detail textarea, #task-detail input, #task-detail form').count()===0,'Earlier task has an input');
  const sent=await page.evaluate(()=>window.deskFixture.requests.map(r=>r.method));
- assert(sent.every(m=>['state','select_task','switch_project'].includes(m)),'Reading an earlier task sent '+sent.join(','));
+ assert(sent.every(m=>['state','select_task','switch_project','providers_list'].includes(m)),'Reading an earlier task sent '+sent.join(','));
  await page.locator('[data-view=tasks]').click();await page.locator('[data-open-task="old-2"]').click();
  await page.locator('[data-task-tab=plan]').click();assert(await page.locator('#plan-empty').isVisible(),'Empty plan not explained');
  await page.locator('[data-task-tab=result]').click();assert((await text('#result-body')).includes('Stopped early'),'Saved error missing');
@@ -69,15 +70,16 @@ export default async function check(page,url){
  await page.locator('[data-view=tasks]').click();await page.locator('[data-open-task="agent-1"]').click();
  assert(await page.locator('#agent-view').isVisible()&&await page.locator('#task-detail').isHidden(),'Agent row did not open the agent view');
 
- // Settings: project details, connection and sign-in with Stop.
+ // Settings: project details and Providers (no old OpenAI connection section); the active banner still stops.
  await page.getByRole('button',{name:'Settings',exact:true}).click();
  assert(await page.locator('#project-settings').isVisible(),'Project details unreachable');
- await page.getByRole('button',{name:'Check connection',exact:true}).click();
- await page.getByRole('button',{name:'Sign in with ChatGPT',exact:true}).click();
- assert(await page.locator('#active-owner').isVisible()&&(await text('#activity')).includes('Signing in'),'Sign-in banner missing');
+ assert(await page.getByRole('heading',{name:'Providers',exact:true}).isVisible(),'Providers settings missing');
+ assert(await page.getByRole('button',{name:'Sign in with ChatGPT'}).count()===0&&await page.getByRole('button',{name:'Check connection'}).count()===0,'Old connection controls still shown');
+ await page.evaluate(()=>window.deskFixture.setActive('Working'));
+ assert(await page.locator('#active-owner').isVisible()&&(await text('#activity')).includes('Working'),'Active banner missing');
  await page.getByRole('button',{name:'Stop',exact:true}).first().click();
  const methods=await page.evaluate(()=>window.deskFixture.requests.map(r=>r.method));
- assert(methods.includes('connection')&&methods.includes('sign_in')&&methods.at(-1)==='cancel','Settings actions not sent: '+methods.join(','));
+ assert(methods.includes('providers_list')&&methods.at(-1)==='cancel','Settings actions not sent: '+methods.join(','));
 
  // Light/dark fit at every width for each surface.
  const fits=[];
@@ -110,5 +112,5 @@ export default async function check(page,url){
   assert(await page.evaluate(()=>window.requests.every(m=>['select_task','switch_project'].includes(m))),'Reopened history sent a work request');
  }}
  assert(!errors.length,errors.join('\n'));
- return {checks:'Tasks default, removed surfaces absent, agent-only New task, earlier tasks read-only with conversation/plan/result text and no actions, literal saved text, agent rows open the agent view, Settings connection and sign-in/Stop, reopened backend projections with malformed-task isolation, light/dark 320-1280 fit',responsiveSurfaces:fits.length};
+ return {checks:'Tasks default, removed surfaces absent, agent-only New task, earlier tasks read-only with conversation/plan/result text and no actions, literal saved text, agent rows open the agent view, Settings Providers and Stop, reopened backend projections with malformed-task isolation, light/dark 320-1280 fit',responsiveSurfaces:fits.length};
 }
