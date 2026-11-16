@@ -7,7 +7,13 @@ The first log line records argv, cwd and the environment's keys; every line rece
 (docs/research/codex-app-server-runtime.md). Strings "$thread" and "$turn" in scenario steps are replaced.
 
 Scenario keys:
-  account       the `account/read` result's `account` (default {"type": "chatgpt"}); null = signed out
+  account       the `account/read` result's `account` (default {"type": "chatgpt"}); null = signed out.
+                A sign-in or sign-out saves the account in `$CODEX_HOME/fake-account.json`, which then wins,
+                so later processes on the same home see it (like the real `auth.json`).
+  after_initialize  notifications sent right after the `initialize` reply
+  login         `account/login/start` behaviour: {"result": {...} (merged into the reply), "error": true,
+                "complete_after": seconds (default 0.2; null = never), "success": true,
+                "account": {...} (saved on success)}
   thread_start  fields merged into the `thread/start` result (to break the sandbox echo, for example)
   exit_on       a request method after which the process exits at once
   turns         a list, one entry per `turn/start`, each a list of steps:
@@ -90,6 +96,37 @@ def play(steps, turn_id):
             time.sleep(step['sleep'])
 
 
+def account_path():
+    home = os.environ.get('CODEX_HOME')
+    return os.path.join(home, 'fake-account.json') if home else None
+
+
+def saved_account():
+    path = account_path()
+    if path and os.path.exists(path):
+        with open(path) as handle:
+            return json.load(handle)
+    return scenario.get('account', {'type': 'chatgpt'})
+
+
+def save_account(account):
+    path = account_path()
+    if path:
+        with open(path, 'w') as handle:
+            json.dump(account, handle)
+
+
+def finish_login(login_id, login, delay):
+    time.sleep(delay)
+    success = login.get('success', True)
+    if success:
+        save_account(login.get('account', {'type': 'chatgpt', 'email': 'person@example.com', 'planType': 'pro'}))
+    send({'method': 'account/login/completed', 'params': {'loginId': login_id, 'success': success,
+                                                           'error': None if success else 'denied'}})
+    if success:
+        send({'method': 'account/updated', 'params': {'authMode': 'chatgpt', 'planType': 'pro'}})
+
+
 def handle(message):
     method, request_id, params = message.get('method'), message.get('id'), message.get('params') or {}
     if method is None:
@@ -102,9 +139,30 @@ def handle(message):
     if method == 'initialize':
         send({'id': request_id, 'result': {'userAgent': 'fake/0.167.0', 'codexHome': os.environ.get('CODEX_HOME'),
                                            'platformFamily': 'unix', 'platformOs': 'macos'}})
+        for note in scenario.get('after_initialize', []):
+            send(note)
     elif method == 'account/read':
-        account = scenario.get('account', {'type': 'chatgpt'})
-        send({'id': request_id, 'result': {'account': account, 'requiresOpenaiAuth': account is None}})
+        account = saved_account()
+        send({'id': request_id, 'result': {'account': account, 'requiresOpenaiAuth': account is None,
+                                           'userId': 'user-secret' if account else None}})
+    elif method == 'account/login/start':
+        login = scenario.get('login', {})
+        if login.get('error'):
+            send({'id': request_id, 'error': {'code': -32600, 'message': 'login refused'}})
+        else:
+            result = {'type': 'chatgptDeviceCode', 'loginId': 'login-1',
+                      'verificationUrl': 'https://auth.openai.com/codex/device', 'userCode': 'ABCD-12345'}
+            result.update(login.get('result', {}))
+            send({'id': request_id, 'result': result})
+            delay = login.get('complete_after', 0.2)
+            if delay is not None:
+                threading.Thread(target=finish_login, args=(result.get('loginId'), login, delay), daemon=True).start()
+    elif method == 'account/login/cancel':
+        send({'id': request_id, 'result': {}})
+    elif method == 'account/logout':
+        save_account(None)
+        send({'id': request_id, 'result': {}})
+        send({'method': 'account/updated', 'params': {'authMode': None, 'planType': None}})
     elif method == 'thread/start':
         result = {'thread': {'id': THREAD, 'ephemeral': True, 'status': {'type': 'idle'}},
                   'model': params.get('model') or 'gpt-test', 'modelProvider': 'openai', 'cwd': params.get('cwd'),

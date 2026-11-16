@@ -1,10 +1,13 @@
 """Agent runtimes for agentic tasks (scheduler.md, "Runtime adapter API").
 
 `make_factory(app)` returns the `runtime_factory(task_id) -> Runtime` that `scheduler.Scheduler` takes. The
-runtime is chosen by the task row's `provider` field: `codex` (the default) or `claude`. The Claude runtime is
-built by stream 2B in `runtime/claude.py` and imported only when a task asks for it.
+runtime is chosen by the task row's `provider` field, looked up in the provider registry (`runtime/registry.py`).
+A runtime module is imported only when a task asks for its provider.
 """
-import importlib
+from . import registry
+
+# Task rows saved before providers existed have no `provider` field; they were all Codex tasks.
+LEGACY_PROVIDER = 'codex'
 
 
 class RuntimeFailure(ValueError):
@@ -15,29 +18,15 @@ class RuntimeFailure(ValueError):
         self.code = code
 
 
-PROVIDERS = ('codex', 'claude')
-
-
 def _task_provider(app, task_id):
     with app.lock:
         task = app.store.task(task_id)
         provider = task.get('provider') if isinstance(task, dict) else None
     if provider is None:
-        return 'codex'
-    if provider not in PROVIDERS:
+        return LEGACY_PROVIDER
+    if provider not in registry.names():
         raise ValueError('This task names an unknown agent provider.')
     return provider
-
-
-def _claude(app):
-    try:
-        module = importlib.import_module(__name__ + '.claude')
-    except ImportError:
-        raise ValueError('The Claude Code runtime is not in this build yet.') from None
-    runtime_class = getattr(module, 'ClaudeRuntime', None)
-    if runtime_class is None:
-        raise ValueError('The Claude Code runtime is not in this build yet.')
-    return runtime_class(app)
 
 
 def make_factory(app):
@@ -47,11 +36,6 @@ def make_factory(app):
     def factory(task_id):
         provider = _task_provider(app, task_id)
         if provider not in made:
-            if provider == 'codex':
-                from . import codex
-                made[provider] = codex.CodexRuntime(app)
-            else:
-                made[provider] = _claude(app)
+            made[provider] = registry.runtime_class(provider)(app)
         return made[provider]
     return factory
-

@@ -10,6 +10,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / 'app' / 'backend') not in sys.path:
@@ -253,6 +254,27 @@ class LaunchTests(ClaudeCase):
             self.assertTrue(set(env) - shell <= set(claude.ENV_ALLOWLIST), env.keys())
         self.assertEqual(set(claude.child_env()), {k for k in claude.ENV_ALLOWLIST if k in os.environ})
 
+    def test_each_session_gets_its_own_tmpdir_in_the_workspace(self):
+        ctx = FakeContext(self.root)
+        os.makedirs(os.path.join(ctx.primary_workspace, '.git', 'info'))
+        self.turn({'turns': [simple_turn()]}, ctx=ctx)
+        tmp = os.path.join(ctx.primary_workspace, '.interspace', 'tmp')
+        self.assertEqual(self.main_launches()[0]['env']['TMPDIR'], tmp)
+        self.assertTrue(os.path.isdir(tmp))
+        exclude = Path(ctx.primary_workspace, '.git', 'info', 'exclude').read_text().splitlines()
+        self.assertEqual(exclude.count('/.interspace/'), 1)
+        self.turn({'turns': [simple_turn()]}, ctx=ctx)  # A second launch does not repeat the line.
+        exclude = Path(ctx.primary_workspace, '.git', 'info', 'exclude').read_text().splitlines()
+        self.assertEqual(exclude.count('/.interspace/'), 1)
+        # `claude auth status` keeps the user's own TMPDIR.
+        auth = [e for e in self.launches() if e['launch'][:2] == ['auth', 'status']][0]
+        self.assertNotEqual(auth['env'].get('TMPDIR'), tmp)
+
+    def test_cli_reports_manual_mode_as_default(self):
+        _, _, outcome = self.turn({'turns': [simple_turn()]})
+        self.assertEqual(outcome['status'], 'completed', outcome)  # The fake reports "default", like 2.1.322.
+        self.assertEqual(claude.REPORTED_PERMISSION_MODES, ('manual', 'default'))
+
     def test_initialize_then_user_message(self):
         self.turn({'turns': [simple_turn()]}, text='Hello there')
         sent = self.stdin()
@@ -346,6 +368,46 @@ class AuthTests(ClaudeCase):
         self.assertEqual(outcome['error']['code'], 'runtime_unavailable')
 
 
+class SignInTests(ClaudeCase):
+    """`auth_status` and `begin_sign_in` (multi-provider/providers.md): the user's own `claude` login."""
+
+    def status(self, auth):
+        binary = self.runtime({'auth': auth}).binary
+        with mock.patch.object(claude, 'find_claude', lambda: binary):
+            return claude.ClaudeRuntime.auth_status(object())
+
+    def test_signed_in_with_subscription(self):
+        status = self.status({'exit': 0, 'stdout': json.dumps({'loggedIn': True, 'authMethod': 'claude.ai',
+                                                                'email': 'person@example.com', 'orgId': 'org-1'})})
+        self.assertEqual(status, {'provider': 'claude', 'state': 'signed_in', 'account': 'Claude subscription',
+                                  'detail': 'Claude Code is signed in with your Claude subscription.'})
+        self.assertNotIn('example.com', json.dumps(status))
+
+    def test_signed_out_other_method_and_errors(self):
+        self.assertEqual(self.status({'exit': 1, 'stdout': json.dumps({'loggedIn': False})})['state'], 'signed_out')
+        self.assertEqual(self.status({'exit': 1, 'stdout': 'Not logged in'})['state'], 'signed_out')
+        other = self.status({'exit': 0, 'stdout': json.dumps({'loggedIn': True, 'authMethod': 'api_key'})})
+        self.assertEqual(other['state'], 'signed_out')
+        self.assertIn('claude auth login', other['detail'])
+        self.assertNotIn('api_key', json.dumps(other))
+        self.assertEqual(self.status({'exit': 0, 'stdout': 'garbled'})['state'], 'error')
+
+    def test_missing_cli(self):
+        with mock.patch.object(claude, 'find_claude', lambda: None):
+            self.assertEqual(claude.ClaudeRuntime.auth_status(object())['state'], 'missing_cli')
+            with self.assertRaises(ValueError):
+                claude.ClaudeRuntime.begin_sign_in(object())
+
+    def test_sign_in_is_a_terminal_instruction(self):
+        binary = self.runtime({}).binary
+        with mock.patch.object(claude, 'find_claude', lambda: binary):
+            started = claude.ClaudeRuntime.begin_sign_in(object())
+        self.assertEqual(started['kind'], 'terminal')
+        self.assertEqual(started['command'], 'claude auth login')
+        self.assertEqual(started['provider'], 'claude')
+        self.assertEqual(self.launches(), [])  # Nothing is run for the user.
+
+
 class TurnTests(ClaudeCase):
     def test_message_events_and_usage(self):
         _, ctx, outcome = self.turn({'turns': [simple_turn('I read the notes.')]})
@@ -372,6 +434,33 @@ class TurnTests(ClaudeCase):
                     {'modelUsage': []}, {'usage': {'input_tokens': 1, 'output_tokens': True,
                                                    'cache_read_input_tokens': 0, 'cache_creation_input_tokens': 0}}):
             self.assertIsNone(claude.turn_usage(bad), bad)
+
+    def test_cumulative_model_usage_is_charged_per_turn(self):
+        def totals(inp, out, read, create):
+            return model_usage(inp=inp, out=out, read=read, create=create)
+        scenario = {'turns': [[INIT, assistant_text('one'), result(usage=totals(80, 40, 1000, 50))],
+                              [assistant_text('two'), result(usage=totals(90, 45, 1500, 50))]]}
+        ctx = FakeContext(self.root)
+        runtime = self.runtime(scenario)
+        session = runtime.open(ctx)
+        self.addCleanup(session.close)
+        first = session.run_turn('one', ctx)
+        second = session.run_turn('two', ctx)
+        self.assertEqual(first['usage'], {'input_tokens': 80, 'output_tokens': 40, 'cache_read_input_tokens': 1000,
+                                          'cache_creation_input_tokens': 50})
+        self.assertEqual(second['usage'], {'input_tokens': 10, 'output_tokens': 5, 'cache_read_input_tokens': 500,
+                                           'cache_creation_input_tokens': 0})
+
+    def test_turn_usage_takes_the_growth_or_falls_back_to_the_turn(self):
+        previous = {'input_tokens': 80, 'output_tokens': 40, 'cache_read_input_tokens': 0, 'cache_creation_input_tokens': 0}
+        message = {'modelUsage': {'m': {'inputTokens': 90, 'outputTokens': 45, 'cacheReadInputTokens': 0,
+                                        'cacheCreationInputTokens': 0}},
+                   'usage': {'input_tokens': 10, 'output_tokens': 5, 'cache_read_input_tokens': 0,
+                             'cache_creation_input_tokens': 0}}
+        self.assertEqual(claude.turn_usage(message, previous)['input_tokens'], 10)
+        # A total that shrank (a new process the session did not see) falls back to the turn's own usage.
+        shrunk = dict(previous, input_tokens=500)
+        self.assertEqual(claude.turn_usage(message, shrunk), message['usage'])
 
     def test_error_result_fails_with_usage(self):
         _, _, outcome = self.turn({'turns': [[INIT, result('error_max_turns', True)]]})
@@ -460,7 +549,9 @@ class PermissionTests(ClaudeCase):
         results = [d for k, d, _ in ctx.events if k == 'tool_result']
         self.assertEqual([r['status'] for r in results], ['denied'])  # The CLI's own error result is not repeated.
 
-    def test_read_only_denies_writes_before_authorize(self):
+    def test_read_access_denies_writes_before_authorize(self):
+        ctx = FakeContext(self.root)
+        ctx.access = 'read'
         steps = [INIT, self.ask('Edit', {'file_path': 'a.py', 'old_string': 'a', 'new_string': 'b'}, 'toolu_1'),
                  self.ask('Write', {'file_path': 'b.py', 'content': 'x'}, 'toolu_2'),
                  self.ask('NotebookEdit', {'notebook_path': 'n.ipynb', 'new_source': 'x'}, 'toolu_3'),
@@ -473,7 +564,7 @@ class PermissionTests(ClaudeCase):
                  self.ask('Bash', {'command': 'echo hi > out.txt'}, 'toolu_10'),
                  self.ask('Bash', {'command': 'git commit -m x'}, 'toolu_11'),
                  result()]
-        _, ctx, outcome = self.turn({'turns': [steps]})
+        _, ctx, outcome = self.turn({'turns': [steps]}, ctx=ctx)
         self.assertEqual(outcome['status'], 'completed', outcome)
         self.assertEqual(ctx.authorized, [])
         self.assertTrue(all(a['behavior'] == 'deny' for a in self.answers()))
@@ -499,17 +590,100 @@ class PermissionTests(ClaudeCase):
              'sandbox': 'workspace', 'network': False, 'project_id': 'p1'}])
         self.assertTrue(all(a['behavior'] == 'allow' for a in self.answers()))
 
-    def test_read_only_switch_is_one_constant(self):
-        self.assertTrue(claude.READ_ONLY)
+    def test_read_only_switch_forces_read_access(self):
+        self.assertFalse(claude.READ_ONLY)
         self.assertEqual(claude.READ_ONLY_RULE, 'provider.claude_readonly')
-        ctx = FakeContext(self.root)
         original = claude.READ_ONLY
-        claude.READ_ONLY = False
+        claude.READ_ONLY = True
         self.addCleanup(setattr, claude, 'READ_ONLY', original)
         steps = [INIT, self.ask('Edit', {'file_path': 'a.py', 'old_string': 'a', 'new_string': 'b'}), result()]
+        _, ctx, outcome = self.turn({'turns': [steps]})  # The context asks for write access.
+        self.assertEqual(outcome['status'], 'completed', outcome)
+        self.assertEqual(ctx.authorized, [])
+        self.assertEqual([d['decision']['rule'] for k, d, _ in ctx.events if k == 'tool_call'], ['provider.claude_readonly'])
+        prompt = dict(zip(self.main_launches()[0]['launch'], self.main_launches()[0]['launch'][1:]))['--system-prompt']
+        self.assertIn('read-only', prompt)
+
+    def test_write_mode_is_the_default(self):
+        ctx = FakeContext(self.root)
+        self.assertFalse(hasattr(ctx, 'access'))  # Run contexts before 1B's `access` field mean write.
+        edit = {'file_path': 'src/a.py', 'old_string': 'a', 'new_string': 'b'}
+        normalised = dict(edit, replace_all=False)
+        steps = [INIT, self.ask('Edit', edit, 'toolu_1', request_input=normalised),
+                 self.ask('Write', {'file_path': os.path.join(ctx.workspaces['p1'], 'new', 'deep', 'b.py'),
+                                    'content': 'x'}, 'toolu_2'),
+                 self.ask('NotebookEdit', {'notebook_path': 'n.ipynb', 'new_source': 'x'}, 'toolu_3'),
+                 self.ask('Write', {'file_path': os.path.join(ctx.workspaces['p2'], 'c.txt'), 'content': 'y'}, 'toolu_4'),
+                 self.ask('Bash', {'command': 'echo hi > out.txt'}, 'toolu_5'),
+                 result()]
         _, ctx, outcome = self.turn({'turns': [steps]}, ctx=ctx)
         self.assertEqual(outcome['status'], 'completed', outcome)
-        self.assertEqual(ctx.authorized, [({'category': 'file_write', 'project_id': 'p1', 'paths': ['a.py']}, 'toolu_1')])
+        ws1, ws2 = ctx.workspaces['p1'], ctx.workspaces['p2']
+        self.assertEqual([r for r, _ in ctx.authorized], [
+            {'category': 'file_write', 'project_id': 'p1', 'paths': [os.path.join(ws1, 'src', 'a.py')]},
+            {'category': 'file_write', 'project_id': 'p1', 'paths': [os.path.join(ws1, 'new', 'deep', 'b.py')]},
+            {'category': 'file_write', 'project_id': 'p1', 'paths': [os.path.join(ws1, 'n.ipynb')]},
+            {'category': 'file_write', 'project_id': 'p2', 'paths': [os.path.join(ws2, 'c.txt')]},
+            {'category': 'command', 'argv': None, 'command': 'echo hi > out.txt', 'cwd': '.', 'sandbox': 'workspace',
+             'network': False, 'project_id': 'p1'}])
+        answers = self.answers()
+        self.assertTrue(all(a['behavior'] == 'allow' for a in answers))
+        # The exact input the CLI asked about is echoed back, never the model's tool_use input.
+        self.assertEqual(answers[0]['updatedInput'], normalised)
+        prompt = dict(zip(self.main_launches()[0]['launch'], self.main_launches()[0]['launch'][1:]))['--system-prompt']
+        self.assertIn('edit files', prompt)
+        self.assertNotIn('read-only', prompt)
+
+    def test_file_changes_outside_the_workspace_are_refused_before_authorize(self):
+        ctx = FakeContext(self.root)
+        ws1 = ctx.workspaces['p1']
+        outside = self.root / 'outside'
+        outside.mkdir()
+        os.symlink(str(outside), os.path.join(ws1, 'link'))
+        os.symlink(str(outside / 'target.txt'), os.path.join(ws1, 'dangling.txt'))
+        os.makedirs(os.path.join(ws1, '.git', 'info'))
+        bad = [str(outside / 'escaped.txt'), '../escaped.txt', 'src/../../escaped.txt', 'link/x.txt',
+               'dangling.txt', '.git/config', '.GIT/hooks/pre-commit', 'sub/.git/config', ws1, '/etc/hosts',
+               os.path.join(ws1, '.git', 'info', 'exclude')]
+        steps = [INIT] + [self.ask('Write', {'file_path': path, 'content': 'x'}, 'toolu_%d' % i)
+                          for i, path in enumerate(bad)] + [result()]
+        _, ctx, outcome = self.turn({'turns': [steps]}, ctx=ctx)
+        self.assertEqual(outcome['status'], 'completed', outcome)
+        self.assertEqual(ctx.authorized, [])
+        self.assertEqual(len(self.answers()), len(bad))
+        self.assertTrue(all(a['behavior'] == 'deny' for a in self.answers()))
+        self.assertIn('task workspace', self.answers()[0]['message'])
+        calls = [d for k, d, _ in ctx.events if k == 'tool_call']
+        self.assertEqual({c['decision']['rule'] for c in calls}, {'provider.claude_workspace'})
+        self.assertEqual([d['status'] for k, d, _ in ctx.events if k == 'tool_result'], ['denied'] * len(bad))
+        self.assertFalse((outside / 'escaped.txt').exists())
+
+    def test_sandbox_escape_is_refused(self):
+        steps = [INIT, self.ask('Bash', {'command': 'ls', 'dangerouslyDisableSandbox': True}, 'toolu_1'), result()]
+        _, ctx, outcome = self.turn({'turns': [steps]})
+        self.assertEqual(outcome['status'], 'completed', outcome)
+        self.assertEqual(ctx.authorized, [])
+        self.assertEqual(self.answers()[0]['behavior'], 'deny')
+        calls = [d for k, d, _ in ctx.events if k == 'tool_call']
+        self.assertEqual(calls[0]['decision']['rule'], 'provider.claude_sandbox')
+
+    def test_policy_denial_of_a_write(self):
+        ctx = FakeContext(self.root, decisions={'file_write': 'deny'})
+        steps = [INIT, self.ask('Write', {'file_path': 'a.txt', 'content': 'x'}), result()]
+        _, ctx, outcome = self.turn({'turns': [steps]}, ctx=ctx)
+        self.assertEqual(outcome['status'], 'completed', outcome)
+        self.assertEqual(len(ctx.authorized), 1)
+        self.assertEqual(self.answers()[0]['behavior'], 'deny')
+
+    def test_access_change_restarts_the_process(self):
+        ctx = FakeContext(self.root)
+        runtime = self.runtime({'turns': [simple_turn(), simple_turn()]})
+        session = runtime.open(ctx)
+        self.addCleanup(session.close)
+        self.assertEqual(session.run_turn('one', ctx)['status'], 'completed')
+        ctx.access = 'read'
+        self.assertEqual(session.run_turn('two', ctx)['status'], 'completed')
+        self.assertEqual(len(self.main_launches()), 2)
 
     def test_unknown_tool_is_denied(self):
         steps = [INIT, self.ask('WebFetch', {'url': 'https://example.com'}), result()]
@@ -565,7 +739,8 @@ class ProtocolTests(ClaudeCase):
 
     def test_init_is_checked(self):
         for override in ({'tools': list(claude.TOOLS) + ['Agent']}, {'model': 'claude-haiku-5-5'},
-                         {'permissionMode': 'bypassPermissions'}, {'mcp_servers': [{'name': 'other', 'status': 'connected'}]}):
+                         {'permissionMode': 'bypassPermissions'}, {'permissionMode': 'acceptEdits'},
+                         {'permissionMode': 'dontAsk'}, {'permissionMode': None}, {'mcp_servers': [{'name': 'other', 'status': 'connected'}]}):
             self.log.unlink(missing_ok=True)
             self.assertProtocol([{'init': override}, assistant_text('x'), result()])
 

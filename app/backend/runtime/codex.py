@@ -186,12 +186,39 @@ class CodexRuntime:
         overrides = [('default_permissions', PROFILE), ('permissions.' + PROFILE, self.profile(ctx)),
                      ('project_doc_max_bytes', 0), ('allow_login_shell', False),
                      ('shell_environment_policy.inherit', 'core'),
-                     ('web_search', 'live' if scope.get('web_search') == 'allow' else 'disabled')]
+                     ('web_search', 'live' if scope.get('web_search') == 'allow' else 'disabled'),
+                     # The same credential pins as sign-in (codex_auth.CREDENTIAL_OVERRIDES, spike-0b.md).
+                     ('cli_auth_credentials_store', 'file'), ('forced_login_method', 'chatgpt')]
         overrides += [('features.' + name, False) for name in DISABLED_FEATURES]
         argv = self.base_command() + ['app-server']
         for key, value in overrides:
             argv += ['-c', key + '=' + _toml(value)]
         return argv
+
+    # -- sign-in on the app-owned CODEX_HOME (multi-provider/providers.md, "Sign-in") --------------------
+
+    @classmethod
+    def auth(cls, app):
+        """A `codex_auth.CodexAuth` for the app-owned home, with the same env as task sessions."""
+        import codex_auth
+        runtime = cls(app)
+        try:
+            command = runtime.base_command()
+        except RuntimeFailure:
+            command = []
+        return codex_auth.CodexAuth(command=command, codex_home=runtime.codex_home, environ=runtime.env())
+
+    @classmethod
+    def auth_status(cls, app):
+        return dict(cls.auth(app).account_status(), provider=cls.name)
+
+    @classmethod
+    def begin_sign_in(cls, app):
+        return dict(cls.auth(app).begin_device_sign_in(), provider=cls.name)
+
+    @classmethod
+    def sign_out(cls, app):
+        return dict(cls.auth(app).sign_out(), provider=cls.name)
 
     def env(self):
         keep = ('PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TMPDIR', 'TERM')

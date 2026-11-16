@@ -12,9 +12,11 @@ Steps:
   {"emit": <object>}       write one JSON line (the string "$MODEL" is replaced by --model)
   {"raw": "<text>"}        write a raw line
   {"init": {...}}          write system/init built from the launch flags, with overrides
-  {"ask": {"tool_name", "input", "tool_use_id", "result": "<text>"}}
+  {"ask": {"tool_name", "input", "tool_use_id", "result": "<text>", "request_input": {...}}}
                            emit the assistant tool_use, send can_use_tool, wait for the answer,
-                           then emit a tool_result (ok on allow, is_error on deny)
+                           then emit a tool_result (ok on allow, is_error on deny). `request_input`, when
+                           given, is the input in can_use_tool (the real CLI normalises the model's input
+                           before asking, spike-0b.md gotcha 1); the tool_use block keeps `input`.
   {"mcp_call": {"name", "arguments", "tool_use_id"}}
                            call the fake bridge socket named in the --mcp-config file (with its token),
                            then emit a tool_result
@@ -108,7 +110,9 @@ def init(overrides):
         servers.append({'name': name, 'status': 'connected'})
         tools += ['mcp__%s__%s' % (name, tool) for tool in server['env']['FAKE_TOOLS'].split(',')]
     message = {'type': 'system', 'subtype': 'init', 'session_id': 's1', 'cwd': os.getcwd(), 'tools': tools,
-               'mcp_servers': servers, 'model': MODEL, 'permissionMode': flag('--permission-mode'),
+               # Like Claude Code 2.1.322: `--permission-mode manual` is reported as "default".
+               'mcp_servers': servers, 'model': MODEL,
+               'permissionMode': 'default' if flag('--permission-mode') == 'manual' else flag('--permission-mode'),
                'apiKeySource': 'none'}
     message.update(overrides)
     out(message)
@@ -153,7 +157,8 @@ def run_step(step):
              'message': {'id': 'msg_t', 'role': 'assistant', 'model': MODEL,
                          'content': [{'type': 'tool_use', 'id': ask['tool_use_id'], 'name': ask['tool_name'],
                                       'input': ask['input']}]}})
-        response = control({'subtype': 'can_use_tool', 'tool_name': ask['tool_name'], 'input': ask['input'],
+        response = control({'subtype': 'can_use_tool', 'tool_name': ask['tool_name'],
+                            'input': ask.get('request_input', ask['input']),
                             'tool_use_id': ask['tool_use_id'], 'permission_suggestions': []})
         answer = response.get('response', {})
         log({'answer': answer})

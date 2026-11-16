@@ -168,6 +168,8 @@ class LaunchTests(CodexCase):
         self.assertEqual(overrides['project_doc_max_bytes'], '0')
         self.assertEqual(overrides['allow_login_shell'], 'false')
         self.assertEqual(overrides['web_search'], '"disabled"')
+        self.assertEqual(overrides['cli_auth_credentials_store'], '"file"')
+        self.assertEqual(overrides['forced_login_method'], '"chatgpt"')
         for feature in ('computer_use', 'browser_use', 'apps', 'plugins', 'hooks', 'multi_agent', 'shell_snapshot'):
             self.assertEqual(overrides['features.' + feature], 'false')
         self.assertNotIn('--dangerously-bypass-approvals-and-sandbox', ' '.join(argv))
@@ -574,10 +576,30 @@ class FactoryTests(unittest.TestCase):
         self.assertIs(factory('b'), first)
         self.assertEqual(first.codex_home, app.storage / 'codex-home')
         with mock.patch.dict(sys.modules, {runtime.__name__ + '.claude': None}):
-            with self.assertRaisesRegex(ValueError, 'Claude Code runtime is not in this build'):
+            with self.assertRaisesRegex(ValueError, 'Claude runtime is not in this build'):
                 factory('c')
         with self.assertRaisesRegex(ValueError, 'unknown agent provider'):
             factory('d')
+
+    def test_registered_provider_is_built_from_its_registry_record(self):
+        from runtime import registry
+        module = type(sys)('fake_later_runtime')
+
+        class LaterRuntime:
+            name = 'later'
+
+            def __init__(self, app):
+                self.app = app
+        module.LaterRuntime = LaterRuntime
+        registry.register(dict(registry.get('codex'), name='later', title='Later',
+                               runtime='fake_later_runtime:LaterRuntime'))
+        self.addCleanup(registry.unregister, 'later')
+        app = self.App({'l': {'id': 'l', 'provider': 'later'}})
+        with mock.patch.dict(sys.modules, {'fake_later_runtime': module}):
+            made = runtime.make_factory(app)('l')
+        self.assertIsInstance(made, LaterRuntime)
+        self.assertIs(made.app, app)
+        self.assertFalse(hasattr(runtime, 'PROVIDERS'))  # The registry is the only provider list.
 
     def test_claude_runtime_is_imported_when_present(self):
         made = []

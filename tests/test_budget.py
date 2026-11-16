@@ -163,5 +163,49 @@ class BudgetPolicyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             budget.release(state, entry)
 
+
+class RegistryChargeTests(unittest.TestCase):
+    """Charge rules come from the provider registry (multi-provider/providers.md)."""
+
+    def setUp(self):
+        from runtime import registry
+        self.registry = registry
+
+    def test_charge_reads_fields_from_the_registry(self):
+        for name in self.registry.names():
+            fields = self.registry.get(name)['charge_fields']
+            usage = {field: index + 1 for index, field in enumerate(fields)}
+            self.assertEqual(budget.charge(usage, name), sum(range(1, len(fields) + 1)))
+        self.assertIsNone(budget.charge({'input_tokens': 1, 'output_tokens': 1}, 'gemini'))
+
+    def test_a_registered_provider_is_charged_by_its_own_fields(self):
+        record = dict(self.registry.get('codex'), name='later', title='Later', runtime='runtime.later:Later',
+                      charge_fields=('prompt_tokens', 'candidates_tokens'))
+        self.registry.register(record)
+        self.addCleanup(self.registry.unregister, 'later')
+        self.assertEqual(budget.charge({'prompt_tokens': 7, 'candidates_tokens': 3}, 'later'), 10)
+        self.assertIsNone(budget.charge({'input_tokens': 7, 'output_tokens': 3}, 'later'))
+        state, task = state_with(100000)
+        entry_id = budget.reserve(state, task, role='turn', prompt='p', project_id='p', estimate=500,
+                                  provider='later', turn_id='t1', call_kind='agent_turn')
+        self.assertEqual(state['usage'][0]['charge_rule'], 'later.prompt+candidates')
+        entry = budget.settle(state, entry_id, {'prompt_tokens': 70, 'candidates_tokens': 30}, 'completed')
+        self.assertEqual((entry['charge_kind'], entry['charge']), ('reported', 100))
+
+    def test_reserve_refuses_unknown_provider_and_keeps_rule_labels(self):
+        state, task = state_with(100000)
+        with self.assertRaisesRegex(ValueError, 'Unknown model provider.'):
+            budget.reserve(state, task, role='turn', prompt='p', project_id='p', estimate=10, provider='gemini')
+        budget.reserve(state, task, role='turn', prompt='p', project_id='p', estimate=10, provider='claude')
+        budget.reserve(state, task, role='turn', prompt='p', project_id='p', estimate=10, provider='codex')
+        self.assertEqual([e['charge_rule'] for e in state['usage']],
+                         ['claude.input+cache_creation+cache_read+output', 'codex.input+output'])
+
+    def test_entries_without_provider_are_codex(self):
+        state, task = state_with(None)
+        state['usage'].append({'task_id': 'task-1', 'tokens': {'input_tokens': 4, 'output_tokens': 6}})
+        self.assertEqual(budget.ledger(state, 'task-1')['used'], 10)
+
+
 if __name__ == '__main__':
     unittest.main()
