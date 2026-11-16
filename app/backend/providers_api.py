@@ -1,0 +1,96 @@
+"""Backend methods for agent providers and routing defaults (multi-provider/providers.md, "Sign-in").
+
+`service.extension_methods` registers METHODS; each handler is `(app, params)` and runs on the request pool,
+never in a run slot. Runtime answers are filtered to the contract fields here, so no token, credential path or
+account detail beyond the display name can reach the UI.
+"""
+from concurrent.futures import ThreadPoolExecutor
+import copy
+import re
+
+import routing
+from runtime import registry
+
+STATES = ('signed_in', 'signed_out', 'missing_cli', 'error')
+URL_RE = re.compile(r'https://[A-Za-z0-9.-]+(/[A-Za-z0-9._~/%?=&-]*)?\Z')
+TERMINAL_COMMANDS = ('claude auth login',)  # Instructions the UI may show; anything else is refused.
+MAX_TEXT = 300
+
+
+def _text(value, limit=MAX_TEXT):
+    return value[:limit] if isinstance(value, str) else ''
+
+
+def _provider(params):
+    return registry.get(params.get('provider'))['name']
+
+
+def _error(name, detail):
+    return {'provider': name, 'state': 'error', 'account': None, 'detail': detail}
+
+
+def _status(app, name):
+    title = registry.get(name)['title']
+    try:
+        result = registry.runtime_class(name).auth_status(app)
+    except ValueError as error:
+        return _error(name, _text(str(error)))
+    except Exception:
+        return _error(name, title + ' could not report its sign-in. Check its installation.')
+    if not isinstance(result, dict) or result.get('provider') != name or result.get('state') not in STATES:
+        return _error(name, title + ' sent a sign-in status Interspace does not understand.')
+    account = result.get('account')
+    return {'provider': name, 'state': result['state'],
+            'account': account[:120] if isinstance(account, str) and account else None,
+            'detail': _text(result.get('detail'))}
+
+
+def providers_list(app, params):
+    names = registry.names()
+    with ThreadPoolExecutor(max_workers=max(1, len(names)), thread_name_prefix='provider-status') as pool:
+        status = list(pool.map(lambda name: _status(app, name), names))
+    with app.lock:
+        current = routing.current(app.state)
+    return {'providers': registry.public(), 'status': status, 'routing': current}
+
+
+def provider_status(app, params):
+    return _status(app, _provider(params))
+
+
+def provider_sign_in(app, params):
+    name = _provider(params)
+    title = registry.get(name)['title']
+    try:
+        result = registry.runtime_class(name).begin_sign_in(app)
+    except ValueError as error:
+        raise ValueError(_text(str(error)) or title + ' sign-in could not start.') from None
+    except Exception:
+        raise ValueError(title + ' sign-in could not start. Check its installation.') from None
+    kind = result.get('kind') if isinstance(result, dict) else None
+    if kind == 'device':
+        url, code = result.get('url'), result.get('code')
+        if isinstance(url, str) and URL_RE.match(url) and len(url) <= 300 \
+                and (code is None or (isinstance(code, str) and 0 < len(code) <= 40)):
+            return {'provider': name, 'kind': 'device', 'url': url, 'code': code, 'detail': _text(result.get('detail'))}
+    elif kind == 'terminal':
+        if result.get('command') in TERMINAL_COMMANDS:
+            return {'provider': name, 'kind': 'terminal', 'command': result['command'],
+                    'detail': _text(result.get('detail'))}
+    raise ValueError(title + ' sent a sign-in step Interspace does not understand.')
+
+
+def routing_update(app, params):
+    checked = routing.validate(params.get('routing'))
+    with app.lock:
+        app.state['routing'] = copy.deepcopy(checked)
+        app.publish()
+    return checked
+
+
+METHODS = {
+    'providers_list': providers_list,
+    'provider_sign_in': provider_sign_in,
+    'provider_status': provider_status,
+    'routing_update': routing_update,
+}
