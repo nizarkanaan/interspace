@@ -22,6 +22,7 @@ import time
 import uuid
 
 import budget
+import orchestrator
 
 from timeutil import iso_time
 
@@ -41,8 +42,9 @@ GIT_TIMEOUT_S = 120
 QUEUED = 'queued'
 COUNTED = ('starting', 'running', 'waiting_lock')  # Only these count against the time limit.
 TERMINAL = ('completed', 'failed', 'cancelled', 'budget_exhausted', 'time_limit', 'interrupted')
-RECOVER = ('queued', 'starting', 'running', 'waiting_lock', 'paused_ask', 'paused_scope', 'cancelling')
-STATES = ('queued', 'starting', 'running', 'waiting_lock', 'paused_ask', 'paused_scope', 'idle', 'cancelling') + TERMINAL
+RECOVER = ('queued', 'starting', 'running', 'waiting_lock', 'paused_ask', 'paused_scope', 'paused_team', 'cancelling')
+STATES = ('queued', 'starting', 'running', 'waiting_lock', 'paused_ask', 'paused_scope', 'paused_team', 'idle',
+          'cancelling') + TERMINAL
 RUNTIME_KINDS = ('message_delta', 'message', 'reasoning', 'plan_update', 'tool_call', 'tool_output_delta',
                  'tool_result', 'diff')
 ANSWERS = ('allow_once', 'add_to_scope', 'deny', 'text')
@@ -266,10 +268,15 @@ class BudgetGate:
     def __init__(self, store):
         self.store = store
 
-    def reserve(self, task, text, provider, turn_id):
-        return budget.reserve(self.store.state, task, role='Agent', prompt=text, project_id=task['agent']['project_id'],
-                              estimate=budget.estimate_turn(len(text)), provider=provider, turn_id=turn_id,
-                              call_kind='agent_turn')
+    def reserve(self, task, text, provider, turn_id, source_task_id=None):
+        """Reserve against `task`, the root task (orchestration.md: one budget per root). A child's entry records
+        the child as `source_task_id` and is charged by the child's own provider rule."""
+        entry_id = budget.reserve(self.store.state, task, role='Agent', prompt=text,
+                                  project_id=task['agent']['project_id'], estimate=budget.estimate_turn(len(text)),
+                                  provider=provider, turn_id=turn_id, call_kind='agent_turn')
+        if source_task_id is not None and source_task_id != task['id']:
+            self.entry(entry_id)['source_task_id'] = source_task_id
+        return entry_id
 
     def entry(self, entry_id):
         return next(e for e in self.store.state['usage'] if isinstance(e, dict) and e.get('id') == entry_id)
@@ -390,6 +397,7 @@ def recover(store, events):
                           {'state': 'interrupted', 'detail': 'The app closed while this task was working.',
                            'queue_position': None, 'reason': None})
             changed.append(task['id'])
+        changed += [t for t in orchestrator.recover(store) if t not in changed]
         if changed:
             store.changed()
     return changed
@@ -412,6 +420,11 @@ class RunContext:
         # A model id from the signed-in account's model list (0B-7), or None for the provider default.
         self.model = task.get('model') if isinstance(task.get('model'), str) and task.get('model') else None
         self.cancel = run.cancel
+        self.role = run.role
+        # 'read' or 'write': runtimes start read sessions without workspace writes. The Orchestrator reads only.
+        self.access = run.access
+        # Added system instructions for Orchestrator sessions (orchestration.md "Prompt"), else None.
+        self.instructions = scheduler.orchestrator.system_prompt() if run.orchestrates else None
 
     def authorize(self, request, call_id):
         return self._scheduler._authorize(self._run, request, _runtime_id(call_id, 'call_id'))
@@ -425,17 +438,19 @@ class RunContext:
             _runtime_id(item_id, 'item_id')
         return self._scheduler._emit(self._run, kind, data, turn_id=turn_id or self.turn_id, item_id=item_id)
 
-    def call_tool(self, name, arguments, call_id):
-        """Run one Interspace tool from the MCP bridge. No tools are offered yet, so every name is unknown."""
-        _runtime_id(call_id, 'call_id')
-        raise ValueError('Unknown tool.')
+    def orchestrate(self, name, arguments):
+        """Run one orchestration tool from the MCP bridge (Orchestrator sessions only). Returns the tool result."""
+        return self._scheduler._orchestrate(self._run, name, arguments)
 
     def report_usage(self, usage):
         self._scheduler._report_usage(self._run, usage)
 
     def tools(self):
-        """Tool descriptors for the MCP bridge. None yet: runtimes start a bridge only for a non-empty list."""
-        return []
+        """Tool descriptors for the MCP bridge: the orchestration tools for Orchestrator sessions, none otherwise."""
+        if not self._run.orchestrates:
+            return []
+        from runtime import mcp_bridge
+        return copy.deepcopy(list(mcp_bridge.ORCHESTRATION_TOOLS))
 
     def observed(self, request, call_id):
         """Record an action the provider ran without asking; returns its final decision (`provider.sandbox`)."""
@@ -464,6 +479,12 @@ class _Run:
         self.ask = None
         self.ask_answer = None
         self.ask_lock = threading.Lock()
+        self.parent_task_id = None
+        self.role = None
+        self.access = 'write'
+        self.orchestrates = False
+        self.yielded = False  # Waiting on the user or on its children: holds no run slot.
+        self.team_wait = None
 
 
 def _final(decision, rule=None):
@@ -500,6 +521,7 @@ class Scheduler:
         self._sessions = {}
         self._closed = False
         self._stop_watch = threading.Event()
+        self.orchestrator = orchestrator.Orchestrator(self)
         self._watch = threading.Thread(target=self._watchdog, args=(tick_s,), daemon=True, name='scheduler-watchdog')
         self._watch.start()
 
@@ -523,6 +545,10 @@ class Scheduler:
                 raise ValueError('Approve the task scope before starting.')
             agent['turns'] = agent.get('turns', 0) + 1
             run = _Run(task_id, project_id, text, client_id, 'u%d' % agent['turns'])
+            run.parent_task_id = task.get('parent_task_id')
+            run.role = task.get('role')
+            run.orchestrates = run.role == 'orchestrator' and run.parent_task_id is None
+            run.access = task.get('access') or ('read' if run.orchestrates else 'write')
             self._runs[task_id] = run
             if not self._queue and self._free_slots() > 0:
                 self._start(run)
@@ -534,6 +560,16 @@ class Scheduler:
             return {'task_id': task_id, 'state': 'queued', 'position': position}
 
     def cancel(self, task_id):
+        """Cancel a task's run, then every running or queued child of that task (the parent stops first, so a
+        parent waiting on its children sees the cancel rather than finished children)."""
+        cancelled = self._cancel_one(task_id)
+        with self.lock:
+            children = [t for t, r in self._runs.items() if r.parent_task_id == task_id]
+        for child_id in children:
+            cancelled = self._cancel_one(child_id) or cancelled
+        return cancelled
+
+    def _cancel_one(self, task_id):
         with self.lock:
             run = self._runs.get(task_id)
             if run is None:
@@ -596,12 +632,12 @@ class Scheduler:
                 if run.thread is None:
                     continue
                 task = self._task(run.task_id)
-                totals = self.budget.totals(task)
-                running.append({'task_id': run.task_id, 'project_id': run.project_id, 'state': task['agent']['state'],
-                                'started_at': run.started_at, 'tokens': {'used': totals['used'], 'budget': totals['budget']},
-                                'lock': run.lock_key})
-            queued = [{'task_id': t, 'project_id': self._runs[t].project_id, 'position': i + 1}
-                      for i, t in enumerate(self._queue)]
+                totals = self.budget.totals(self._root(task))
+                running.append(dict(self._lineage(run, task), task_id=run.task_id, project_id=run.project_id,
+                                    state=task['agent']['state'], started_at=run.started_at,
+                                    tokens={'used': totals['used'], 'budget': totals['budget']}, lock=run.lock_key))
+            queued = [dict(self._lineage(self._runs[t], self._task(t)), task_id=t, project_id=self._runs[t].project_id,
+                           position=i + 1) for i, t in enumerate(self._queue)]
             return {'max_running': self.max_running, 'running': running, 'queued': queued}
 
     def shutdown(self, timeout_s=30):
@@ -636,6 +672,15 @@ class Scheduler:
             raise ValueError('This is not an agent task.')
         return task
 
+    def _root(self, task):
+        """The task whose budget a run is charged against: the parent of a child, else the task itself."""
+        parent_id = task.get('parent_task_id')
+        return self._task(parent_id) if parent_id else task
+
+    @staticmethod
+    def _lineage(run, task):
+        return {'parent_task_id': run.parent_task_id, 'role': run.role, 'provider': task.get('provider', 'codex')}
+
     def approved(self, task):
         """Whether the task's live scope has a matching approval (scope.md approval binding)."""
         approval = task.get('scope_approval')
@@ -647,7 +692,7 @@ class Scheduler:
                 and approval.get('scope_version') == task['scope'].get('version'))
 
     def _running_count(self):
-        return sum(1 for run in self._runs.values() if run.thread is not None)
+        return sum(1 for run in self._runs.values() if run.thread is not None and not run.yielded)
 
     def _free_slots(self):
         return self.max_running - self._running_count()
@@ -668,6 +713,8 @@ class Scheduler:
             agent.update(state=state, detail=detail, reason=reason)
             self.events.append(run.task_id, run.project_id, 'status',
                                {'state': state, 'detail': detail, 'queue_position': position, 'reason': reason})
+            if run.parent_task_id:
+                self.orchestrator.child_changed(self._task(run.task_id), state)
             self.store.changed(run.task_id)
             self._cond.notify_all()
 
@@ -684,8 +731,7 @@ class Scheduler:
 
     def _emit_budget(self, run, entry):
         with self.lock:
-            task = self._task(run.task_id)
-            totals = self.budget.totals(task)
+            totals = self.budget.totals(self._root(self._task(run.task_id)))
             tokens = entry['estimate'] if entry['charge_kind'] == 'reserved' else entry['charge']
             self._emit(run, 'budget', {'charge_kind': entry['charge_kind'], 'tokens': tokens,
                                        'provider': entry.get('provider', 'codex'), 'used': totals['used'],
@@ -760,7 +806,8 @@ class Scheduler:
         with self.lock:
             task = self._task(run.task_id)
             try:
-                run.reservation = self.budget.reserve(task, run.text, run.provider, run.turn_id)
+                run.reservation = self.budget.reserve(self._root(task), run.text, run.provider, run.turn_id,
+                                                      source_task_id=run.task_id)
             except budget.Exhausted as error:
                 self._error(run, 'budget_exhausted', str(error), False)
                 return 'budget_exhausted', None
@@ -948,8 +995,7 @@ class Scheduler:
             amount = budget.charge(usage, run.provider)
             if amount is None or run.reservation is None:
                 return
-            task = self._task(run.task_id)
-            totals = self.budget.totals(task)
+            totals = self.budget.totals(self._root(self._task(run.task_id)))
             own = self.budget.entry(run.reservation)['estimate']
             over = totals['budget'] is not None and totals['used'] + totals['reserved'] - own + amount > totals['budget']
         if over:
@@ -1077,6 +1123,34 @@ class Scheduler:
                             'by': 'user', 'summary': 'Added to the scope while answering a question.'})
 
     # -- runtime support ----------------------------------------------------------------------------
+
+    def _orchestrate(self, run, name, arguments):
+        """An orchestration tool call from an Orchestrator session, shown as a `tool_call`/`tool_result` pair."""
+        if not run.orchestrates or name not in orchestrator.TOOLS:
+            raise ValueError('Unknown tool.')
+        call_id = 'orc_' + uuid.uuid4().hex
+        with self.lock:
+            version = self._task(run.task_id)['scope'].get('version')
+        shown = json.dumps(arguments, ensure_ascii=False)
+        self._emit(run, 'tool_call', {'call_id': call_id, 'category': 'orchestrate', 'tool': name, 'app': None,
+                                      'title': name.replace('_', ' ').capitalize(),
+                                      'input': arguments if len(shown) <= 16384 else {'truncated': True},
+                                      'decision': {'decision': 'allow', 'rule': 'orchestrate', 'scope_version': version}},
+                   turn_id=run.turn_id, item_id=call_id)
+        started = time.monotonic()
+        try:
+            result = self.orchestrator.call(run, name, arguments)
+        except Exception:
+            result = {'ok': False, 'error': {'code': 'unavailable', 'message': 'The orchestration tool failed.'}}
+        error = result.get('error') if not result.get('ok') else None
+        text = json.dumps({k: v for k, v in result.items() if k != 'ok'}, ensure_ascii=False)
+        status = 'ok' if result.get('ok') else 'cancelled' if (error or {}).get('code') == 'cancelled' else 'error'
+        self._emit(run, 'tool_result', {'call_id': call_id, 'status': status, 'exit_code': None,
+                                        'duration_ms': int((time.monotonic() - started) * 1000),
+                                        'output': {'text': text[:MAX_PATCH_CHARS], 'truncated': len(text) > MAX_PATCH_CHARS,
+                                                   'blob_id': None}, 'error': error},
+                   turn_id=run.turn_id, item_id=call_id)
+        return result
 
     def _observed(self, run, request, call_id):
         with self.lock:

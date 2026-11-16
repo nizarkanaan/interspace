@@ -82,6 +82,33 @@ class TaskStorageTests(unittest.TestCase):
             with self.subTest(method=method):
                 with self.assertRaisesRegex(ValueError,'Unknown method'):app.handle(method,{'project_id':pid})
 
+    def test_new_tasks_are_orchestrator_tasks_and_subagents_are_child_rows(self):
+        parent=tasks.create('Fix it',project_id='p1',token_budget=90000)
+        self.assertEqual(parent['role'],'orchestrator')
+        self.assertIsNone(parent.get('parent_task_id'))
+        child=tasks.child(parent,role='implementer',brief_text='  Add input validation.  ',provider='claude',
+                          model='claude-sonnet-5-5',access='write',team_id='t1',member_id='m2')
+        self.assertEqual({k:child[k] for k in ('parent_task_id','role','brief','provider','model','access','team_id','member_id')},
+                         {'parent_task_id':parent['id'],'role':'implementer','brief':'Add input validation.','provider':'claude',
+                          'model':'claude-sonnet-5-5','access':'write','team_id':'t1','member_id':'m2'})
+        self.assertEqual((child['title'],child['token_budget'],child['agent']['project_id'],child['mode']),
+                         ('Implementer: Add input validation.',90000,'p1','agent'))
+        self.assertNotEqual(child['id'],parent['id'])
+        tasks.validate(child,child['id'])
+        paused=dict(parent,agent=dict(parent['agent'],state='paused_team'))
+        tasks.validate(paused,parent['id'])
+        legacy=dict(parent);legacy.pop('role')
+        tasks.validate(legacy,parent['id'])  # Agent tasks saved before the Orchestrator still load.
+        for bad in (dict(child,role='orchestrator'),dict(child,access='admin'),dict(child,brief=''),dict(child,member_id=None),
+                    dict(parent,role='boss'),dict(parent,team_id='t1')):
+            with self.assertRaises(ValueError):tasks.validate(bad,bad['id'])
+        for kwargs in (dict(role='orchestrator'),dict(access='none'),dict(brief_text='x'*6001)):
+            arguments=dict(role='reviewer',brief_text='b',provider='codex',model=None,access='read',team_id='t',member_id='m1')
+            arguments.update(kwargs)
+            with self.assertRaises(ValueError):tasks.child(parent,**arguments)
+        self.assertEqual(len(tasks.child(parent,role='writer',brief_text='w'*300,provider='codex',model=None,access='read',
+                                         team_id='t',member_id='m1')['title']),160)
+
     def test_earlier_tasks_load_read_only_with_conversation_plan_and_report(self):
         storage=self.base/'data'
         project=projects.new_project(self.source)
