@@ -93,6 +93,10 @@ class FakeContext:
         self.tool_calls.append((name, arguments, call_id))
         return {'ok': True, 'result': {}}
 
+    def orchestrate(self, name, arguments):  # The bridge's entry point since Wave 1B.
+        self.tool_calls.append((name, arguments, None))
+        return {'ok': True, 'result': {}}
+
     def report_usage(self, value):
         self.usages.append(value)
 

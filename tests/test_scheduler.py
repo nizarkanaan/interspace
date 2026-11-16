@@ -694,22 +694,22 @@ class RuntimeSupportTests(SchedulerCase):
         self.sched.cancel('a')
         self.wait_state('a', 'cancelled')
 
-    def test_no_tools_are_offered_and_call_tool_refuses(self):
+    def test_plain_agent_tasks_get_no_tools_and_orchestrate_refuses(self):
         seen = []
 
         def script(session, text, ctx):
-            seen.append(ctx.tools())
+            seen.append((ctx.tools(), ctx.access, ctx.role, ctx.instructions))
             with self.assertRaisesRegex(ValueError, 'Unknown tool'):
-                ctx.call_tool('anything', {}, 'c1')
-            with self.assertRaises(ValueError):
-                ctx.call_tool('anything', {}, 'bad id!')
+                ctx.orchestrate('propose_team', {})
+            self.assertFalse(hasattr(ctx, 'call_tool'))
             seen.append('refused')
             return default_script(session, text, ctx)
         self.make(script=script)
         self.task('a')
         self.sched.submit('a', 'p1', 'x', None)
         self.wait_state('a', 'idle')
-        self.assertEqual(seen, [[], 'refused'])
+        self.assertEqual(seen, [([], 'write', None, None), 'refused'])
+        self.assertNotIn('tool_call', self.kinds('a'))
 
     def test_observed_actions_are_audited_as_provider_sandbox(self):
         seen = []

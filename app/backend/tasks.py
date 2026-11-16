@@ -14,7 +14,7 @@ import budget
 MODES = ('agent',)
 LEGACY_MODES = ('review','python_fix')
 # Agent task run states (events.md `status`); None means no turn has started yet.
-AGENT_STATES = ('queued','starting','running','waiting_lock','paused_ask','paused_scope','idle','cancelling',
+AGENT_STATES = ('queued','starting','running','waiting_lock','paused_ask','paused_scope','paused_team','idle','cancelling',
                 'completed','failed','cancelled','budget_exhausted','time_limit','interrupted')
 # Agent runtimes (scheduler.md runtime adapter): Codex app-server (2A) or Claude Code (2B).
 PROVIDERS = ('codex','claude')
@@ -26,6 +26,15 @@ FINISHED_STAGES = ('completed','completed_unreviewed','accepted','needs_revision
                    'interrupted','integrity_failed','budget_exhausted','awaiting_test_approval','ready_to_apply',
                    'applied','application_failed','recovery_required','abandoned')
 MAX_REPORT_CHARS = 24000
+# Agent task roles (orchestration.md): every new task is an Orchestrator task; subagents are child tasks with a
+# team role. `implementer` and `tester` are write roles (providers.md); the other team roles read only.
+ORCHESTRATOR = 'orchestrator'
+TEAM_ROLES = ('researcher','implementer','reviewer','tester','writer')
+WRITE_ROLES = ('implementer','tester')
+ROLES = (ORCHESTRATOR,)+TEAM_ROLES
+ACCESS = ('read','write')
+MAX_BRIEF_CHARS = 6000
+CHILD_FIELDS = ('parent_task_id','brief','access','team_id','member_id')
 
 
 def title(value):
@@ -73,13 +82,41 @@ def provider(task):
 
 
 def create(name='New agent task', *, project_id, provider=None, model=None, token_budget=budget.DEFAULT_BUDGET):
-    """A new agent task. The scope (scope.md) is attached by the caller, which needs the task ID to build it."""
+    """A new Orchestrator task. The scope (scope.md) is attached by the caller, which needs the task ID to build it."""
     if not isinstance(project_id,str) or not project_id:raise ValueError('An agent task needs a project.')
-    return {'id':uuid.uuid4().hex,'title':title(name),'mode':'agent','draft':'',
+    return {'id':uuid.uuid4().hex,'title':title(name),'mode':'agent','role':ORCHESTRATOR,'draft':'',
             'token_budget':budget.validate(token_budget),'thread':[],'pending':None,'run_id':None,'run_ids':[],
             'error':'','error_status':None,'scope':None,'scope_approval':None,
             'provider':validate_provider(DEFAULT_PROVIDER if provider is None else provider),'model':validate_model(model),
             'agent':{'project_id':project_id,'state':None,'detail':'','reason':None,'turns':0,'active_s':0.0,'workspaces':{}}}
+
+
+def role(task):
+    """The task's role; agent tasks saved before the Orchestrator have none and run as plain agent tasks."""
+    return task.get('role')
+
+
+def brief(value):
+    if not isinstance(value,str) or not value.strip() or len(value)>MAX_BRIEF_CHARS:
+        raise ValueError('A subagent brief must contain 1–6,000 characters.')
+    return value.strip()
+
+
+def validate_access(value):
+    if value not in ACCESS:raise ValueError('Access must be read or write.')
+    return value
+
+
+def child(parent, *, role, brief_text, provider, model, access, team_id, member_id):
+    """A subagent row (orchestration.md): a normal agent task with the child fields. Scope is attached by the caller."""
+    if role not in TEAM_ROLES:raise ValueError('Unknown subagent role.')
+    text=brief(brief_text)
+    label=role.capitalize()+': '+' '.join(text.split())
+    task=create(label if len(label)<=160 else label[:159]+'…',project_id=parent['agent']['project_id'],
+                provider=provider,model=model,token_budget=parent.get('token_budget'))
+    task.update(role=role,brief=text,access=validate_access(access),parent_task_id=parent['id'],
+                team_id=team_id,member_id=member_id)
+    return task
 
 
 def imported(name):
@@ -96,6 +133,12 @@ def validate_agent(task):
     if type(agent.get('turns',0)) is not int or not isinstance(agent.get('workspaces',{}),dict):raise ValueError()
     if not isinstance(agent.get('active_s',0.0),(int,float)) or isinstance(agent.get('active_s'),bool):raise ValueError()
     validate_provider(task.get('provider',DEFAULT_PROVIDER))
+    if task.get('role') is not None and task['role'] not in ROLES:raise ValueError()
+    if task.get('parent_task_id') is not None:
+        if task.get('role') not in TEAM_ROLES or task.get('access') not in ACCESS:raise ValueError()
+        brief(task.get('brief'))
+        if any(not isinstance(task.get(k),str) or not task[k] for k in ('parent_task_id','team_id','member_id')):raise ValueError()
+    elif any(task.get(k) is not None for k in CHILD_FIELDS):raise ValueError()
     if validate_model(task.get('model'))!=task.get('model'):raise ValueError()
     if task.get('scope') is not None and not isinstance(task['scope'],dict):raise ValueError()
     if task.get('scope_approval') is not None and not isinstance(task['scope_approval'],dict):raise ValueError()
