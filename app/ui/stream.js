@@ -2,22 +2,23 @@
    Model and event text is only ever inserted with textContent. */
 (()=>{
 const TERMINAL=new Set(['completed','failed','cancelled','budget_exhausted','time_limit','interrupted']);
-const BUSY=new Set(['queued','starting','running','waiting_lock','paused_ask','paused_scope','cancelling']);
-const STATUS={queued:'Queued',starting:'Starting',running:'Running',waiting_lock:'Waiting for a lock',paused_ask:'Needs your answer',paused_scope:'Scope needs approval',idle:'Waiting for your message',cancelling:'Stopping',completed:'Completed',failed:'Failed',cancelled:'Cancelled',budget_exhausted:'Token budget exhausted',time_limit:'Time limit reached',interrupted:'Interrupted: the app quit mid-task and nothing resumes automatically'};
+const BUSY=new Set(['queued','starting','running','waiting_lock','paused_ask','paused_scope','paused_team','cancelling']);
+const STATUS={queued:'Queued',starting:'Starting',running:'Running',waiting_lock:'Waiting for a lock',paused_ask:'Needs your answer',paused_scope:'Scope needs approval',paused_team:'Team needs your approval',idle:'Waiting for your message',cancelling:'Stopping',completed:'Completed',failed:'Failed',cancelled:'Cancelled',budget_exhausted:'Token budget exhausted',time_limit:'Time limit reached',interrupted:'Interrupted: the app quit mid-task and nothing resumes automatically'};
 const NOTABLE=new Set(['queued','waiting_lock','paused_scope','cancelling',...TERMINAL]);
-const CATEGORY={command:'Command',file_read:'Read file',file_write:'Write files',network:'Network',web_search:'Web search',mcp:'MCP tool'};
+const SUBAGENT=['team_id','member_id','task_id','role','provider','model','access','brief','state','tokens_used','report_excerpt','diff_summary'];
+const CATEGORY={command:'Command',file_read:'Read file',file_write:'Write files',network:'Network',web_search:'Web search',mcp:'MCP tool',orchestrate:'Orchestration'};
 const RESULT={ok:'Done',error:'Failed',denied:'Denied',cancelled:'Cancelled'};
 const REASON={outside_scope:'Outside the task scope',destructive:'Destructive action: always asks',network_host:'Network host not in the scope',escalation:'Asks to run outside the sandbox',mcp_tool:'External MCP tool: always asks',agent_question:'The agent asks you'};
 const OPTION={allow_once:'Allow once',add_to_scope:'Add to scope',deny:'Deny'};
 const ANSWERED={allow_once:'Allowed once',add_to_scope:'Added to scope',deny:'Denied',text:'Replied',cancelled:'Closed: the task was cancelled'};
 const MAX_PAGES=20,COMPACT_ITEMS=5;
-const tasks=new Map(),views=new WeakMap();
-let request=()=>Promise.reject(Error('No bridge')),changed=()=>{};
+const tasks=new Map(),views=new WeakMap(),parents=new Map();
+let request=()=>Promise.reject(Error('No bridge')),changed=()=>{},hostChanged=()=>{},open=()=>{};
 
 const el=(tag,cls,text,parent)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=String(text);if(parent)parent.append(e);return e;};
 const tokens=n=>Number(n||0).toLocaleString('en-US');
 function model(id){
- if(!tasks.has(id))tasks.set(id,{id,lastSeq:0,buffer:new Map(),fetching:false,items:new Map(),status:null,budget:null,scopeEvent:null,workspace:null,openAsk:null,paths:new Set(),loadError:''});
+ if(!tasks.has(id))tasks.set(id,{id,lastSeq:0,buffer:new Map(),fetching:false,items:new Map(),status:null,budget:null,scopeEvent:null,workspace:null,openAsk:null,paths:new Set(),loadError:'',children:new Map()});
  return tasks.get(id);
 }
 function item(m,key){let it=m.items.get(key);if(!it){it={key,version:0};m.items.set(key,it);}it.version++;return it;}
@@ -33,7 +34,9 @@ function apply(m,e){
  const d=e.data&&typeof e.data==='object'?e.data:{},key=typeof e.item_id==='string'&&e.item_id?e.item_id:'seq:'+e.seq;
  if(e.v!==1){row(m,e,'unsupported',{text:'Unsupported event (format version '+String(e.v)+')'});return;}
  switch(e.kind){
-  case 'status':m.status=d;if(NOTABLE.has(d.state))row(m,e,'status',{text:statusText(d)});return;
+  case 'status':{m.status=d;if(NOTABLE.has(d.state))row(m,e,'status',{text:statusText(d)});
+   // An open proposal closes when the task ends, so its card is rebuilt without the answer controls.
+   if(TERMINAL.has(d.state))for(const it of m.items.values())if(it.team&&!it.team.answered)it.version++;return;}
   case 'message_delta':{const it=item(m,key);it.message={role:d.role||'assistant',text:(it.message&&!it.message.final?it.message.text:'')+(d.text_delta||''),final:false};return;}
   case 'message':{if(d.role==='user'&&d.client_id)m.items.delete('client:'+d.client_id);item(m,key).message={role:d.role==='user'?'user':'assistant',text:String(d.text??''),final:true};return;}
   case 'reasoning':item(m,key).reasoning=String(d.text??'');return;
@@ -47,8 +50,14 @@ function apply(m,e){
   case 'budget':m.budget=d;if(d.charge_kind!=='reserved')row(m,e,'budget',{text:(d.charge_kind==='estimated'?'Estimated ':'Reported ')+tokens(d.tokens)+' tokens'+(d.charge_kind==='estimated'?' (no counts returned)':'')+' · '+tokens(d.used)+' / '+tokens(d.budget)+' used'});return;
   case 'scope':m.scopeEvent=d;row(m,e,'scope',{text:'Scope v'+d.scope_version+' '+({approved:'approved',edited:'edited: approve it before the next action',amended:'amended and approved'}[d.change]||String(d.change))+(d.summary?': '+d.summary:'')});return;
   case 'error':item(m,key).error=d;return;
-  default:row(m,e,'unsupported',{text:'Unsupported event ('+e.kind+')'});
+  case 'team_proposed':case 'team_answered':{if(typeof d.team_id!=='string')break;const it=item(m,'team:'+d.team_id);it.team={...(it.team||{}),[e.kind==='team_proposed'?'proposal':'answered']:d};return;}
+  case 'subagent_started':case 'subagent_status':case 'subagent_finished':{
+   if(typeof d.task_id!=='string'||!d.task_id)break;const k='sub:'+d.task_id,it=item(m,k);it.sub=it.sub||{};
+   for(const f of SUBAGENT)if(d[f]!==undefined)it.sub[f]=d[f];if(e.kind==='subagent_finished')it.sub.finished=true;
+   m.children.set(d.task_id,k);parents.set(d.task_id,m.id);return;}
+  default:row(m,e,'unsupported',{text:'Unsupported event ('+e.kind+')'});return;
  }
+ row(m,e,'unsupported',{text:'Unsupported event ('+e.kind+')'});
 }
 function drain(m){while(m.buffer.has(m.lastSeq+1)){const e=m.buffer.get(m.lastSeq+1);m.buffer.delete(e.seq);apply(m,e);m.lastSeq=e.seq;}}
 function accept(m,e){if(valid(e)&&e.task_id===m.id&&e.seq>m.lastSeq&&!m.buffer.has(e.seq))m.buffer.set(e.seq,e);}
@@ -137,7 +146,9 @@ function build(m,it){
  if(it.row){const r=el('p','row-event '+it.row,it.text);r.dataset.item=it.key;return r;}
  if(it.message){const msg=el('div','message '+it.message.role+(it.message.pending?' pending':''));msg.dataset.item=it.key;el('small','',it.message.role==='user'?'You':'Agent',msg);markdown(it.message.text,msg);if(!it.message.final&&!it.message.pending)el('span','streaming footnote','Writing…',msg);if(it.message.pending&&!it.message.failed)el('span','footnote','Sending…',msg);if(it.message.failed)el('p','error-text','Not sent: '+it.message.failed,msg);return msg;}
  const card=el('article','card');card.dataset.item=it.key;
- if(it.ask)askCard(m,it,card);
+ if(it.team)window.interspaceTeam.teamCard(card,{taskId:m.id,team:it.team,request,closed:terminal(m.status),closedText:statusText(m.status).toLowerCase(),bump:()=>{it.version++;changed(m.id);}});
+ else if(it.sub)window.interspaceTeam.subagentCard(card,subContext(m,it));
+ else if(it.ask)askCard(m,it,card);
  else if(it.call||it.result||it.output!=null)toolCard(m,it,card);
  else if(it.diff){card.classList.add('diff-card');diffBlock(m,it,it.diff,card);}
  else if(it.reasoning!=null){const d=el('details','reasoning',null,card);el('summary','','Reasoning summary',d);markdown(it.reasoning,d);}
@@ -146,9 +157,24 @@ function build(m,it){
  if(it.blobError)el('p','error-text',it.blobError,card);
  return card;
 }
+const terminal=s=>!!s&&TERMINAL.has(s.state);
+// A child's own stream renders into one container that lives as long as its card, so it reconciles in place.
+function subContext(m,it){
+ const child=it.sub.task_id;
+ if(it.expanded&&!it.childBox){it.childBox=el('div','stream nested');it.childBox.id='child-'+child.replace(/[^A-Za-z0-9_-]/g,'_');it.childBox.setAttribute('role','log');it.childBox.setAttribute('aria-label','Subagent activity');}
+ if(it.expanded)render(it.childBox,child);
+ return {sub:it.sub,expanded:!!it.expanded,childBox:it.childBox,statusText,markdown,
+  toggle:()=>{it.expanded=!it.expanded;it.version++;if(it.expanded)sync(model(child));changed(m.id);},
+  open:()=>open(child)};
+}
+function childChanged(id){
+ const parent=parents.get(id),pm=parent&&tasks.get(parent),it=pm&&pm.items.get(pm.children.get(id));
+ if(it?.expanded&&it.childBox)render(it.childBox,id);
+}
 // Reconciles cards in place, so focus, open details and scroll position survive new events.
 function render(container,taskId,options={}){
  const m=model(taskId);let cache=views.get(container);if(!cache){cache=new Map();views.set(container,cache);}
+ const focus=document.activeElement&&container.contains(document.activeElement)&&document.activeElement.id?document.activeElement.id:null;
  let list=[...m.items.values()];
  if(options.compact){const open=m.openAsk&&m.items.get(m.openAsk);list=list.slice(-COMPACT_ITEMS);if(open&&!list.includes(open))list.push(open);}
  const nodes=list.map(it=>{const hit=cache.get(it.key);if(hit&&hit.version===it.version)return hit.node;const next=build(m,it);if(hit){const was=hit.node.querySelector('details');const now=next.querySelector('details');if(was&&now)now.open=was.open;}cache.set(it.key,{version:it.version,node:next});return next;});
@@ -156,6 +182,7 @@ function render(container,taskId,options={}){
  nodes.forEach((n,i)=>{if(container.children[i]!==n)container.insertBefore(n,container.children[i]||null);});
  while(container.children.length>nodes.length)container.lastElementChild.remove();
  if(m.loadError&&!options.compact){const note=el('p','error-text',m.loadError,container);note.setAttribute('role','alert');}
+ if(focus&&document.activeElement?.id!==focus){const again=document.getElementById(focus);if(again&&container.contains(again))again.focus();}
 }
 function answer(taskId,key,decision,text){
  const m=model(taskId),it=m.items.get(key);if(!it?.ask||it.sending||it.answer)return;
@@ -169,9 +196,11 @@ function optimistic(taskId,text,clientId){const m=model(taskId);item(m,'client:'
 function failed(taskId,clientId,reason){const it=model(taskId).items.get('client:'+clientId);if(!it)return;it.message.failed=reason;it.version++;changed(taskId);}
 
 window.interspaceStream={
- init(options){request=options.request;changed=options.changed||changed;},
+ init(options){request=options.request;hostChanged=options.changed||hostChanged;open=options.open||open;changed=id=>{hostChanged(id);childChanged(id);};},
  receive,sync:id=>sync(model(id)),render,optimistic,failed,statusText,budgetText,
  has:id=>tasks.has(id)&&tasks.get(id).lastSeq>0,ids:()=>[...tasks.keys()],
+ parentOf:id=>parents.get(id)||null,
+ children:id=>{const m=tasks.get(id);return m?[...m.children.values()].map(k=>m.items.get(k)?.sub).filter(Boolean):[];},
  status:id=>tasks.get(id)?.status||null,budget:id=>tasks.get(id)?.budget||null,scopeEvent:id=>tasks.get(id)?.scopeEvent||null,workspace:id=>tasks.get(id)?.workspace||null,
  busy:s=>!!s&&BUSY.has(s.state),terminal:s=>!!s&&TERMINAL.has(s.state),
  mentions(id){const m=tasks.get(id);if(!m)return [];return [...m.paths].map(p=>({value:p,hint:'File'}));}
