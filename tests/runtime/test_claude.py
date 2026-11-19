@@ -309,6 +309,65 @@ class LaunchTests(ClaudeCase):
         denied = json.loads(args[args.index('--settings') + 1])['sandbox']['filesystem']['denyRead']
         self.assertIn(os.path.join(os.environ['HOME'], '.ssh'), denied)
 
+    def test_scratch_tmp_never_follows_agent_links_out_of_the_clone(self):
+        # An agent can make symlinks in its clone (the command sandbox allows it, .git/info included), so the
+        # backend's own scratch writes must stay inside the clone.
+        outside = self.root / 'outside'
+
+        def clone(name):
+            workspace = self.root / name
+            (workspace / '.git' / 'info').mkdir(parents=True)
+            outside.mkdir(exist_ok=True)
+            return workspace
+
+        cases = {}
+        workspace = clone('exclude-link')
+        (outside / 'target').write_text('keep\n')
+        (workspace / '.git' / 'info' / 'exclude').symlink_to(outside / 'target')
+        cases['exclude is a symlink'] = workspace
+        workspace = clone('info-link')
+        (workspace / '.git' / 'info').rmdir()
+        (workspace / '.git' / 'info').symlink_to(outside, target_is_directory=True)
+        cases['info is a symlink'] = workspace
+        workspace = clone('git-link')
+        os.rename(str(workspace / '.git'), str(self.root / 'moved-git'))
+        (workspace / '.git').symlink_to(outside, target_is_directory=True)
+        cases['.git is a symlink'] = workspace
+        workspace = clone('gitfile')
+        os.rename(str(workspace / '.git'), str(self.root / 'moved-git-2'))
+        (workspace / '.git').write_text('gitdir: %s\n' % outside)
+        cases['.git is a gitfile'] = workspace
+        workspace = clone('commondir')
+        (workspace / '.git' / 'commondir').write_text(str(outside) + '\n')
+        cases['.git has a commondir'] = workspace
+        workspace = clone('scratch-link')
+        (workspace / '.interspace').symlink_to(outside, target_is_directory=True)
+        cases['.interspace is a symlink'] = workspace
+        workspace = clone('tmp-link')
+        (workspace / '.interspace').mkdir()
+        (workspace / '.interspace' / 'tmp').symlink_to(outside, target_is_directory=True)
+        cases['.interspace/tmp is a symlink'] = workspace
+        workspace = clone('exclude-fifo')
+        os.mkfifo(str(workspace / '.git' / 'info' / 'exclude'))  # Opening it must not hang the backend.
+        cases['exclude is a FIFO'] = workspace
+        for label, workspace in cases.items():
+            with self.subTest(label):
+                with self.assertRaises(OSError):
+                    claude.scratch_tmp(str(workspace))
+                self.assertEqual(sorted(p.name for p in outside.iterdir()), ['target'])
+                self.assertEqual((outside / 'target').read_text(), 'keep\n')
+
+    def test_unsafe_scratch_folder_fails_the_turn_before_launch(self):
+        ctx = FakeContext(self.root)
+        outside = self.root / 'outside'
+        outside.mkdir()
+        os.symlink(str(outside), os.path.join(ctx.primary_workspace, '.interspace'))
+        _, _, outcome = self.turn({'turns': [simple_turn()]}, ctx=ctx)
+        self.assertEqual(outcome['status'], 'failed')
+        self.assertEqual(outcome['error']['code'], 'workspace_failed')
+        self.assertEqual(self.main_launches(), [])
+        self.assertEqual(list(outside.iterdir()), [])
+
     def test_cli_reports_manual_mode_as_default(self):
         _, _, outcome = self.turn({'turns': [simple_turn()]})
         self.assertEqual(outcome['status'], 'completed', outcome)  # The fake reports "default", like 2.1.322.

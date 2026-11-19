@@ -34,6 +34,7 @@ import selectors
 import shlex
 import shutil
 import signal
+import stat
 import subprocess
 import tempfile
 import threading
@@ -217,23 +218,44 @@ def write_target(path, workspaces, primary):
     return real, best[0]
 
 
+def _plain_dir(path):
+    """Make `path` a real folder; OSError when a symlink or anything else is there (never followed)."""
+    try:
+        os.mkdir(path, 0o700)
+    except FileExistsError:
+        pass
+    if not stat.S_ISDIR(os.lstat(path).st_mode):
+        raise OSError('Not a plain folder: ' + path)
+
+
 def scratch_tmp(workspace):
-    """The session's TMPDIR, `<workspace>/.interspace/tmp`, kept out of git by the clone's info/exclude."""
-    tmp = os.path.join(workspace, SCRATCH_DIR, 'tmp')
-    os.makedirs(tmp, mode=0o700, exist_ok=True)
+    """The session's TMPDIR, `<workspace>/.interspace/tmp`, kept out of git by the clone's info/exclude.
+
+    The agent can create symlinks in its clone, `.git/info` included, so nothing here follows one: every folder
+    must be a real folder, a redirected `.git` (a symlink, a gitfile or a `commondir`) is refused, and the exclude
+    file is opened without following a link. OSError when the clone is not safe to write.
+    """
+    workspace = os.path.realpath(workspace)
+    scratch = os.path.join(workspace, SCRATCH_DIR)
+    tmp = os.path.join(scratch, 'tmp')
+    _plain_dir(scratch)
+    _plain_dir(tmp)
     git = os.path.join(workspace, '.git')
-    if os.path.isdir(git):
-        exclude = os.path.join(git, 'info', 'exclude')
-        os.makedirs(os.path.dirname(exclude), exist_ok=True)
-        line = '/' + SCRATCH_DIR + '/'
-        try:
-            with open(exclude, encoding='utf-8') as handle:
-                present = line in handle.read().splitlines()
-        except FileNotFoundError:
-            present = False
-        if not present:
-            with open(exclude, 'a', encoding='utf-8') as handle:
-                handle.write('\n' + line + '\n')
+    if not os.path.lexists(git):
+        return tmp
+    if not stat.S_ISDIR(os.lstat(git).st_mode) or os.path.lexists(os.path.join(git, 'commondir')):
+        raise OSError('The clone\'s .git points elsewhere.')
+    info = os.path.join(git, 'info')
+    _plain_dir(info)
+    line = '/' + SCRATCH_DIR + '/'
+    # O_NONBLOCK: a FIFO in place of the file must not hang the backend; it is then refused as not a file.
+    handle = os.open(os.path.join(info, 'exclude'),
+                     os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW | os.O_NONBLOCK, 0o644)
+    with os.fdopen(handle, 'r+', encoding='utf-8') as exclude:
+        if not stat.S_ISREG(os.fstat(handle).st_mode):
+            raise OSError('The clone\'s exclude file is not a file.')
+        if line not in exclude.read().splitlines():
+            exclude.write('\n' + line + '\n')
     return tmp
 
 
