@@ -60,7 +60,14 @@ class Source:
 
   `research.parse_id(text)` returns `('doi'|'arxiv'|'s2'|'openalex', value)`, or raises `ValueError`.
 - **Errors** (in `research/http.py`, restored from the deleted `spaces/base.py`): `ResearchError(ValueError)` with subclasses `NotConfigured`, `RateLimited(retry_after_s)`, `Unavailable`, `BadResponse` and `NotFound`. They map to tool error codes `not_configured`, `rate_limited`, `unavailable`, `bad_response` and `not_found`.
-- **Rate limits:** one token bucket per source, using the spike-0b values (defaults: Semantic Scholar 1/s, arXiv 1 per 3 s, the others 5/s). On a 429, the client honours `Retry-After` up to 10 s, retries once, then raises `RateLimited`.
+- **Spike 0B corrections (binding):**
+  - OpenAlex works without a key on a small shared per-IP budget. Its credential is optional (`required: False`), and a missing key shows as reduced quota, not as unusable.
+  - Upstream error bodies are NEVER passed to agents or the UI. OpenAlex's 429 body addresses AI agents and asks for an email. Errors carry only the code and a fixed Interspace message.
+  - Crossref retraction data also contains corrections, so only an update whose `type` is `retraction` counts.
+  - arXiv BibTeX reports the latest version's year. `research_bibtex` replaces the year with the v1 publication year from the arXiv record.
+  - Semantic Scholar misses some DOIs, so lookups fall back to OpenAlex and then to title matching.
+  - Crossref allows only one connection at a time: 1 request/s for list queries and 5/s for single lookups. Semantic Scholar sends 429 without `Retry-After`, so the client waits 2 s and then 4 s.
+- **Rate limits:** one token bucket per source, using the spike-0b values (defaults: Semantic Scholar 1/s, arXiv 1 per 3 s, the others 5/s). On a 429, the client honours `Retry-After` up to 10 s, retries once, then raises `RateLimited`. Values come from `spike-0b.md`.
 - **Cache** (`research/cache.py`): keyed by `(source, method, canonical args)`, stored under `<storage>/research-cache/`. Each entry has a TTL of 7 days and is at most 2 MiB; the whole cache is LRU-pruned to 200 MiB. Keys and emails are never part of a cache key or entry.
 
 ## Registry and dispatch (`research/__init__.py`)

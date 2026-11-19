@@ -47,4 +47,6 @@ class Credentials:
 | `research_test` | `{source}` | `status(test=True)` |
 | `research_usage` | `{task_id?}` | `{calls: {source: n}, cached: {source: n}}`: call counts, never money |
 
+Semantic Scholar and OpenAlex keys are optional and only raise quotas. Crossref's email is optional (polite pool); Unpaywall's email is required.
+
 `value` for an email-kind source is the user's own email. The UI says, in plain language, that the email goes to that service as its polite-pool contact.
