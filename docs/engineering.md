@@ -76,6 +76,27 @@ Dependency rules:
 
 Testing: the scheduler and orchestrator use a fake runtime and a controlled clock; runtimes use the fake Codex and Claude CLIs in `tests/runtime/fixtures/`; the UI uses fixture event streams. Routine tests never contact a model provider or the user's sign-ins. Live checks are separate, explicitly approved steps, reported separately from unit tests.
 
+## Research boundaries (approved 2026-11-19, being built)
+
+Plan: `docs/superpowers/plans/2026-11-19-research-workspace.md`; contracts: `docs/superpowers/specs/research/`.
+
+| Location | Owns |
+| --- | --- |
+| `app/backend/research/http.py`, `cache.py`, `records.py` | The only research network client (https, per-source host allowlist, caps, rate limits, backoff), the response cache, the normalized paper record and de-duplication |
+| `app/backend/research/<source>.py` | One client per source (Semantic Scholar, OpenAlex, arXiv, Crossref, Unpaywall); search, lookup, citations, open-access link, BibTeX, status |
+| `app/backend/research/__init__.py` | Source registry and tool dispatch; authorizes each source call through the run context |
+| `app/backend/research/citations.py` | The deterministic citation checker; no model calls |
+| `app/backend/research/credentials.py`, `app/backend/research_api.py` | Keychain-backed keys and emails, and the Research sources settings methods |
+
+Dependency rules:
+
+- Source clients know nothing about tasks, scopes or the UI. They reach the network only through `research/http.py` and secrets only through `research.credentials`.
+- Tool dispatch authorizes every source call with `category: research` before it is made, and records calls without query text in the audit log.
+- Secrets cross only the Swift Keychain bridge (`keychain`/`keychain_reply` pipe messages, never visible to the WebView). A test proves no stored secret appears in state, events, audit, stdout, tool results or cache files.
+- Research results are untrusted: wrapped for agents, rendered as text in the UI, links only for `https:`.
+
+Testing: source clients use recorded fixtures under `tests/research/fixtures/` through a fake HTTP layer; the checker uses fake lookups covering verified, mismatch, not found, retracted and unchecked. Live calls with the user's keys are separate, explicitly approved steps.
+
 ## Broader application organization
 
 Start with one application and explicit module boundaries. Do not introduce a monorepo, microservices, plugin framework, or generic repository abstraction merely to anticipate growth. The exact physical layout follows the chosen desktop/local-web stack; this is the proposed ownership map, not an existing scaffold.

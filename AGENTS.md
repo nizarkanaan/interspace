@@ -19,6 +19,16 @@ The user approved `docs/superpowers/plans/2026-11-15-multi-provider.md`. It repl
 
 Kept: an approval binds the exact scope and team, enforced at the execution boundary; no automatic retries or resumes after failure or restart; a full append-only audit trail; the provider-independent UI. Sample Project stays read-only and is not accessed; Snack Picker is the only authorized live write-test target. Routine tests use disposable repositories and fake CLIs, never personal app data or real source projects.
 
+## Research workspace (approved 2026-11-19, being built)
+
+The user approved `docs/superpowers/plans/2026-11-19-research-workspace.md`: Interspace becomes a research environment that keeps coding. Contracts: `docs/superpowers/specs/research/`.
+
+- **Research sources with the user's own keys.** Semantic Scholar, OpenAlex, arXiv, Crossref and Unpaywall first; more sources later through the same module shape. Keys and contact emails live only in the macOS Keychain (service `app.interspace.research`) through the Swift bridge. They never reach agents, the UI, logs, audit, events, state, cache files or git.
+- **Only the backend calls research APIs**, over https to each source's fixed hosts. Agents get read-only research tools through Interspace's MCP bridge, every call is decided by the task scope's `research` sources (allow, ask or off) and audited without its query text, and all results are untrusted content rendered as text.
+- **Citations are checked, not trusted.** The deterministic citation checker reports each reference as verified, mismatch, not found, retracted or unchecked. Agents must not cite papers they did not retrieve, and must run it before an answer that cites papers. Nothing claims verification the checker did not report.
+- **Tasks without a project** are research-only: read members, no workspace, no file or command tools. Their report and verified BibTeX are saved in app data and leave it only through a user-driven save panel.
+- Routine tests use recorded fixtures and fake HTTP, never the network. Live calls with the user's keys need the user's approval at the time. Research calls cost no tokens; show call counts, never money.
+
 ## Token budgets
 
 Every task-owned model call, the Orchestrator's and every subagent's, passes the per-task budget gate (`app/backend/budget.py`) before it starts. One budget covers a task and all its subagents; each provider's usage is charged by its own rule from the provider registry. Budgets are tokens only; never show or imply money or remaining account allowance. The budget is part of the task scope. See `app/README.md#token-budgets`.
