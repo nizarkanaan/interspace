@@ -299,7 +299,8 @@ class AgentMethodTests(ApplicationCase):
 class DecideOptionTests(ApplicationCase):
     def test_application_passes_its_data_directory_as_app_data(self):
         def script(session, text, ctx):
-            ctx.authorize({'category': 'command', 'argv': ['ls']}, 'c1')
+            ctx.authorize({'category': 'command', 'argv': ['ls'], 'command': None, 'cwd': '.', 'sandbox': 'workspace',
+                           'network': False}, 'c1')
             return {'status': 'completed', 'usage': None, 'error': None}
         self.runtime.script = script
         app = self.open()

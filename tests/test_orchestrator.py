@@ -161,6 +161,8 @@ class ProposalTests(OrchestratorCase):
         self.assertEqual(self.codex.turns, [(researcher['id'], 'Find where dates are parsed.')])
         approvals = [r for r in self.audit.records if r['kind'] == 'scope' and r['rule'] == 'team.approve']
         self.assertEqual(sorted(r['task_id'] for r in approvals), sorted(t['id'] for t in self.children()))
+        # Only the write member's workspace is committed before publishing; read runs and the Orchestrator are not.
+        self.assertEqual(self.sched.workspaces.committed, ['interspace/task-' + self.member_task('m2')['id'][:8]])
 
     def test_orchestration_calls_are_tool_cards_with_the_orchestrate_category(self):
         self.make(orchestrating(self.results))
@@ -423,6 +425,31 @@ class RunTests(OrchestratorCase):
         self.assertEqual(order, ['child researcher', 'parent resumed', 'child implementer', 'parent resumed'])
         self.assertEqual(seen, [1, 1, 1, 1])
         self.assertFalse(self.results[0]['timed_out'])
+
+    def test_read_members_are_refused_writes_and_escalation_without_asking(self):
+        decisions = {}
+
+        def researcher(session, text, ctx):
+            for name, request in (
+                    ('write', {'category': 'file_write', 'project_id': 'p1', 'paths': ['a.py']}),
+                    ('escalated', {'category': 'command', 'argv': ['make'], 'command': None, 'cwd': '.',
+                                   'sandbox': 'escalated', 'network': False, 'project_id': 'p1'}),
+                    ('read', {'category': 'file_read', 'project_id': 'p1', 'paths': ['a.py']}),
+                    ('command', {'category': 'command', 'argv': ['ls'], 'command': None, 'cwd': '.',
+                                 'sandbox': 'workspace', 'network': False, 'project_id': 'p1'})):
+                decisions[name] = ctx.authorize(request, 'call_' + name)
+            return child_script(CODEX_USAGE)(session, text, ctx)
+        self.make(orchestrating(self.results), codex=researcher)
+        self.parent()
+        self.sched.submit('parent', 'p1', 'x', None)
+        self.approve_when_proposed()
+        self.wait_state('parent', 'idle')
+        self.assertEqual({k: (v['decision'], v['rule']) for k, v in decisions.items()},
+                         {'write': ('deny', 'access.read'), 'escalated': ('deny', 'access.read'),
+                          'read': ('allow', decisions['read']['rule']), 'command': ('allow', decisions['command']['rule'])})
+        self.assertEqual(self.events_of(self.member_task('m1')['id'], 'ask'), [])
+        audited = [r for r in self.audit.records if r['kind'] == 'decision' and r['rule'] == 'access.read']
+        self.assertEqual(sorted(r['call_id'] for r in audited), ['call_escalated', 'call_write'])
 
     def test_snapshot_groups_children_under_their_task(self):
         gate = threading.Event()

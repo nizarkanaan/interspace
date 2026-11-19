@@ -24,6 +24,9 @@ Scenario keys:
     {"raw": text}                            write one raw line
     {"exit": code}                           exit the process
     {"sleep": seconds}
+    {"touch": path}                          create that file
+    {"wait_file": path}                      wait (up to 20 s, else exit 3) until that file exists
+"$cwd" in any step is replaced by the server's working folder.
 """
 import json
 import os
@@ -56,7 +59,7 @@ def send(message):
 
 def fill(value, turn_id):
     if isinstance(value, str):
-        return value.replace('$thread', THREAD).replace('$turn', turn_id)
+        return value.replace('$thread', THREAD).replace('$turn', turn_id).replace('$cwd', os.getcwd())
     if isinstance(value, list):
         return [fill(v, turn_id) for v in value]
     if isinstance(value, dict):
@@ -94,6 +97,15 @@ def play(steps, turn_id):
             os._exit(step['exit'])
         elif 'sleep' in step:
             time.sleep(step['sleep'])
+        elif 'touch' in step:
+            open(step['touch'], 'a').close()
+        elif 'wait_file' in step:
+            deadline = time.monotonic() + 20
+            while not os.path.exists(step['wait_file']):
+                if time.monotonic() > deadline:
+                    record({'timeout': step['wait_file']})
+                    os._exit(3)
+                time.sleep(0.02)
 
 
 def account_path():

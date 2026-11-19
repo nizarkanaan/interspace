@@ -200,6 +200,7 @@ class FakeWorkspaces:
         self.root = root
         self.prepared = []
         self.published = []
+        self.committed = []
         self.fail = False
 
     def prepare(self, task_id, project_id, source_path):
@@ -208,6 +209,10 @@ class FakeWorkspaces:
         self.prepared.append((task_id, project_id))
         return {'path': str(self.root / task_id / project_id), 'branch': 'interspace/task-' + task_id[:8],
                 'base_commit': 'b6bd066', 'target_branch': None}
+
+    def commit(self, info, message):
+        self.committed.append(info['branch'])
+        return None
 
     def publish(self, info, source_path):
         self.published.append(info['branch'])

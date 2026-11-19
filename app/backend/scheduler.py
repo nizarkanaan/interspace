@@ -299,6 +299,9 @@ def _git_env():
     return env
 
 
+SCRATCH_EXCLUDES = ('/.interspace/', '/.claude/')  # Provider scratch folders never committed from a task clone.
+
+
 class Workspaces:
     """Isolated task clones (scope.md): `<root>/<task_id>/<project_id>`, published back only as the task branch."""
 
@@ -333,6 +336,31 @@ class Workspaces:
             if partial.exists():
                 shutil.rmtree(str(partial), ignore_errors=True)
         return {'path': str(path), 'branch': branch, 'base_commit': base, 'target_branch': None}
+
+    def commit(self, info, message):
+        """Commit everything the agent changed in its clone to the task branch; the commit ID, or None when clean.
+
+        Only the task clone is touched. Scratch folders (`.interspace/`, `.claude/`) stay out through the clone's
+        `info/exclude`. The user's own git identity is used when the clone has one, else a local Interspace
+        identity. No signing, no hooks and a one-line message, so nothing can add a trailer.
+        """
+        work = info['path']
+        exclude = Path(work) / '.git' / 'info' / 'exclude'
+        exclude.parent.mkdir(parents=True, exist_ok=True)
+        lines = exclude.read_text(encoding='utf-8').splitlines() if exclude.exists() else []
+        missing = [line for line in SCRATCH_EXCLUDES if line not in lines]
+        if missing:
+            with exclude.open('a', encoding='utf-8') as handle:
+                handle.write('\n' + '\n'.join(missing) + '\n')
+        if not self._git(['-C', work, 'status', '--porcelain', '--untracked-files=all']).stdout.strip():
+            return None
+        identity = []
+        if self._git(['-C', work, 'config', 'user.email'], check=False).returncode != 0:
+            identity = ['-c', 'user.name=Interspace', '-c', 'user.email=interspace@localhost']
+        self._git(['-C', work, 'add', '--all'])
+        self._git(identity + ['-c', 'commit.gpgsign=false', '-C', work, 'commit', '--quiet', '--no-verify',
+                              '-m', ' '.join(message.split())])
+        return self._git(['-C', work, 'rev-parse', 'HEAD']).stdout.strip()
 
     def publish(self, info, source_path):
         """Write only the task's branch into the user's repository. The chosen name is kept in `info`."""
@@ -485,6 +513,18 @@ class _Run:
         self.orchestrates = False
         self.yielded = False  # Waiting on the user or on its children: holds no run slot.
         self.team_wait = None
+
+
+READ_ACCESS_RULE = 'access.read'
+
+
+def _writes(request):
+    """Whether a request changes files or leaves the sandbox (what a read-access run may never do)."""
+    if not isinstance(request, dict):
+        return False
+    if request.get('category') == 'file_write':
+        return True
+    return request.get('category') == 'command' and request.get('sandbox') != 'workspace'
 
 
 def _final(decision, rule=None):
@@ -924,6 +964,9 @@ class Scheduler:
         for project_id, info in run.workspaces.items():
             project = self.store.project(project_id)
             try:
+                if run.access == 'write':
+                    # The agent's edits become a commit on its own task branch, so publishing and Merge carry them.
+                    self.workspaces.commit(info, 'Interspace task %s turn %s' % (run.task_id[:8], run.turn_id))
                 branch = self._with_lock(run, 'project:' + project_id,
                                          lambda: self.workspaces.publish(info, project['source_path']), cancellable=False)
                 change = self.workspaces.diff(info)
@@ -1025,6 +1068,16 @@ class Scheduler:
     # -- policy -------------------------------------------------------------------------------------
 
     def _decide(self, run, task, request):
+        if run.access == 'read' and _writes(request):
+            # Read members (orchestration.md "Shape") never write or leave the sandbox, whatever the scope says:
+            # refused here, so the user is never asked to let a read role write.
+            try:
+                digest = self.policy.digest(task['scope'])
+            except Exception:
+                digest = None
+            return {'decision': 'deny', 'rule': READ_ACCESS_RULE, 'ask': None,
+                    'reason': 'This agent has read access, so it cannot change files or leave the sandbox.',
+                    'scope_version': task['scope'].get('version'), 'scope_digest': digest}
         try:
             decision = self.policy.decide(task['scope'], task.get('scope_approval'), copy.deepcopy(request),
                                           workspace_roots=dict((k, v['path']) for k, v in run.workspaces.items()),
