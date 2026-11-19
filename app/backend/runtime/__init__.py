@@ -18,6 +18,26 @@ CREDENTIAL_PATHS = ('.ssh', '.gnupg', '.aws', '.azure', '.codex', '.claude', '.d
                     'Library/Keychains', 'Library/Cookies')
 
 
+# macOS limits a Unix socket path to 104 bytes; the bridge adds "/isb-XXXXXXXX/s" to the run folder.
+MAX_RUN_DIR_CHARS = 104 - len('/isb-XXXXXXXX/s') - 1
+
+
+def run_dir(app_data):
+    """`<app data>/run` (mode 0700) for the MCP bridge's socket and the Claude CLI's MCP configuration, or None.
+
+    The folder is part of Interspace's data, which `deny_paths` keeps away from sandboxed commands; the shared
+    temporary folder is readable by every command. None (no app data, or a path too long for a socket) means the
+    caller falls back to the temporary folder.
+    """
+    if app_data is None:
+        return None
+    path = os.path.join(os.path.realpath(str(app_data)), 'run')
+    if len(path.encode('utf-8')) > MAX_RUN_DIR_CHARS:
+        return None
+    os.makedirs(path, mode=0o700, exist_ok=True)
+    return path
+
+
 def _within(path, root):
     try:
         return os.path.commonpath([path, root]) == root

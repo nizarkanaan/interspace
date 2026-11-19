@@ -359,6 +359,20 @@ class LaunchTests(ClaudeCase):
         self.assertTrue(self.bridges[0].stopped)
         self.assertFalse(os.path.exists(path))
 
+    def test_bridge_files_live_in_denied_app_data(self):
+        data = self.root / 'data'
+        data.mkdir()
+        app = mock.Mock(storage=str(data))
+        session, ctx, outcome = self.turn({'turns': [simple_turn()]}, bridge=True, app=app)
+        self.assertEqual(outcome['status'], 'completed', outcome)
+        args = self.main_launches()[0]['launch']
+        run = os.path.realpath(str(data / 'run'))
+        self.assertTrue(args[args.index('--mcp-config') + 1].startswith(run + os.sep))
+        self.assertIn(run, json.loads(args[args.index('--settings') + 1])['sandbox']['filesystem']['denyRead'])
+        bridge = claude.ClaudeRuntime(app).bridge_factory([{'name': 'example_get', 'effect': 'read'}])
+        self.addCleanup(bridge.stop)
+        self.assertTrue(bridge.path.startswith(run + os.sep), bridge.path)
+
     def test_no_tools_no_bridge(self):
         _, _, outcome = self.turn({'turns': [simple_turn()]})
         self.assertEqual(outcome['status'], 'completed', outcome)

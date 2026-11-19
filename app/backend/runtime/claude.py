@@ -264,10 +264,10 @@ def _result_text(content):
     return ''
 
 
-def start_bridge(tools):
+def start_bridge(tools, socket_dir=None):
     """The Interspace MCP bridge (2A's `runtime.mcp_bridge`, scheduler.md "MCP bridge API")."""
     from runtime import mcp_bridge
-    return mcp_bridge.start(tools)
+    return mcp_bridge.start(tools, socket_dir=socket_dir)
 
 
 class ClaudeRuntime:
@@ -283,6 +283,9 @@ class ClaudeRuntime:
         storage = getattr(app, 'storage', None)
         self.app_data = str(storage) if isinstance(storage, (str, os.PathLike)) else None
         self.binary = str(binary) if binary else find_claude()
+        if bridge_factory is start_bridge:
+            # The socket goes to <app data>/run, out of reach of sandboxed commands (runtime.run_dir).
+            bridge_factory = lambda tools: start_bridge(tools, socket_dir=runtime.run_dir(self.app_data))  # noqa: E731
         self.bridge_factory = bridge_factory
         self.interrupt_grace_s = interrupt_grace_s
 
@@ -519,6 +522,7 @@ class ClaudeSession:
 
     def _deny_reads(self, ctx):
         home = os.environ.get('HOME') or os.path.expanduser('~')
+        runtime.run_dir(self.runtime.app_data)  # Listed below with the rest of Interspace's data.
         return runtime.deny_paths(ctx.workspaces.values(), home=home, app_data=self.runtime.app_data,
                                   credential_paths=CREDENTIAL_PATHS)
 
@@ -527,7 +531,8 @@ class ClaudeSession:
         server = self.bridge.server
         if server.get('name') != BRIDGE_SERVER:
             raise _Fail('runtime_unavailable', 'The Interspace tool server is misconfigured.')
-        self._config_dir = tempfile.mkdtemp(prefix='interspace-claude-')
+        # In <app data>/run, which sandboxed commands cannot read; the shared temporary folder otherwise.
+        self._config_dir = tempfile.mkdtemp(prefix='interspace-claude-', dir=runtime.run_dir(self.runtime.app_data))
         path = os.path.join(self._config_dir, 'mcp.json')
         config = {'mcpServers': {BRIDGE_SERVER: {'type': 'stdio', 'command': server['command'],
                                                  'args': list(server.get('args') or []),

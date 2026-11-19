@@ -37,7 +37,7 @@ import subprocess
 import threading
 import time
 
-from . import CREDENTIAL_PATHS, RuntimeFailure, deny_paths, mcp_bridge  # noqa: F401 (CREDENTIAL_PATHS: re-exported)
+from . import CREDENTIAL_PATHS, RuntimeFailure, deny_paths, mcp_bridge, run_dir  # noqa: F401 (CREDENTIAL_PATHS: re-exported)
 
 PROFILE = 'interspace-task'       # Write the task workspace only.
 READ_PROFILE = 'interspace-read'  # Read only: read roles and the Orchestrator (ctx.access == 'read').
@@ -276,11 +276,13 @@ class CodexSession:
         cwd = ctx.primary_workspace
         if not cwd or not os.path.isdir(cwd):
             raise RuntimeFailure('workspace_failed', 'The task workspace is missing.')
+        # The run folder exists before the profile lists Interspace's data, so its socket is denied too.
+        socket_dir = runtime.socket_dir if runtime.socket_dir is not None else run_dir(runtime.app_data)
         argv, env = runtime.argv(ctx), runtime.env()
         Path(env['CODEX_HOME']).mkdir(parents=True, exist_ok=True)
         tools = ctx.tools() if hasattr(ctx, 'tools') else []
         if tools:
-            self.bridge = mcp_bridge.start(tools, socket_dir=runtime.socket_dir)
+            self.bridge = mcp_bridge.start(tools, socket_dir=socket_dir)
         try:
             try:
                 self.process = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.PIPE,

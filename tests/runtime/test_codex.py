@@ -276,6 +276,26 @@ class LaunchTests(CodexCase):
             self.runtime({}).open(ctx)
         self.assertEqual(caught.exception.code, 'workspace_failed')
 
+    def test_bridge_socket_lives_in_denied_app_data(self):
+        # The bridge token and socket never sit in the shared temporary folder that every sandboxed command
+        # can read: they go to <app data>/run, which the sandbox profile denies.
+        path = self.root / 'scenario.json'
+        path.write_text(json.dumps({}))
+        rt = codex.CodexRuntime(mock.Mock(storage=str(self.data)), command=[sys.executable, str(FAKE), str(path),
+                                str(self.log)], environ={'PATH': os.environ.get('PATH', ''), 'HOME': str(self.home)})
+        ctx = self.ctx()
+        session = rt.open(ctx)
+        self.addCleanup(session.close)
+        run = os.path.realpath(str(self.data / 'run'))
+        self.assertTrue(session.bridge.path.startswith(run + os.sep), session.bridge.path)
+        self.assertIn(run, rt.deny_paths(ctx))
+
+    def test_run_dir_falls_back_when_the_socket_path_would_be_too_long(self):
+        self.assertEqual(runtime.run_dir(self.data), os.path.realpath(str(self.data / 'run')))
+        self.assertEqual(os.stat(str(self.data / 'run')).st_mode & 0o777, 0o700)
+        self.assertIsNone(runtime.run_dir(self.root / ('x' * 90)))
+        self.assertIsNone(runtime.run_dir(None))
+
     def test_no_tools_means_no_bridge_and_no_mcp_servers(self):
         ctx = self.ctx()
         ctx.tool_list = []
