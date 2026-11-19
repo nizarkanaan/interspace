@@ -1,0 +1,20 @@
+{
+ "_fixture": {
+  "source": "openalex",
+  "captured": "2026-11-19",
+  "note": "GET /rate-limit needs a key: 401 without one"
+ },
+ "request": {
+  "url": "https://api.openalex.org/rate-limit",
+  "accept": null
+ },
+ "status": 401,
+ "headers": {
+  "content-type": "application/json",
+  "content-length": "107"
+ },
+ "body": {
+  "error": "Authentication required",
+  "message": "You must provide a valid API key to check rate limit status"
+ }
+}

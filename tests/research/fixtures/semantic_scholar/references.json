@@ -1,0 +1,93 @@
+{
+ "_fixture": {
+  "source": "semantic_scholar",
+  "captured": "2026-11-19",
+  "note": ""
+ },
+ "request": {
+  "url": "https://api.semanticscholar.org/graph/v1/paper/ARXIV:1706.03762/references?fields=paperId,title,year,externalIds&limit=2",
+  "accept": null
+ },
+ "status": 200,
+ "headers": {
+  "content-type": "application/json",
+  "content-length": "1468"
+ },
+ "body": {
+  "offset": 0,
+  "citingPaperInfo": {
+   "openAccessPdf": {
+    "url": "https://arxiv.org/pdf/1706.03762",
+    "status": "CLOSED",
+    "license": null,
+    "disclaimer": "Notice: Paper or abstract available at https://arxiv.org/abs/1706.03762, which is subject to the license by the author or copyright owner provided with this content. Please go to the source to verify the license and copyright information for your use."
+   },
+   "title": "Attention is All you Need",
+   "authors": [
+    {
+     "authorId": "40348417",
+     "name": "Ashish Vaswani"
+    },
+    {
+     "authorId": "1846258",
+     "name": "Noam Shazeer"
+    },
+    {
+     "authorId": "3877127",
+     "name": "N. Parmar"
+    },
+    {
+     "authorId": "39328010",
+     "name": "J. Uszkoreit"
+    },
+    {
+     "authorId": "145024664",
+     "name": "L. Jones"
+    },
+    {
+     "authorId": "19177000",
+     "name": "Aidan N. Gomez"
+    },
+    {
+     "authorId": "40527594",
+     "name": "L. Kaiser"
+    },
+    {
+     "authorId": "3443442",
+     "name": "I. Polosukhin"
+    }
+   ]
+  },
+  "next": 2,
+  "data": [
+   {
+    "citedPaper": {
+     "paperId": "032274e57f7d8b456bd255fe76b909b2c1d7458e",
+     "externalIds": {
+      "DBLP": "conf/iclr/PaulusXS18",
+      "MAG": "2612675303",
+      "ArXiv": "1705.04304",
+      "DOI": "10.48550/arXiv.1705.04304",
+      "CorpusId": 21850704
+     },
+     "title": "A Deep Reinforced Model for Abstractive Summarization",
+     "year": 2017
+    }
+   },
+   {
+    "citedPaper": {
+     "paperId": "43428880d75b3a14257c3ee9bda054e61eb869c0",
+     "externalIds": {
+      "MAG": "2964265128",
+      "ArXiv": "1705.03122",
+      "DBLP": "conf/icml/GehringAGYD17",
+      "DOI": "10.48550/arXiv.1705.03122",
+      "CorpusId": 3648736
+     },
+     "title": "Convolutional Sequence to Sequence Learning",
+     "year": 2017
+    }
+   }
+  ]
+ }
+}

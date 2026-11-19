@@ -1,0 +1,20 @@
+{
+ "_fixture": {
+  "source": "semantic_scholar",
+  "captured": "2026-11-19",
+  "note": "unauthenticated shared pool: 429 JSON {message, code}, no Retry-After header"
+ },
+ "request": {
+  "url": "https://api.semanticscholar.org/graph/v1/paper/ARXIV:1706.03762?fields=paperId,externalIds,title,abstract,year,venue,publicationVenue,authors,citationCount,url,openAccessPdf,isOpenAccess,publicationTypes,publicationDate,citationStyles",
+  "accept": null
+ },
+ "status": 429,
+ "headers": {
+  "content-type": "application/json",
+  "content-length": "174"
+ },
+ "body": {
+  "message": "Too Many Requests. Please wait and try again or apply for a key for higher rate limits. https://www.semanticscholar.org/product/api#api-key-form",
+  "code": "429"
+ }
+}

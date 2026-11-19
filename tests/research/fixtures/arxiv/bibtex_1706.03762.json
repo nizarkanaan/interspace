@@ -1,0 +1,17 @@
+{
+ "_fixture": {
+  "source": "arxiv",
+  "captured": "2026-11-19",
+  "note": "arxiv.org/bibtex/{id}: @misc with year of the LATEST version (2023), not 2017"
+ },
+ "request": {
+  "url": "https://arxiv.org/bibtex/1706.03762",
+  "accept": null
+ },
+ "status": 200,
+ "headers": {
+  "content-length": "383",
+  "content-type": "text/plain; charset=utf-8"
+ },
+ "text": "@misc{vaswani2023attentionneed,\n      title={Attention Is All You Need}, \n      author={Ashish Vaswani and Noam Shazeer and Niki Parmar and Jakob Uszkoreit and Llion Jones and Aidan N. Gomez and Lukasz Kaiser and Illia Polosukhin},\n      year={2023},\n      eprint={1706.03762},\n      archivePrefix={arXiv},\n      primaryClass={cs.CL},\n      url={https://arxiv.org/abs/1706.03762}, \n}"
+}

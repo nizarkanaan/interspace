@@ -1,0 +1,164 @@
+{
+ "_fixture": {
+  "source": "semantic_scholar",
+  "captured": "2026-11-19",
+  "note": "relevance search with year=2017; only 1 of 3 hits has an abstract; openAccessPdf.status CLOSED despite arXiv url"
+ },
+ "request": {
+  "url": "https://api.semanticscholar.org/graph/v1/paper/search?query=attention+is+all+you+need&year=2017&limit=3&fields=paperId,externalIds,title,abstract,year,venue,publicationVenue,authors,citationCount,url,openAccessPdf,isOpenAccess,publicationTypes,publicationDate",
+  "accept": null
+ },
+ "status": 200,
+ "headers": {
+  "content-type": "application/json",
+  "content-length": "4560"
+ },
+ "body": {
+  "total": 290,
+  "offset": 0,
+  "next": 3,
+  "data": [
+   {
+    "paperId": "204e3073870fae3d05bcbc2f6a8e263d9b72e776",
+    "externalIds": {
+     "MAG": "2963403868",
+     "DBLP": "journals/corr/VaswaniSPUJGKP17",
+     "ArXiv": "1706.03762",
+     "DOI": "10.48550/arXiv.1706.03762",
+     "CorpusId": 13756489
+    },
+    "publicationVenue": {
+     "id": "d9720b90-d60b-48bc-9df8-87a30b9a60dd",
+     "name": "Neural Information Processing Systems",
+     "type": "conference",
+     "alternate_names": [
+      "Neural Inf Process Syst",
+      "NeurIPS",
+      "NIPS"
+     ],
+     "url": "http://neurips.cc/"
+    },
+    "url": "https://www.semanticscholar.org/paper/204e3073870fae3d05bcbc2f6a8e263d9b72e776",
+    "title": "Attention is All you Need",
+    "venue": "Neural Information Processing Systems",
+    "year": 2017,
+    "citationCount": 203887,
+    "isOpenAccess": true,
+    "openAccessPdf": {
+     "url": "https://arxiv.org/pdf/1706.03762",
+     "status": "CLOSED",
+     "license": null,
+     "disclaimer": "Notice: Paper or abstract available at https://arxiv.org/abs/1706.03762, which is subject to the license by the author or copyright owner provided with this content. Please go to the source to verify the license and copyright information for your use."
+    },
+    "publicationTypes": [
+     "JournalArticle",
+     "Conference"
+    ],
+    "publicationDate": "2017-06-12",
+    "authors": [
+     {
+      "authorId": "40348417",
+      "name": "Ashish Vaswani"
+     },
+     {
+      "authorId": "1846258",
+      "name": "Noam Shazeer"
+     },
+     {
+      "authorId": "3877127",
+      "name": "N. Parmar"
+     },
+     {
+      "authorId": "39328010",
+      "name": "J. Uszkoreit"
+     },
+     {
+      "authorId": "145024664",
+      "name": "L. Jones"
+     },
+     {
+      "authorId": "19177000",
+      "name": "Aidan N. Gomez"
+     },
+     {
+      "authorId": "40527594",
+      "name": "L. Kaiser"
+     },
+     {
+      "authorId": "3443442",
+      "name": "I. Polosukhin"
+     }
+    ],
+    "abstract": "The dominant sequence transduction models are based on complex recurrent or convolutional neural networks in an encoder-decoder configuration. The best performing models also connect the encoder and decoder through an attention mechanism. We propose a new simple network architecture, the Transformer, based solely on attention mechanisms, dispensing with recurrence and convolutions entirely. Experiments on two machine translation tasks show these models to be superior in quality while being more parallelizable and requiring significantly less time to train. Our model achieves 28.4 BLEU on the WMT 2014 English-to-German translation task, improving over the existing best results, including ensembles by over 2 BLEU. On the WMT 2014 English-to-French translation task, our model establishes a new single-model state-of-the-art BLEU score of 41.8 after training for 3.5 days on eight GPUs, a small fraction of the training costs of the best models from the literature. We show that the Transformer generalizes well to other tasks by applying it successfully to English constituency parsing both with large and limited training data."
+   },
+   {
+    "paperId": "0b18b49590ce29c8a03fe5d3d5b2801747773d80",
+    "externalIds": {
+     "MAG": "2735081091",
+     "DOI": "10.1353/NEO.2016.0033",
+     "CorpusId": 148759321
+    },
+    "publicationVenue": null,
+    "url": "https://www.semanticscholar.org/paper/0b18b49590ce29c8a03fe5d3d5b2801747773d80",
+    "title": "“Your Father Knows that You Need All of This”: Divine Fatherhood as Socio-Ethical Impetus in Q’s Formative Stratum",
+    "venue": "",
+    "year": 2017,
+    "citationCount": 5,
+    "isOpenAccess": false,
+    "openAccessPdf": {
+     "url": "",
+     "status": "CLOSED",
+     "license": null,
+     "disclaimer": "Notice: The following paper fields have been elided by the publisher: {'abstract'}. Paper or abstract available at https://api.unpaywall.org/v2/10.1353/NEO.2016.0033?email=<INSERT_YOUR_EMAIL> or https://doi.org/10.1353/NEO.2016.0033, which is subject to the license by the author or copyright owner provided with this content. Please go to the source to verify the license and copyright information for your use."
+    },
+    "publicationTypes": [
+     "Review"
+    ],
+    "publicationDate": "2017-07-10",
+    "authors": [
+     {
+      "authorId": "74051720",
+      "name": "L. Howes"
+     }
+    ],
+    "abstract": null
+   },
+   {
+    "paperId": "47b06884a63c90e724b6b84ec136e15b163c8ecc",
+    "externalIds": {
+     "MAG": "2611348372",
+     "CorpusId": 151338362
+    },
+    "publicationVenue": null,
+    "url": "https://www.semanticscholar.org/paper/47b06884a63c90e724b6b84ec136e15b163c8ecc",
+    "title": "You can track but not detect: How attention alters change-detection rates in MOT",
+    "venue": "",
+    "year": 2017,
+    "citationCount": 0,
+    "isOpenAccess": false,
+    "openAccessPdf": {
+     "url": "",
+     "status": null,
+     "license": null
+    },
+    "publicationTypes": null,
+    "publicationDate": "2017-02-09",
+    "authors": [
+     {
+      "authorId": "34925836",
+      "name": "C. Vater"
+     },
+     {
+      "authorId": "6197825",
+      "name": "Ralf Kredel"
+     },
+     {
+      "authorId": "66646475",
+      "name": "E. Hossner"
+     }
+    ],
+    "abstract": null
+   }
+  ]
+ }
+}

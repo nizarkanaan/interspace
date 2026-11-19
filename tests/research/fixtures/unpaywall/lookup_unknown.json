@@ -1,0 +1,17 @@
+{
+ "_fixture": {
+  "source": "unpaywall",
+  "captured": "2026-11-19",
+  "note": "unknown DOI: 404 with an HTML body, not JSON"
+ },
+ "request": {
+  "url": "https://api.unpaywall.org/v2/10.9999/does-not-exist-0b",
+  "accept": null
+ },
+ "status": 404,
+ "headers": {
+  "content-length": "207",
+  "content-type": "text/html; charset=utf-8"
+ },
+ "text": "<!doctype html>\n<html lang=en>\n<title>404 Not Found</title>\n<h1>Not Found</h1>\n<p>The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.</p>\n"
+}

@@ -1,0 +1,267 @@
+{
+ "_fixture": {
+  "source": "crossref",
+  "captured": "2026-11-19",
+  "note": ""
+ },
+ "request": {
+  "url": "https://api.crossref.org/works/10.1038/nature14539",
+  "accept": null
+ },
+ "status": 200,
+ "headers": {
+  "content-type": "application/json",
+  "x-rate-limit-limit": "5",
+  "x-rate-limit-interval": "1s",
+  "x-concurrency-limit": "1",
+  "x-api-pool": "public-single"
+ },
+ "body": {
+  "status": "ok",
+  "message-type": "work",
+  "message-version": "1.0.0",
+  "message": {
+   "indexed": {
+    "date-parts": [
+     [
+      2026,
+      11,
+      19
+     ]
+    ],
+    "date-time": "2026-11-19T16:04:16Z",
+    "timestamp": 1795104256073,
+    "version": "4.10.3"
+   },
+   "reference-count": 103,
+   "publisher": "Springer Science and Business Media LLC",
+   "issue": "7553",
+   "license": [
+    {
+     "start": {
+      "date-parts": [
+       [
+        2015,
+        5,
+        27
+       ]
+      ],
+      "date-time": "2015-05-27T00:00:00Z",
+      "timestamp": 1432684800000
+     },
+     "content-version": "tdm",
+     "delay-in-days": 0,
+     "URL": "https://www.springer.com/tdm"
+    },
+    {
+     "start": {
+      "date-parts": [
+       [
+        2015,
+        5,
+        27
+       ]
+      ],
+      "date-time": "2015-05-27T00:00:00Z",
+      "timestamp": 1432684800000
+     },
+     "content-version": "vor",
+     "delay-in-days": 0,
+     "URL": "https://www.springer.com/tdm"
+    }
+   ],
+   "content-domain": {
+    "domain": [
+     "link.springer.com"
+    ],
+    "crossmark-restriction": false
+   },
+   "short-container-title": [
+    "Nature"
+   ],
+   "published-print": {
+    "date-parts": [
+     [
+      2015,
+      5,
+      28
+     ]
+    ]
+   },
+   "DOI": "10.1038/nature14539",
+   "type": "journal-article",
+   "created": {
+    "date-parts": [
+     [
+      2015,
+      5,
+      26
+     ]
+    ],
+    "date-time": "2015-05-26T12:10:15Z",
+    "timestamp": 1432642215000
+   },
+   "page": "436-444",
+   "update-policy": "https://doi.org/10.1007/springer_crossmark_policy",
+   "source": "Crossref",
+   "is-referenced-by-count": 79568,
+   "title": [
+    "Deep learning"
+   ],
+   "prefix": "10.1038",
+   "volume": "521",
+   "author": [
+    {
+     "given": "Yann",
+     "family": "LeCun",
+     "sequence": "first",
+     "affiliation": [],
+     "role": [
+      {
+       "vocabulary": "crossref",
+       "role": "author"
+      }
+     ]
+    },
+    {
+     "given": "Yoshua",
+     "family": "Bengio",
+     "sequence": "additional",
+     "affiliation": [],
+     "role": [
+      {
+       "vocabulary": "crossref",
+       "role": "author"
+      }
+     ]
+    },
+    {
+     "given": "Geoffrey",
+     "family": "Hinton",
+     "sequence": "additional",
+     "affiliation": [],
+     "role": [
+      {
+       "vocabulary": "crossref",
+       "role": "author"
+      }
+     ]
+    }
+   ],
+   "member": "297",
+   "published-online": {
+    "date-parts": [
+     [
+      2015,
+      5,
+      27
+     ]
+    ]
+   },
+   "reference": [
+    {
+     "key": "BFnature14539_CR1",
+     "first-page": "1090",
+     "volume-title": "Proc. Advances in Neural Information Processing Systems 25",
+     "author": "A Krizhevsky",
+     "year": "2012",
+     "unstructured": "Krizhevsky, A., Sutskever, I. & Hinton, G. ImageNet classification with deep convolutional neural networks. In Proc. Advances in Neural Information Processing Systems 25 1090–1098 (2012). This report was a breakthrough that used convolutional nets to almost halve the error rate for object recognition, and precipitated the rapid adoption of deep learning by the computer vision community."
+    },
+    {
+     "key": "BFnature14539_CR2",
+     "doi-asserted-by": "crossref",
+     "first-page": "1915",
+     "DOI": "10.1109/TPAMI.2012.231",
+     "volume": "35",
+     "author": "C Farabet",
+     "year": "2013",
+     "unstructured": "Farabet, C., Couprie, C., Najman, L. & LeCun, Y. Learning hierarchical features for scene labeling. IEEE Trans. Pattern Anal. Mach. Intell. 35, 1915–1929 (2013).",
+     "journal-title": "IEEE Trans. Pattern Anal. Mach. Intell."
+    }
+   ],
+   "container-title": [
+    "Nature"
+   ],
+   "original-title": [],
+   "language": "en",
+   "deposited": {
+    "date-parts": [
+     [
+      2023,
+      8,
+      10
+     ]
+    ],
+    "date-time": "2023-08-10T18:12:02Z",
+    "timestamp": 1691691122000
+   },
+   "score": 1,
+   "resource": {
+    "primary": {
+     "URL": "https://www.nature.com/articles/nature14539"
+    }
+   },
+   "subtitle": [],
+   "short-title": [],
+   "issued": {
+    "date-parts": [
+     [
+      2015,
+      5,
+      27
+     ]
+    ]
+   },
+   "references-count": 103,
+   "journal-issue": {
+    "issue": "7553",
+    "published-print": {
+     "date-parts": [
+      [
+       2015,
+       5,
+       28
+      ]
+     ]
+    }
+   },
+   "alternative-id": [
+    "BFnature14539"
+   ],
+   "URL": "https://doi.org/10.1038/nature14539",
+   "relation": {
+    "has-review": [
+     {
+      "id-type": "doi",
+      "id": "10.3410/f.725516248.793534414",
+      "asserted-by": "object"
+     }
+    ]
+   },
+   "ISSN": [
+    "0028-0836",
+    "1476-4687"
+   ],
+   "issn-type": [
+    {
+     "value": "0028-0836",
+     "type": "print"
+    },
+    {
+     "value": "1476-4687",
+     "type": "electronic"
+    }
+   ],
+   "subject": [],
+   "published": {
+    "date-parts": [
+     [
+      2015,
+      5,
+      27
+     ]
+    ]
+   }
+  }
+ }
+}

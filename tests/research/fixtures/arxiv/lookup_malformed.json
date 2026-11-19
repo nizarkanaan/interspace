@@ -1,0 +1,17 @@
+{
+ "_fixture": {
+  "source": "arxiv",
+  "captured": "2026-11-19",
+  "note": "malformed id: HTTP 400, one <entry> whose <id> is .../api/errors#..."
+ },
+ "request": {
+  "url": "https://export.arxiv.org/api/query?id_list=not-an-id",
+  "accept": null
+ },
+ "status": 400,
+ "headers": {
+  "content-length": "860",
+  "content-type": "application/atom+xml; charset=utf-8"
+ },
+ "text": "<?xml version='1.0' encoding='UTF-8'?>\n<feed xmlns:opensearch=\"http://a9.com/-/spec/opensearch/1.1/\" xmlns:arxiv=\"http://arxiv.org/schemas/atom\" xmlns=\"http://www.w3.org/2005/Atom\">\n  <id>https://arxiv.org/</id>\n  <title>arXiv Search Results</title>\n  <updated>2026-11-19T23:32:18Z</updated>\n  <opensearch:itemsPerPage>1</opensearch:itemsPerPage>\n  <opensearch:totalResults>1</opensearch:totalResults>\n  <opensearch:startIndex>0</opensearch:startIndex>\n  <entry>\n    <id>https://arxiv.org/api/errors#incorrect_id_format_for_not-an-id</id>\n    <title>Error</title>\n    <updated>2026-11-19T23:32:18Z</updated>\n    <link href=\"https://arxiv.org/api/errors#incorrect_id_format_for_not-an-id\" rel=\"alternate\" type=\"text/html\"/>\n    <summary>incorrect id format for not-an-id</summary>\n    <author>\n      <name>arXiv api core</name>\n    </author>\n  </entry>\n</feed>\n"
+}
