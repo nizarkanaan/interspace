@@ -13,7 +13,7 @@ let allowedMethods: Set<String> = [
     "review_summary", "review_merge", "review_branches",
     // Research workspace (docs/superpowers/specs/research): sources settings and task outputs
     "research_sources", "research_credential_set", "research_credential_delete", "research_test", "research_usage",
-    "task_outputs", "task_output_save",
+    "task_outputs", "task_output_save", "task_output_read",
 ]
 
 /// Lines only Swift and the backend exchange (research/credentials.md). They never reach or come from the WebView.

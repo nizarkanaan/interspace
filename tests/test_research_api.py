@@ -52,7 +52,7 @@ class RegistrationTests(ApiTestCase):
 
     def test_methods_are_in_the_swift_allowlist(self):
         swift = (ROOT / 'app/macos/main.swift').read_text()
-        for method in list(research_api.METHODS) + ['task_outputs', 'task_output_save']:
+        for method in list(research_api.METHODS) + ['task_outputs', 'task_output_save', 'task_output_read']:
             self.assertIn('"%s"' % method, swift)
 
 
