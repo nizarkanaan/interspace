@@ -37,8 +37,13 @@ def _status(app, name):
         return _error(name, _text(str(error)))
     except Exception:
         return _error(name, title + ' could not report its sign-in. Check its installation.')
+    return _clean(name, result) or _error(name, title + ' sent a sign-in status Interspace does not understand.')
+
+
+def _clean(name, result):
+    """A runtime's `auth_status`-shaped answer cut to the contract fields, or None when it is not one."""
     if not isinstance(result, dict) or result.get('provider') != name or result.get('state') not in STATES:
-        return _error(name, title + ' sent a sign-in status Interspace does not understand.')
+        return None
     account = result.get('account')
     return {'provider': name, 'state': result['state'],
             'account': account[:120] if isinstance(account, str) and account else None,
@@ -58,11 +63,25 @@ def provider_status(app, params):
     return _status(app, _provider(params))
 
 
+def _remember(app, status):
+    """Put a provider's latest status in the published state (`provider_status`), so the UI learns it there."""
+    with app.lock:
+        app.state.setdefault('provider_status', {})[status['provider']] = copy.deepcopy(status)
+        app.publish()
+
+
+def _finished(app, name):
+    """A device sign-in ended (succeeded, failed or expired): read the status again and publish it."""
+    def report(outcome):
+        _remember(app, _status(app, name))
+    return report
+
+
 def provider_sign_in(app, params):
     name = _provider(params)
     title = registry.get(name)['title']
     try:
-        result = registry.runtime_class(name).begin_sign_in(app)
+        result = registry.runtime_class(name).begin_sign_in(app, on_finish=_finished(app, name))
     except ValueError as error:
         raise ValueError(_text(str(error)) or title + ' sign-in could not start.') from None
     except Exception:
@@ -80,6 +99,32 @@ def provider_sign_in(app, params):
     raise ValueError(title + ' sent a sign-in step Interspace does not understand.')
 
 
+SIGN_OUT_ELSEWHERE = {'claude': 'Claude uses your own Claude Code sign-in. To sign out, run claude auth logout in Terminal.'}
+
+
+def provider_sign_out(app, params):
+    """Sign a provider's app-owned sign-in out; returns the `auth_status` shape and publishes it."""
+    name = _provider(params)
+    title = registry.get(name)['title']
+    try:
+        runtime = registry.runtime_class(name)
+    except ValueError as error:
+        raise ValueError(_text(str(error))) from None
+    if not callable(getattr(runtime, 'sign_out', None)):
+        raise ValueError(SIGN_OUT_ELSEWHERE.get(name, title + ' has no sign-out in Interspace.'))
+    try:
+        result = runtime.sign_out(app)
+    except ValueError as error:
+        raise ValueError(_text(str(error)) or title + ' could not sign out.') from None
+    except Exception:
+        raise ValueError(title + ' could not sign out. Check its installation.') from None
+    status = _clean(name, result)
+    if status is None:
+        raise ValueError(title + ' sent a sign-in status Interspace does not understand.')
+    _remember(app, status)
+    return status
+
+
 def routing_update(app, params):
     checked = routing.validate(params.get('routing'))
     with app.lock:
@@ -91,6 +136,7 @@ def routing_update(app, params):
 METHODS = {
     'providers_list': providers_list,
     'provider_sign_in': provider_sign_in,
+    'provider_sign_out': provider_sign_out,
     'provider_status': provider_status,
     'routing_update': routing_update,
 }

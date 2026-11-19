@@ -202,7 +202,12 @@ def _digest(value):
 
 
 def child_scope(parent_scope, child_id, access):
-    """A child's scope from the parent's approved scope; read access drops every write and command-write permission."""
+    """A child's scope from the parent's approved scope; read access drops every file write and allowed prefix.
+
+    A read child's runtime starts read-only (Codex `interspace-read` sandbox; Claude refuses edits and every
+    command outside its read-only allowlist before `authorize`), so the parent's `commands.workspace` setting is
+    kept: its sandboxed read-only commands run without asking (orchestration.md "Shape").
+    """
     scope = copy.deepcopy(parent_scope)
     scope.update(v=1, task_id=child_id, version=1)
     if access == 'read':
@@ -210,8 +215,6 @@ def child_scope(parent_scope, child_id, access):
             entry.update(access='read', write=[])
         commands = scope.get('commands')
         if isinstance(commands, dict):
-            if commands.get('workspace') == 'allow':
-                commands['workspace'] = 'ask'
             commands['allow'] = []
     return scope
 
@@ -330,8 +333,8 @@ class Orchestrator:
                 while team['status'] == 'proposed' and not run.cancel.is_set():
                     s._cond.wait(0.5)
             finally:
-                run.yielded = False
                 run.team_wait = None
+                s.resume(run)  # Ahead of the queue, and only when a slot is free (never above max_running).
             if team['status'] == 'proposed':  # Stopped before the user answered: no child starts.
                 team.update(status='interrupted' if run.stop_reason == 'shutdown' else 'cancelled',
                             answered_at=iso_time(s.clock()))
@@ -375,7 +378,7 @@ class Orchestrator:
                         break
                     s._cond.wait(min(left, 0.5))
             finally:
-                run.yielded = False
+                s.resume(run)
             if run.cancel.is_set():
                 return self._refused('The task was stopped while waiting.', 'cancelled')
             results = []

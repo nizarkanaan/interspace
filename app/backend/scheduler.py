@@ -518,6 +518,7 @@ class Scheduler:
         self._cond = threading.Condition(self.lock)
         self._runs = {}
         self._queue = []
+        self._resuming = []  # Yielded parents waiting for a slot to continue their turn; served before the queue.
         self._sessions = {}
         self._closed = False
         self._stop_watch = threading.Event()
@@ -550,7 +551,7 @@ class Scheduler:
             run.orchestrates = run.role == 'orchestrator' and run.parent_task_id is None
             run.access = task.get('access') or ('read' if run.orchestrates else 'write')
             self._runs[task_id] = run
-            if not self._queue and self._free_slots() > 0:
+            if not self._queue and self._open_slots() > 0:
                 self._start(run)
                 return {'task_id': task_id, 'state': 'starting', 'position': None}
             self._queue.append(task_id)
@@ -619,7 +620,7 @@ class Scheduler:
     def pump(self):
         with self.lock:
             started = False
-            while self._queue and not self._closed and self._free_slots() > 0:
+            while self._queue and not self._closed and self._open_slots() > 0:
                 self._start(self._runs[self._queue.pop(0)])
                 started = True
             if started:
@@ -696,6 +697,26 @@ class Scheduler:
 
     def _free_slots(self):
         return self.max_running - self._running_count()
+
+    def _open_slots(self):
+        """Slots a queued run may take: parents resuming their turn are served first."""
+        return self._free_slots() - len(self._resuming)
+
+    def resume(self, run):
+        """Take a run slot back for a parent that yielded it (`propose_team`, `wait_for`); call under the lock.
+
+        The parent waits ahead of the FIFO queue until a slot is free, so resuming never pushes the running
+        count above `max_running`. A cancelled parent stops waiting and ends its turn without a slot.
+        """
+        self._resuming.append(run.task_id)
+        try:
+            while not run.cancel.is_set() and (self._resuming[0] != run.task_id or self._free_slots() <= 0):
+                self._cond.wait(0.5)
+        finally:
+            self._resuming.remove(run.task_id)
+            self._cond.notify_all()
+        if not run.cancel.is_set():
+            run.yielded = False
 
     def _renumber(self):
         for index, task_id in enumerate(self._queue):

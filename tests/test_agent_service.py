@@ -20,6 +20,7 @@ import budget
 import projects
 import scheduler
 import tasks
+import routing
 from agent_fakes import FakeAudit, FakeRuntime, FakeScope, wait_for, wait_interrupt
 
 class Output:
@@ -397,49 +398,62 @@ class ApplyAnswerAdapterTests(unittest.TestCase):
 
 
 class AgentProviderTests(ApplicationCase):
-    """The runtime choice (`provider`: codex or claude) and optional model are stored on the agent task row."""
+    """The runtime choice (`provider`, from the registry) and optional model are stored on the agent task row.
+    New tasks are Orchestrator tasks and follow `routing.orchestrator` unless the request names a provider."""
 
-    def test_defaults_to_codex_without_a_model(self):
+    def create(self, app, project_id, **extra):
+        task_id = app.handle('agent_create', dict({'project_id': project_id, 'title': 'Fix it', 'scope': None},
+                                                  **extra))['task_id']
+        with app.lock:
+            return app.store.task(task_id)
+
+    def test_defaults_follow_the_orchestrator_routing(self):
         app = self.open()
         project_id = self.add_project(app)
-        task_id = app.handle('agent_create', {'project_id': project_id, 'title': 'Fix it', 'scope': None})['task_id']
-        with app.lock:
-            task = app.store.task(task_id)
-        self.assertEqual((task['provider'], task['model']), ('codex', None))
+        task = self.create(app, project_id)
+        self.assertEqual((task['role'], task['provider'], task['model']), ('orchestrator', 'claude', None))
         public = app.handle('state', {})
-        self.assertEqual([t['provider'] for t in public['tasks'] if t['id'] == task_id], ['codex'])
-        self.assertEqual((public['task']['agent']['provider'], public['task']['agent']['model']), ('codex', None))
+        self.assertEqual([t['provider'] for t in public['tasks'] if t['id'] == task['id']], ['claude'])
+        self.assertEqual((public['task']['agent']['provider'], public['task']['agent']['model']), ('claude', None))
+        routing_doc = routing.default()
+        routing_doc['orchestrator'] = {'provider': 'codex', 'model': 'gpt-test-1'}
+        app.handle('routing_update', {'routing': routing_doc})
+        task = self.create(app, project_id)
+        self.assertEqual((task['role'], task['provider'], task['model']), ('orchestrator', 'codex', 'gpt-test-1'))
 
-    def test_claude_and_model_are_stored(self):
+    def test_explicit_provider_and_model_override_the_routing(self):
         app = self.open()
         project_id = self.add_project(app)
-        task_id = app.handle('agent_create', {'project_id': project_id, 'title': 'Fix it', 'scope': None,
-                                              'provider': 'claude', 'model': ' claude-opus-5-5 '})['task_id']
-        with app.lock:
-            task = app.store.task(task_id)
+        routing_doc = routing.default()
+        routing_doc['orchestrator'] = {'provider': 'codex', 'model': 'gpt-test-1'}
+        app.handle('routing_update', {'routing': routing_doc})
+        task = self.create(app, project_id, provider='claude', model=' claude-opus-5-5 ')
         self.assertEqual((task['provider'], task['model']), ('claude', 'claude-opus-5-5'))
-        self.assertEqual([t['provider'] for t in app.handle('state', {})['tasks'] if t['id'] == task_id], ['claude'])
+        # Another provider without a model gets that provider's own default, not the routing model.
+        task = self.create(app, project_id, provider='claude')
+        self.assertEqual((task['provider'], task['model']), ('claude', None))
+        task = self.create(app, project_id, model='')
+        self.assertEqual((task['provider'], task['model']), ('codex', None))
 
     def test_invalid_provider_or_model_is_refused_before_anything_is_saved(self):
         app = self.open()
         project_id = self.add_project(app)
-        for extra in ({'provider': 'gpt'}, {'provider': None}, {'model': 7}, {'model': 'x' * 129},
-                      {'model': 'bad model'}, {'model': '--yolo'}):
-            with self.assertRaisesRegex(ValueError, 'runtime|model'):
+        for extra in ({'provider': 'gpt'}, {'provider': None}, {'model': 7}, {'model': 'x' * 65},
+                      {'model': 'bad model'}, {'model': 'claude-sonnet'}, {'provider': 'codex', 'model': 'a/b'},
+                      {'provider': 'codex', 'model': 'x' * 65}):
+            with self.assertRaisesRegex(ValueError, 'provider|model'):
                 app.handle('agent_create', dict({'project_id': project_id, 'title': 'Fix it', 'scope': None}, **extra))
         with app.lock:
             self.assertEqual(list(app.state['projects'][project_id].get('tasks', {})), [])
         self.assertEqual(self.audit.records, [])
-        self.assertEqual(app.handle('agent_create', {'project_id': project_id, 'title': 'X', 'scope': None,
-                                                     'model': ''})['task_id'] != '', True, 'empty model means default')
 
     def test_saved_rows_are_validated(self):
         task = tasks.create('A', project_id='p1')
-        self.assertEqual((task['provider'], task['model']), ('codex', None))
+        self.assertEqual((task['provider'], task['model']), ('claude', None))
         del task['provider'], task['model']
-        tasks.validate(task, task['id'])  # Agent tasks saved before Wave 2 run on Codex.
+        tasks.validate(task, task['id'])  # Agent tasks saved before providers existed ran on Codex.
         self.assertEqual(tasks.provider(task), 'codex')
-        for bad in ({'provider': 'other'}, {'model': 5}):
+        for bad in ({'provider': 'other'}, {'model': 5}, {'model': 'a b'}):
             broken = dict(task, **bad)
             with self.assertRaises(ValueError):
                 tasks.validate(broken, task['id'])
@@ -447,6 +461,28 @@ class AgentProviderTests(ApplicationCase):
         self.assertNotIn('provider', legacy)
         with self.assertRaises(ValueError):
             tasks.create('C', project_id='p1', provider='other')
+        with self.assertRaises(ValueError):
+            tasks.create('C', project_id='p1', provider='claude', model='gpt-5')
+        self.assertFalse(hasattr(tasks, 'PROVIDERS'))  # The registry is the only provider list.
+        self.assertFalse(hasattr(tasks, 'MODEL'))
+
+
+class CodexHomeTests(ApplicationCase):
+    def test_default_codex_auth_uses_the_app_owned_home(self):
+        app = service.Application(self.root / 'data2', emit=Output(), scope_api=self.scope, audit_api=self.audit,
+                                  runtime_factory=lambda task_id: self.runtime)
+        self.addCleanup(app.scheduler.shutdown, 5)
+        self.assertEqual(app.provider.codex_home, (self.root / 'data2' / 'codex-home').resolve())
+
+    def test_stale_provider_status_is_not_kept_across_restarts(self):
+        app = self.open()
+        with app.lock:
+            app.state['provider_status'] = {'codex': {'provider': 'codex', 'state': 'signed_in', 'account': 'x',
+                                                      'detail': ''}}
+            app.persist()
+        app.scheduler.shutdown(5)
+        again = self.open()
+        self.assertEqual(again.handle('state', {})['provider_status'], {})
 
 
 class ProviderBudgetTests(unittest.TestCase):

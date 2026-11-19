@@ -71,7 +71,7 @@ class TaskStorageTests(unittest.TestCase):
 
     def test_new_tasks_are_agent_tasks_only(self):
         task=tasks.create('Fix it',project_id='p1')
-        self.assertEqual((task['mode'],task['provider'],task['agent']['project_id']),('agent','codex','p1'))
+        self.assertEqual((task['mode'],task['provider'],task['agent']['project_id']),('agent','claude','p1'))
         self.assertEqual(tasks.MODES,('agent',))
         tasks.validate(task,task['id'])
         with self.assertRaises(ValueError):tasks.create('Fix it',project_id=None)

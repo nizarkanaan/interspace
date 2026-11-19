@@ -141,6 +141,28 @@ class SignInTests(CodexAuthCase):
         self.assertEqual(codex.CodexRuntime.auth_status(self.app)['account'], 'ChatGPT (pro)')
         self.assertTrue(self.wait_until(lambda: not codex_auth.pending(self.home)))
 
+    def test_on_finish_is_called_once_with_the_outcome(self):
+        for scenario, outcome in (({'complete_after': 0.1}, 'success'),
+                                  ({'complete_after': 0.1, 'success': False}, 'failed')):
+            self.scenario({'account': None, 'login': scenario})
+            seen = []
+            codex.CodexRuntime.begin_sign_in(self.app, on_finish=seen.append)
+            self.assertTrue(self.wait_until(lambda: seen))
+            # Called after the attempt is over, so a status read then sees the outcome.
+            self.assertFalse(codex_auth.pending(self.home))
+            time.sleep(0.1)
+            self.assertEqual(seen, [outcome])
+            (self.home / 'fake-account.json').unlink(missing_ok=True)
+
+    def test_on_finish_is_not_called_for_a_replaced_or_cancelled_sign_in(self):
+        self.scenario({'account': None, 'login': {'complete_after': None}})
+        first, second = [], []
+        codex.CodexRuntime.begin_sign_in(self.app, on_finish=first.append)
+        codex.CodexRuntime.begin_sign_in(self.app, on_finish=second.append)
+        codex_auth.cancel_all()
+        time.sleep(0.2)
+        self.assertEqual((first, second), ([], []))
+
     def test_failed_sign_in_reports_in_status_and_stops_the_server(self):
         self.scenario({'account': None, 'login': {'complete_after': 0.1, 'success': False}})
         codex.CodexRuntime.begin_sign_in(self.app)

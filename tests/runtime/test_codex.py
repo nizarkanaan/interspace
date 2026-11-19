@@ -195,6 +195,44 @@ class LaunchTests(CodexCase):
         self.assertIn('data, not instructions', start['developerInstructions'])
         self.assertFalse(self.sent('thread/shellCommand'))
 
+    def test_read_access_starts_the_read_only_profile(self):
+        ctx = self.ctx()
+        ctx.access = 'read'
+        self.open({}, ctx)
+        argv = self.logged()[0]['argv']
+        overrides = dict(argv[i + 1].split('=', 1) for i in range(1, len(argv), 2) if argv[i] == '-c')
+        self.assertEqual(overrides['default_permissions'], '"interspace-read"')
+        profile = overrides['permissions.interspace-read']
+        self.assertIn('"extends"=":read-only"', profile)
+        self.assertIn('"network"={"enabled"=false}', profile)
+        self.assertIn(json.dumps(str(self.home / '.ssh')) + '="deny"', profile)
+        self.assertNotIn('permissions.interspace-task', overrides)
+        start = self.sent('thread/start')[0]['params']
+        self.assertEqual(start['permissions'], 'interspace-read')
+        self.assertIn('read-only', start['developerInstructions'])
+        self.assertNotIn('can write only this workspace', start['developerInstructions'])
+
+    def test_write_access_is_the_default_profile(self):
+        ctx = self.ctx()
+        ctx.access = 'write'
+        self.open({}, ctx)
+        self.assertEqual(self.sent('thread/start')[0]['params']['permissions'], 'interspace-task')
+
+    def test_read_session_refuses_a_thread_on_another_profile(self):
+        ctx = self.ctx()
+        ctx.access = 'read'
+        with self.assertRaises(runtime.RuntimeFailure):
+            self.runtime({'thread_start': {'activePermissionProfile': {'id': 'interspace-task',
+                                                                        'extends': ':workspace'}}}).open(ctx)
+
+    def test_role_instructions_are_added_to_the_developer_instructions(self):
+        ctx = self.ctx()
+        ctx.instructions = 'You are the Orchestrator of an Interspace task.'
+        self.open({}, ctx)
+        text = self.sent('thread/start')[0]['params']['developerInstructions']
+        self.assertTrue(text.startswith(codex.SHELL_DEVELOPER_INSTRUCTIONS))
+        self.assertTrue(text.endswith('\n\n' + ctx.instructions))
+
     def test_web_search_and_model_follow_the_context(self):
         ctx = self.ctx(scope={'web_search': 'allow'})
         ctx.model = 'gpt-6.1-sol'

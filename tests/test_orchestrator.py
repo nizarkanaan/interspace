@@ -312,7 +312,11 @@ class DefaultsTests(unittest.TestCase):
         read = orchestrator.child_scope(parent_scope, 'c1', 'read')
         self.assertEqual((read['task_id'], read['version']), ('c1', 1))
         self.assertEqual([(p['access'], p['write']) for p in read['projects']], [('read', [])])
-        self.assertEqual((read['commands']['workspace'], read['commands']['allow']), ('ask', []))
+        # Read children run in a read-only sandbox (Codex `interspace-read`, Claude's read-only path), so the
+        # parent's `commands.workspace` stays: their read-only commands run without asking. Allow prefixes go.
+        self.assertEqual((read['commands']['workspace'], read['commands']['allow']), ('allow', []))
+        parent_scope['commands']['workspace'] = 'ask'
+        self.assertEqual(orchestrator.child_scope(parent_scope, 'c3', 'read')['commands']['workspace'], 'ask')
         write = orchestrator.child_scope(parent_scope, 'c2', 'write')
         self.assertEqual(write['projects'], parent_scope['projects'])
         self.assertEqual(write['commands'], parent_scope['commands'])
@@ -381,6 +385,44 @@ class RunTests(OrchestratorCase):
         self.wait_state('parent', 'idle')
         self.assertFalse(self.results[1]['timed_out'])
         self.assertEqual(sorted(self.state(t['id']) for t in self.children()), ['idle', 'idle'])
+
+    def test_a_resuming_parent_waits_for_a_free_slot_ahead_of_the_queue(self):
+        gate = threading.Event()
+        seen = []
+        order = []
+
+        def watch(ctx, label):
+            seen.append(self.sched._running_count())
+            order.append(label)
+
+        def parent_script(session, text, ctx):
+            proposed = ctx.orchestrate('propose_team', TEAM)
+            watch(ctx, 'parent resumed')
+            waited = ctx.orchestrate('wait_for', {'team_id': proposed['team_id'], 'timeout_s': 10})
+            watch(ctx, 'parent resumed')
+            self.results.append(waited)
+            ctx.emit('message', {'role': 'assistant', 'text': 'Summary.', 'final': True}, item_id='m1')
+            return {'status': 'completed', 'usage': dict(CLAUDE_USAGE), 'error': None}
+
+        def child(usage):
+            def script(session, text, ctx):
+                watch(ctx, 'child ' + ctx.role)
+                gate.wait(5)
+                return child_script(usage)(session, text, ctx)
+            return script
+        self.make(parent_script, codex=child(CODEX_USAGE), claude=child(CLAUDE_USAGE), max_running=1)
+        self.parent()
+        self.sched.submit('parent', 'p1', 'x', None)
+        self.approve_when_proposed()
+        wait_for(lambda: order, message='first child running')
+        time.sleep(0.2)  # The parent has had time to resume if it (wrongly) took a slot.
+        self.assertEqual(order, ['child researcher'])
+        gate.set()
+        self.wait_state('parent', 'idle')
+        # The parent resumed before the queued implementer started, and never shared the single slot.
+        self.assertEqual(order, ['child researcher', 'parent resumed', 'child implementer', 'parent resumed'])
+        self.assertEqual(seen, [1, 1, 1, 1])
+        self.assertFalse(self.results[0]['timed_out'])
 
     def test_snapshot_groups_children_under_their_task(self):
         gate = threading.Event()

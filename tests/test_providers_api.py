@@ -27,8 +27,10 @@ class FakeApp:
         self.published += 1
 
 
-def fake_runtime(status=None, sign_in=None, error=None):
+def fake_runtime(status=None, sign_in=None, error=None, sign_out=None):
     class Runtime:
+        finishers = []
+
         @classmethod
         def auth_status(cls, app):
             if error is not None:
@@ -36,10 +38,13 @@ def fake_runtime(status=None, sign_in=None, error=None):
             return status
 
         @classmethod
-        def begin_sign_in(cls, app):
+        def begin_sign_in(cls, app, on_finish=None):
             if error is not None:
                 raise error
+            cls.finishers.append(on_finish)
             return sign_in
+    if sign_out is not None:
+        Runtime.sign_out = classmethod(lambda cls, app: sign_out)
     return Runtime
 
 
@@ -64,7 +69,42 @@ class ProvidersApiTests(unittest.TestCase):
 
     def test_methods_are_the_contract(self):
         self.assertEqual(set(providers_api.METHODS),
-                         {'providers_list', 'provider_sign_in', 'provider_status', 'routing_update'})
+                         {'providers_list', 'provider_sign_in', 'provider_sign_out', 'provider_status', 'routing_update'})
+
+    def test_sign_in_completion_updates_state_and_publishes(self):
+        self.call('provider_sign_in', {'provider': 'codex'})
+        finish = self.runtimes['codex'].finishers[-1]
+        self.assertTrue(callable(finish))
+        self.assertEqual(self.app.published, 0)
+        self.runtimes['codex'] = fake_runtime({'provider': 'codex', 'state': 'signed_in', 'account': 'ChatGPT (pro)',
+                                               'detail': 'ok', 'token': 'secret'})
+        finish('success')
+        self.assertEqual(self.app.state['provider_status']['codex'],
+                         {'provider': 'codex', 'state': 'signed_in', 'account': 'ChatGPT (pro)', 'detail': 'ok'})
+        self.assertEqual(self.app.published, 1)
+        self.runtimes['codex'] = fake_runtime({'provider': 'codex', 'state': 'signed_out', 'account': None,
+                                               'detail': 'Codex sign-in did not complete.'})
+        finish('failed')
+        self.assertEqual(self.app.state['provider_status']['codex']['state'], 'signed_out')
+        self.assertEqual(self.app.published, 2)
+
+    def test_sign_out(self):
+        self.runtimes['codex'] = fake_runtime(sign_out={'provider': 'codex', 'state': 'signed_out', 'account': None,
+                                                        'detail': 'Signed out.', 'token': 'x'})
+        result = self.call('provider_sign_out', {'provider': 'codex'})
+        self.assertEqual(result, {'provider': 'codex', 'state': 'signed_out', 'account': None, 'detail': 'Signed out.'})
+        self.assertEqual(self.app.state['provider_status']['codex'], result)
+        self.assertEqual(self.app.published, 1)
+        # Claude uses the user's own CLI sign-in, which Interspace never signs out.
+        with self.assertRaisesRegex(ValueError, 'claude auth logout'):
+            self.call('provider_sign_out', {'provider': 'claude'})
+        self.runtimes['codex'] = fake_runtime(error=RuntimeError('/x/auth.json'), sign_out={})
+        self.runtimes['codex'].sign_out = classmethod(lambda cls, app: (_ for _ in ()).throw(RuntimeError('/x/auth.json')))
+        with self.assertRaises(ValueError) as raised:
+            self.call('provider_sign_out', {'provider': 'codex'})
+        self.assertNotIn('auth.json', str(raised.exception))
+        with self.assertRaisesRegex(ValueError, 'Unknown provider.'):
+            self.call('provider_sign_out', {'provider': 'gemini'})
 
     def test_providers_list(self):
         result = self.call('providers_list', {})
@@ -152,6 +192,16 @@ class ProvidersApiTests(unittest.TestCase):
 
 
 class ServiceIntegrationTests(unittest.TestCase):
+    def test_every_backend_method_is_allowed_by_the_shell(self):
+        import re
+        import service
+        swift = (ROOT / 'app' / 'macos' / 'main.swift').read_text()
+        allowed = set(re.findall(r'"([a-z_]+)"', re.search(r'let allowedMethods: Set<String> = \[(.*?)\]',
+                                                            swift, re.S).group(1)))
+        backend = set(service.AGENT_METHODS) | set(service.APP_METHODS) | set(service.extension_methods())
+        native = {'add_project', 'select_project'}  # Sent by the shell itself after its folder picker.
+        self.assertEqual(backend - allowed - native, set())
+
     def test_methods_reach_the_app_through_the_extension_hook(self):
         import service
 

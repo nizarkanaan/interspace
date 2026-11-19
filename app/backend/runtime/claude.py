@@ -12,14 +12,17 @@ user's decisions in docs/superpowers/specs/2026-11-11-claude-code-provider-desig
   (`--permission-prompt-tool stdio`, `can_use_tool` requests). Built-in tools are translated into scope requests
   for `ctx.authorize`; Interspace's own tools (`mcp__interspace__*`, served by the Interspace MCP bridge in
   `runtime/mcp_bridge.py`, scheduler.md "MCP bridge API") are let through to the bridge, which runs each call
-  with `ctx.call_tool`, which authorizes it. The bridge starts only when `ctx.tools()` lists tools. A tool result for a call Interspace never answered fails the turn
+  with `ctx.orchestrate`, which checks it. The bridge starts only when `ctx.tools()` lists tools. A tool result for a call Interspace never answered fails the turn
   as `runtime_protocol`.
 - Write mode (multi-provider user decision 4): Claude may change files inside its own task workspace. Edit,
   Write and NotebookEdit are not sandboxed by the CLI (spike-0b.md, "Containment"), so every target path is
   resolved here and anything outside the task workspaces or inside `.git/` is refused before `authorize`.
   Bash stays inside the macOS sandbox (`allowUnsandboxedCommands: false`, `dangerouslyDisableSandbox`
   refused), with its own TMPDIR inside the workspace scratch folder. A run context with `access: 'read'`
-  keeps the read-only behaviour (READ_ONLY_RULE).
+  keeps the read-only behaviour (READ_ONLY_RULE): edits and commands outside the read-only allowlist are
+  refused before `authorize`, so read roles may run the allowlisted commands under `commands.workspace`.
+- `ctx.instructions` (the role's added system prompt, for example the Orchestrator's) is appended to the
+  system prompt.
 
 One CLI process holds a task's conversation across turns; each user message is one turn ending at `result`.
 """
@@ -323,7 +326,8 @@ class ClaudeRuntime:
         return {'provider': cls.name, 'state': 'signed_out', 'account': None, 'detail': detail}
 
     @classmethod
-    def begin_sign_in(cls, app):
+    def begin_sign_in(cls, app, on_finish=None):
+        """A Terminal instruction; Interspace cannot see when it finishes, so `on_finish` is never called."""
         runtime = cls(app)
         if not runtime.binary or not os.access(runtime.binary, os.X_OK):
             raise ValueError('Install Claude Code before signing in to Claude.')
@@ -356,7 +360,7 @@ class ClaudeSession:
         self._init_seen = False
         self._answered = set()   # tool_use_ids Interspace answered (allowed or denied)
         self._denied = set()     # their CLI error results are not shown again
-        self._bridged = set()  # Interspace tool calls: RunContext.call_tool emits their events
+        self._bridged = set()  # Interspace tool calls: RunContext.orchestrate emits their events
         self._started = {}
         self._counter = 0
         self._turn_bytes = 0
@@ -443,6 +447,9 @@ class ClaudeSession:
         others = [p for p in ctx.workspaces.values() if p != primary]
         prompt = SYSTEM_PROMPT.format(access=WRITE_ACCESS if access == 'write' else READ_ACCESS, primary=primary,
                                       others=(' Other project folders: ' + ', '.join(others) + '.') if others else '')
+        extra = getattr(ctx, 'instructions', None)
+        if isinstance(extra, str) and extra.strip():
+            prompt += '\n\n' + extra  # The role's added instructions (the Orchestrator's routing and tools).
         env = child_env()
         try:
             env['TMPDIR'] = scratch_tmp(primary)
@@ -752,7 +759,7 @@ class ClaudeSession:
         if not self._known_tool(name):
             self._answer(request_id, call_id, None)
             raise _Fail('runtime_protocol', 'Claude Code asked for a tool Interspace did not configure.')
-        if name not in TOOLS:  # An Interspace tool: the bridge runs it through RunContext.call_tool, which authorizes it.
+        if name not in TOOLS:  # An Interspace tool: the bridge runs it through RunContext.orchestrate, which checks it.
             self._bridged.add(call_id)
             self._answer(request_id, call_id, tool_input)
             return
