@@ -100,3 +100,23 @@ Stored in `state['routing']`:
 
 - **New tasks.** `agent_create` creates an Orchestrator task (`role: 'orchestrator'`). Without `provider` and `model` it uses `routing.orchestrator`. An explicit `provider` overrides it; with no `model`, that provider runs its own default (the routing model applies only to the routing provider). An explicit `model` overrides the model; blank means the provider's default.
 - **Task rows.** `tasks.py` keeps no provider or model list. New rows check the provider with `registry.names()` and the model with `registry.check_model`. A saved row's model only needs the registry's name shape (`MODEL_RE`), so a model a provider stops offering fails that turn rather than hiding the saved task. Rows without `provider` are Codex (`LEGACY_PROVIDER`).
+
+## Claude file tools (Wave 3A)
+
+Claude Code's Edit, Write and NotebookEdit are never offered (not in `--tools`, not in `permissions.ask`). They are not sandboxed, and they write a path after Interspace checked it, following links. A sandboxed background command could swap a checked folder for a link in between. Write sessions get Interspace's own tools instead. The MCP bridge serves them as server `interspace`, ahead of any `ctx.tools()`. Read sessions never get them.
+
+| Tool (`mcp__interspace__…`) | Input | Effect |
+| --- | --- | --- |
+| `write_file` | `{file_path, content}` | Create the file, or replace all of its content. Missing folders are created. |
+| `edit_file` | `{file_path, old_string, new_string, replace_all?}` | Replace `old_string`. It must occur exactly once unless `replace_all` is true. |
+| `edit_notebook` | `{notebook_path, new_source, cell_id?, cell_type?, edit_mode?}` | `replace` (default) or `delete` the cell `cell_id`, or `insert` a new `cell_type` cell after it (first without `cell_id`). |
+
+Paths are absolute, or relative to the primary workspace.
+
+- **When the CLI asks** (`can_use_tool`), `runtime.files.locate` places the path lexically. The path must be inside a task workspace, with no `..` and no `.git` part in any case; otherwise the call is denied with `provider.claude_workspace`. A read session is denied with `provider.claude_readonly`. A write while a command is running is denied with `provider.claude_background` (see below). Otherwise the call goes to `ctx.authorize` as `{category: 'file_write', project_id, paths: [<workspace>/<path>]}`. A `tool_call` card is emitted with the decision. On allow, the exact input is recorded as approved, once.
+- **When the bridge runs it**, only an input approved for this session is run, and only once. Anything else returns `not_approved`. `runtime.files` opens each folder from the workspace down with `dir_fd`, `O_NOFOLLOW` and `O_DIRECTORY`. A link anywhere on the path is refused. A folder swapped after it was opened cannot redirect the write. The target must be a regular UTF-8 file of at most 5 MB. New content is written to a temporary file in the same folder and renamed over the target through the same folder descriptor. A hard-linked file is replaced, never written through. An existing file keeps its mode; new files are 0644.
+- **Events:** `tool_call` (when asked), then a per-call `diff` (`cumulative: false`, one file, a unified patch), then `tool_result` with `ok` or `error`. The CLI's own tool result for the call is not shown again.
+
+**Commands (Wave 3A stopgap, kept as defence in depth).** Bash with `run_in_background` is denied with `provider.claude_background`. A file-tool write is denied while any child of the Claude Code process other than the bridge relay is alive. This is checked when the CLI asks and again before the write; if `ps` fails, the write is denied. A process that left the CLI's process tree (`setsid` with an exited parent) is not seen. The file tools do not depend on this check.
+
+**Live check needed:** the real CLI may keep its own long-lived child processes. These would block every write; check this in the live acceptance run.

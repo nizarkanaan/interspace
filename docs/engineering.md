@@ -68,7 +68,7 @@ The plan `docs/superpowers/plans/2026-11-15-multi-provider.md` replaces the Agen
 Dependency rules:
 
 - `scope.decide` is pure: no I/O except path resolution, no clock except the one passed in. Every file, command and network action of an agent passes through the run context's `authorize`, which calls `decide` and writes the audit record before the action runs. Fail closed when policy or audit fails.
-- Runtimes never call the audit log, the budget or other tasks directly; they go through the run context. They start providers only in sandboxed, approval-requesting modes and pass every setting explicitly. A provider's file-editing tools that its own sandbox does not contain (Claude Edit/Write/NotebookEdit) are checked by Interspace against the agent's workspace before `authorize` (spike 0B).
+- Runtimes never call the audit log, the budget or other tasks directly; they go through the run context. They start providers only in sandboxed, approval-requesting modes and pass every setting explicitly. A provider's file-editing tools that its own sandbox does not contain are not offered: Claude Code's Edit/Write/NotebookEdit are replaced by Interspace's own file tools, which write without following links (providers.md, "Claude file tools").
 - Only the registry names providers. Other modules ask the registry; no hard-coded provider lists.
 - The Orchestrator reaches children only through its tools; children never see each other or the Orchestrator's session. Child output reaches the Orchestrator wrapped as untrusted content.
 - The UI dispatches enumerated intentions only. It never decides policy, holds credentials or reconstructs a scope or team digest it did not display.

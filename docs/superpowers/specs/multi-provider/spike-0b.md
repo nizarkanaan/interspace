@@ -285,7 +285,8 @@ Conclusions:
   allows. Keep `sandbox.enabled: true` and `allowUnsandboxedCommands: false`. Refuse
   `dangerouslyDisableSandbox: true`. Temp-folder writes are a known gap: consider giving each agent its own
   `TMPDIR` inside its worktree's scratch folder.
-- So write mode needs these changes: set `READ_ONLY = False`, map Edit/Write/NotebookEdit to a `file_write`
+- Superseded in Wave 3A: checking the path before `authorize` leaves a race (the CLI writes later, following links), so Edit/Write/NotebookEdit are no longer offered; see providers.md "Claude file tools". Original conclusion:
+  so write mode needs these changes: set `READ_ONLY = False`, map Edit/Write/NotebookEdit to a `file_write`
   scope request with the resolved path, and deny anything outside the worktree before `authorize`.
 
 ## Not done, needs the user's approval
