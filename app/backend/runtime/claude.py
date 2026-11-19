@@ -34,6 +34,7 @@ import selectors
 import shlex
 import shutil
 import signal
+import stat
 import subprocess
 import tempfile
 import threading
@@ -41,6 +42,7 @@ import time
 import uuid
 
 import scope
+import runtime
 from runtime import registry
 
 # Multi-provider user decision 4: Claude may write inside its task workspace. True forces every session
@@ -67,6 +69,10 @@ WRITE_TOOLS = ('Edit', 'Write', 'NotebookEdit')
 SEARCH_TOOLS = ('WebSearch',)
 TOOLS = READ_TOOLS + SEARCH_TOOLS + COMMAND_TOOLS + WRITE_TOOLS
 
+# Credential locations the command sandbox may not read (runtime.CREDENTIAL_PATHS). The CLI keeps its shell
+# snapshots in ~/.claude and sources one before every command, so only its credentials file is denied there.
+CREDENTIAL_PATHS = tuple(p for p in runtime.CREDENTIAL_PATHS if p != '.claude') + ('.claude/.credentials.json',)
+
 # Only these variables reach the CLI, so no ANTHROPIC_API_KEY, token or cloud-provider switch can outrank
 # the subscription login or change which account is billed.
 ENV_ALLOWLIST = ('HOME', 'PATH', 'TMPDIR', 'LANG', 'USER')
@@ -88,11 +94,13 @@ READ_ONLY_COMMANDS = {
     'realpath': (), 'echo': (),
     'tail': ('-f', '-F', '--follow'),
     'find': ('-exec', '-execdir', '-ok', '-okdir', '-delete', '-fprint', '-fprint0', '-fprintf', '-fls'),
-    'sort': ('-o', '--output'),
+    'sort': ('-o', '--output', '--compress-program'),
     'rg': ('--pre',),
     'tree': ('-o',),
-    'git': ('--output', '--ext-diff', '--textconv', '--exec'),
+    'file': ('-C', '--compile'),
+    'git': ('--output', '--ext-diff', '--textconv', '--exec', '-O', '--open-files-in-pager'),
 }
+UNIQ_VALUE_OPTIONS = ('-f', '-s', '--skip-fields', '--skip-chars')  # Their next argument is a number, not a file.
 READ_ONLY_GIT = ('status', 'log', 'diff', 'show', 'grep', 'ls-files', 'ls-tree', 'blame', 'rev-parse', 'describe',
                  'shortlog', 'cat-file')
 
@@ -210,23 +218,44 @@ def write_target(path, workspaces, primary):
     return real, best[0]
 
 
+def _plain_dir(path):
+    """Make `path` a real folder; OSError when a symlink or anything else is there (never followed)."""
+    try:
+        os.mkdir(path, 0o700)
+    except FileExistsError:
+        pass
+    if not stat.S_ISDIR(os.lstat(path).st_mode):
+        raise OSError('Not a plain folder: ' + path)
+
+
 def scratch_tmp(workspace):
-    """The session's TMPDIR, `<workspace>/.interspace/tmp`, kept out of git by the clone's info/exclude."""
-    tmp = os.path.join(workspace, SCRATCH_DIR, 'tmp')
-    os.makedirs(tmp, mode=0o700, exist_ok=True)
+    """The session's TMPDIR, `<workspace>/.interspace/tmp`, kept out of git by the clone's info/exclude.
+
+    The agent can create symlinks in its clone, `.git/info` included, so nothing here follows one: every folder
+    must be a real folder, a redirected `.git` (a symlink, a gitfile or a `commondir`) is refused, and the exclude
+    file is opened without following a link. OSError when the clone is not safe to write.
+    """
+    workspace = os.path.realpath(workspace)
+    scratch = os.path.join(workspace, SCRATCH_DIR)
+    tmp = os.path.join(scratch, 'tmp')
+    _plain_dir(scratch)
+    _plain_dir(tmp)
     git = os.path.join(workspace, '.git')
-    if os.path.isdir(git):
-        exclude = os.path.join(git, 'info', 'exclude')
-        os.makedirs(os.path.dirname(exclude), exist_ok=True)
-        line = '/' + SCRATCH_DIR + '/'
-        try:
-            with open(exclude, encoding='utf-8') as handle:
-                present = line in handle.read().splitlines()
-        except FileNotFoundError:
-            present = False
-        if not present:
-            with open(exclude, 'a', encoding='utf-8') as handle:
-                handle.write('\n' + line + '\n')
+    if not os.path.lexists(git):
+        return tmp
+    if not stat.S_ISDIR(os.lstat(git).st_mode) or os.path.lexists(os.path.join(git, 'commondir')):
+        raise OSError('The clone\'s .git points elsewhere.')
+    info = os.path.join(git, 'info')
+    _plain_dir(info)
+    line = '/' + SCRATCH_DIR + '/'
+    # O_NONBLOCK: a FIFO in place of the file must not hang the backend; it is then refused as not a file.
+    handle = os.open(os.path.join(info, 'exclude'),
+                     os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW | os.O_NONBLOCK, 0o644)
+    with os.fdopen(handle, 'r+', encoding='utf-8') as exclude:
+        if not stat.S_ISREG(os.fstat(handle).st_mode):
+            raise OSError('The clone\'s exclude file is not a file.')
+        if line not in exclude.read().splitlines():
+            exclude.write('\n' + line + '\n')
     return tmp
 
 
@@ -239,9 +268,35 @@ def read_only_command(tool_input):
     if normal['opaque'] or not argv or normal['git_config'] or argv[0] not in READ_ONLY_COMMANDS:
         return False
     refused = READ_ONLY_COMMANDS[argv[0]]
-    if any(arg == bad or arg.startswith(bad + '=') for arg in argv[1:] for bad in refused):
+    if any(_refused_arg(arg, bad) for arg in argv[1:] for bad in refused):
         return False
+    if argv[0] == 'uniq' and len(_uniq_operands(argv[1:])) > 1:
+        return False  # `uniq input output` writes the output file.
     return argv[0] != 'git' or (len(argv) > 1 and argv[1] in READ_ONLY_GIT)
+
+
+def _refused_arg(arg, bad):
+    """True when `arg` may be the refused option `bad`, however it is spelled. Refusing too much is safe."""
+    name = arg.split('=', 1)[0]
+    if bad.startswith('--'):
+        # getopt_long and git accept any unambiguous prefix of a long option (`--compress` for --compress-program).
+        return name.startswith('--') and len(name) > 2 and (name.startswith(bad) or bad.startswith(name))
+    if len(bad) == 2:
+        # A short option, alone, with its value attached (`-Osh`) or bundled with others (`-uo out`).
+        return arg.startswith('-') and not arg.startswith('--') and bad[1] in arg[1:]
+    return name == bad or name.startswith(bad)  # find's one-dash words: -fprint, -fprint0.
+
+
+def _uniq_operands(args):
+    operands, skip = [], False
+    for arg in args:
+        if skip:
+            skip = False
+        elif arg in UNIQ_VALUE_OPTIONS:
+            skip = True
+        elif arg == '-' or not arg.startswith('-'):
+            operands.append(arg)
+    return operands
 
 
 def _bounded(value, limit):
@@ -259,10 +314,10 @@ def _result_text(content):
     return ''
 
 
-def start_bridge(tools):
+def start_bridge(tools, socket_dir=None):
     """The Interspace MCP bridge (2A's `runtime.mcp_bridge`, scheduler.md "MCP bridge API")."""
     from runtime import mcp_bridge
-    return mcp_bridge.start(tools)
+    return mcp_bridge.start(tools, socket_dir=socket_dir)
 
 
 class ClaudeRuntime:
@@ -275,7 +330,12 @@ class ClaudeRuntime:
 
     def __init__(self, app, *, binary=None, bridge_factory=start_bridge, interrupt_grace_s=INTERRUPT_GRACE_S):
         self.app = app
+        storage = getattr(app, 'storage', None)
+        self.app_data = str(storage) if isinstance(storage, (str, os.PathLike)) else None
         self.binary = str(binary) if binary else find_claude()
+        if bridge_factory is start_bridge:
+            # The socket goes to <app data>/run, out of reach of sandboxed commands (runtime.run_dir).
+            bridge_factory = lambda tools: start_bridge(tools, socket_dir=runtime.run_dir(self.app_data))  # noqa: E731
         self.bridge_factory = bridge_factory
         self.interrupt_grace_s = interrupt_grace_s
 
@@ -457,7 +517,9 @@ class ClaudeSession:
             raise _Fail('workspace_failed', 'Interspace could not prepare the task workspace for Claude Code.')
         settings = {'permissions': {'allow': [], 'deny': [], 'ask': list(TOOLS) + ['mcp__' + BRIDGE_SERVER]},
                     'disableAllHooks': True, 'enableAllProjectMcpServers': False,
-                    'sandbox': {'enabled': True, 'autoAllowBashIfSandboxed': False, 'allowUnsandboxedCommands': False}}
+                    'sandbox': {'enabled': True, 'autoAllowBashIfSandboxed': False, 'allowUnsandboxedCommands': False,
+                                # The sandbox limits writes, not reads (0B-8): deny what Codex's profile denies.
+                                'filesystem': {'denyRead': self._deny_reads(ctx)}}}
         command = [self.runtime.binary, '-p', '--input-format', 'stream-json', '--output-format', 'stream-json',
                    '--verbose', '--model', model, '--effort', DEFAULT_EFFORT, '--system-prompt', prompt,
                    '--tools', ','.join(TOOLS), '--permission-mode', PERMISSION_MODE,
@@ -508,12 +570,19 @@ class ClaudeSession:
             elif message.get('type') not in IGNORED_TYPES:
                 raise _Fail('runtime_protocol', 'Claude Code sent an unexpected message while starting.')
 
+    def _deny_reads(self, ctx):
+        home = os.environ.get('HOME') or os.path.expanduser('~')
+        runtime.run_dir(self.runtime.app_data)  # Listed below with the rest of Interspace's data.
+        return runtime.deny_paths(ctx.workspaces.values(), home=home, app_data=self.runtime.app_data,
+                                  credential_paths=CREDENTIAL_PATHS)
+
     def _write_mcp_config(self):
         # A private file, not a command-line string: the bridge token must never appear in argv.
         server = self.bridge.server
         if server.get('name') != BRIDGE_SERVER:
             raise _Fail('runtime_unavailable', 'The Interspace tool server is misconfigured.')
-        self._config_dir = tempfile.mkdtemp(prefix='interspace-claude-')
+        # In <app data>/run, which sandboxed commands cannot read; the shared temporary folder otherwise.
+        self._config_dir = tempfile.mkdtemp(prefix='interspace-claude-', dir=runtime.run_dir(self.runtime.app_data))
         path = os.path.join(self._config_dir, 'mcp.json')
         config = {'mcpServers': {BRIDGE_SERVER: {'type': 'stdio', 'command': server['command'],
                                                  'args': list(server.get('args') or []),

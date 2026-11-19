@@ -4,10 +4,72 @@
 runtime is chosen by the task row's `provider` field, looked up in the provider registry (`runtime/registry.py`).
 A runtime module is imported only when a task asks for its provider.
 """
+import os
+from pathlib import Path
+
 from . import registry
 
 # Task rows saved before providers existed have no `provider` field; they were all Codex tasks.
 LEGACY_PROVIDER = 'codex'
+
+# Home-relative locations whose contents a sandboxed command must not read (scope.md always_deny.credentials).
+CREDENTIAL_PATHS = ('.ssh', '.gnupg', '.aws', '.azure', '.codex', '.claude', '.docker', '.kube', '.netrc',
+                    '.npmrc', '.pypirc', '.git-credentials', '.config/gh', '.config/gcloud', '.config/git/credentials',
+                    'Library/Keychains', 'Library/Cookies')
+
+
+# macOS limits a Unix socket path to 104 bytes; the bridge adds "/isb-XXXXXXXX/s" to the run folder.
+MAX_RUN_DIR_CHARS = 104 - len('/isb-XXXXXXXX/s') - 1
+
+
+def run_dir(app_data):
+    """`<app data>/run` (mode 0700) for the MCP bridge's socket and the Claude CLI's MCP configuration, or None.
+
+    The folder is part of Interspace's data, which `deny_paths` keeps away from sandboxed commands; the shared
+    temporary folder is readable by every command. None (no app data, or a path too long for a socket) means the
+    caller falls back to the temporary folder.
+    """
+    if app_data is None:
+        return None
+    path = os.path.join(os.path.realpath(str(app_data)), 'run')
+    if len(path.encode('utf-8')) > MAX_RUN_DIR_CHARS:
+        return None
+    os.makedirs(path, mode=0o700, exist_ok=True)
+    return path
+
+
+def _within(path, root):
+    try:
+        return os.path.commonpath([path, root]) == root
+    except ValueError:
+        return False
+
+
+def deny_paths(workspaces, *, home, app_data=None, credential_paths=CREDENTIAL_PATHS, extra=()):
+    """Paths a task's sandboxed commands must not read (scope.md, known limit 0B-8).
+
+    Credential locations under `home`, `extra` paths, and all of Interspace's data (`app_data`) except the task's
+    own workspaces and the folders that lead to them: other tasks' clones, events, audit, state, the Codex home.
+    Folders are listed when the session starts. Nothing returned contains or equals one of `workspaces`.
+    """
+    found = [str(Path(home) / p) for p in credential_paths] + [str(p) for p in extra]
+    own = [os.path.realpath(p) for p in workspaces]
+    if app_data is not None and os.path.isdir(str(app_data)):
+        ancestors = set()
+        for path in own:
+            ancestors.update(str(parent) for parent in Path(path).parents)
+        stack = [os.path.realpath(str(app_data))]
+        while stack:
+            directory = stack.pop()
+            for name in sorted(os.listdir(directory)):
+                child = os.path.realpath(os.path.join(directory, name))
+                if child in own:
+                    continue
+                if child in ancestors and os.path.isdir(child):
+                    stack.append(child)
+                else:
+                    found.append(child)
+    return [p for p in dict.fromkeys(found) if not any(_within(own_path, p) for own_path in own)]
 
 
 class RuntimeFailure(ValueError):

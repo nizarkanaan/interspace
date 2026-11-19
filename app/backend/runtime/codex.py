@@ -37,7 +37,7 @@ import subprocess
 import threading
 import time
 
-from . import RuntimeFailure, mcp_bridge
+from . import CREDENTIAL_PATHS, RuntimeFailure, deny_paths, mcp_bridge, run_dir  # noqa: F401 (CREDENTIAL_PATHS: re-exported)
 
 PROFILE = 'interspace-task'       # Write the task workspace only.
 READ_PROFILE = 'interspace-read'  # Read only: read roles and the Orchestrator (ctx.access == 'read').
@@ -54,10 +54,6 @@ DISABLED_FEATURES = ('apps', 'browser_use', 'browser_use_external', 'browser_use
                      'in_app_browser', 'in_app_local_automation', 'multi_agent', 'plugins', 'remote_plugin',
                      'plugin_discovery_prefetch', 'hooks', 'shell_snapshot', 'skill_mcp_dependency_install',
                      'workspace_dependencies', 'tool_suggest', 'guardian_approval', 'image_generation')
-# Home-relative locations whose contents a sandboxed command must not read (scope.md always_deny.credentials).
-CREDENTIAL_PATHS = ('.ssh', '.gnupg', '.aws', '.azure', '.codex', '.claude', '.docker', '.kube', '.netrc',
-                    '.npmrc', '.pypirc', '.git-credentials', '.config/gh', '.config/gcloud', '.config/git/credentials',
-                    'Library/Keychains', 'Library/Cookies')
 SHELLS = ('sh', 'bash', 'zsh', 'dash')
 FAILED_TURNS = {
     'modelNotFound': ('runtime_unavailable', 'This Codex model is not available for the signed-in account.'),
@@ -176,28 +172,9 @@ class CodexRuntime:
     # -- launch settings ------------------------------------------------------------------------------
 
     def deny_paths(self, ctx):
-        home = Path(self.environ.get('HOME') or os.path.expanduser('~'))
-        found = [str(home / p) for p in CREDENTIAL_PATHS]
-        if self.codex_home is not None:
-            found.append(str(self.codex_home))
-        own = [os.path.realpath(p) for p in ctx.workspaces.values()]
-        if self.app_data is not None and self.app_data.is_dir():
-            # Interspace's own data except this task's workspaces: other tasks' clones, events, audit, state.
-            ancestors = set()
-            for path in own:
-                ancestors.update(str(parent) for parent in Path(path).parents)
-            stack = [os.path.realpath(str(self.app_data))]
-            while stack:
-                directory = stack.pop()
-                for name in sorted(os.listdir(directory)):
-                    child = os.path.realpath(os.path.join(directory, name))
-                    if child in own:
-                        continue
-                    if child in ancestors and os.path.isdir(child):
-                        stack.append(child)
-                    else:
-                        found.append(child)
-        return [p for p in dict.fromkeys(found) if not any(_within(own_path, p) for own_path in own)]
+        home = self.environ.get('HOME') or os.path.expanduser('~')
+        extra = [str(self.codex_home)] if self.codex_home is not None else []
+        return deny_paths(ctx.workspaces.values(), home=home, app_data=self.app_data, extra=extra)
 
     def profile(self, ctx):
         if access_of(ctx) == 'read':
@@ -299,11 +276,13 @@ class CodexSession:
         cwd = ctx.primary_workspace
         if not cwd or not os.path.isdir(cwd):
             raise RuntimeFailure('workspace_failed', 'The task workspace is missing.')
+        # The run folder exists before the profile lists Interspace's data, so its socket is denied too.
+        socket_dir = runtime.socket_dir if runtime.socket_dir is not None else run_dir(runtime.app_data)
         argv, env = runtime.argv(ctx), runtime.env()
         Path(env['CODEX_HOME']).mkdir(parents=True, exist_ok=True)
         tools = ctx.tools() if hasattr(ctx, 'tools') else []
         if tools:
-            self.bridge = mcp_bridge.start(tools, socket_dir=runtime.socket_dir)
+            self.bridge = mcp_bridge.start(tools, socket_dir=socket_dir)
         try:
             try:
                 self.process = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.PIPE,

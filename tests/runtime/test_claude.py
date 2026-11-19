@@ -183,7 +183,8 @@ class ClaudeCase(unittest.TestCase):
             return made
         options['bridge_factory'] = factory
         options.setdefault('interrupt_grace_s', 1.0)
-        return claude.ClaudeRuntime(object(), binary=str(binary), **options)
+        app = options.pop('app', object())
+        return claude.ClaudeRuntime(app, binary=str(binary), **options)
 
     def entries(self):
         if not self.log.exists():
@@ -270,6 +271,103 @@ class LaunchTests(ClaudeCase):
         auth = [e for e in self.launches() if e['launch'][:2] == ['auth', 'status']][0]
         self.assertNotEqual(auth['env'].get('TMPDIR'), tmp)
 
+    def test_command_sandbox_denies_reads_of_credentials_and_app_data(self):
+        # Claude's command sandbox lets commands read any file unless told otherwise, so a command (a script, a
+        # glob) could read the app-owned Codex token or other tasks' clones. The same paths the Codex profile
+        # denies are passed as sandbox.filesystem.denyRead; the task's own workspaces stay readable.
+        data = self.root / 'data'
+        own = data / 'workspaces' / 'task1'
+        for path in (own / 'p1', own / 'p2', data / 'workspaces' / 'task2' / 'p1', data / 'codex-home',
+                     data / 'tasks', data / 'audit'):
+            path.mkdir(parents=True)
+        (data / 'state.json').write_text('{}')
+        ctx = FakeContext(self.root)
+        ctx.workspaces = {'p1': str(own / 'p1'), 'p2': str(own / 'p2')}
+        ctx.primary_workspace = ctx.workspaces['p1']
+        app = mock.Mock(storage=str(data))
+        _, _, outcome = self.turn({'turns': [simple_turn()]}, ctx=ctx, app=app)
+        self.assertEqual(outcome['status'], 'completed', outcome)
+        args = self.main_launches()[0]['launch']
+        settings = json.loads(args[args.index('--settings') + 1])
+        denied = settings['sandbox']['filesystem']['denyRead']
+        home = os.environ['HOME']
+        for path in (data / 'codex-home', data / 'state.json', data / 'tasks', data / 'audit',
+                     data / 'workspaces' / 'task2'):
+            self.assertIn(str(path), denied)
+        for name in ('.ssh', '.aws', '.codex', '.config/gh', 'Library/Keychains'):
+            self.assertIn(os.path.join(home, name), denied)
+        self.assertIn(os.path.join(home, '.claude', '.credentials.json'), denied)
+        self.assertNotIn(os.path.join(home, '.claude'), denied)  # The CLI's own shell snapshots live there.
+        for path in denied:
+            for workspace in ctx.workspaces.values():
+                self.assertFalse(workspace == path or workspace.startswith(path + os.sep), (path, workspace))
+
+    def test_command_sandbox_denies_credentials_without_app_data(self):
+        _, _, outcome = self.turn({'turns': [simple_turn()]})
+        self.assertEqual(outcome['status'], 'completed', outcome)
+        args = self.main_launches()[0]['launch']
+        denied = json.loads(args[args.index('--settings') + 1])['sandbox']['filesystem']['denyRead']
+        self.assertIn(os.path.join(os.environ['HOME'], '.ssh'), denied)
+
+    def test_scratch_tmp_never_follows_agent_links_out_of_the_clone(self):
+        # An agent can make symlinks in its clone (the command sandbox allows it, .git/info included), so the
+        # backend's own scratch writes must stay inside the clone.
+        outside = self.root / 'outside'
+
+        def clone(name):
+            workspace = self.root / name
+            (workspace / '.git' / 'info').mkdir(parents=True)
+            outside.mkdir(exist_ok=True)
+            return workspace
+
+        cases = {}
+        workspace = clone('exclude-link')
+        (outside / 'target').write_text('keep\n')
+        (workspace / '.git' / 'info' / 'exclude').symlink_to(outside / 'target')
+        cases['exclude is a symlink'] = workspace
+        workspace = clone('info-link')
+        (workspace / '.git' / 'info').rmdir()
+        (workspace / '.git' / 'info').symlink_to(outside, target_is_directory=True)
+        cases['info is a symlink'] = workspace
+        workspace = clone('git-link')
+        os.rename(str(workspace / '.git'), str(self.root / 'moved-git'))
+        (workspace / '.git').symlink_to(outside, target_is_directory=True)
+        cases['.git is a symlink'] = workspace
+        workspace = clone('gitfile')
+        os.rename(str(workspace / '.git'), str(self.root / 'moved-git-2'))
+        (workspace / '.git').write_text('gitdir: %s\n' % outside)
+        cases['.git is a gitfile'] = workspace
+        workspace = clone('commondir')
+        (workspace / '.git' / 'commondir').write_text(str(outside) + '\n')
+        cases['.git has a commondir'] = workspace
+        workspace = clone('scratch-link')
+        (workspace / '.interspace').symlink_to(outside, target_is_directory=True)
+        cases['.interspace is a symlink'] = workspace
+        workspace = clone('tmp-link')
+        (workspace / '.interspace').mkdir()
+        (workspace / '.interspace' / 'tmp').symlink_to(outside, target_is_directory=True)
+        cases['.interspace/tmp is a symlink'] = workspace
+        workspace = clone('exclude-fifo')
+        os.mkfifo(str(workspace / '.git' / 'info' / 'exclude'))  # Opening it must not hang the backend.
+        cases['exclude is a FIFO'] = workspace
+        for label, workspace in cases.items():
+            with self.subTest(label):
+                with self.assertRaises(OSError):
+                    claude.scratch_tmp(str(workspace))
+                self.assertEqual(sorted(p.name for p in outside.iterdir()), ['target'])
+                self.assertEqual((outside / 'target').read_text(), 'keep\n')
+
+    def test_unsafe_scratch_folder_fails_the_turn_before_launch(self):
+        ctx = FakeContext(self.root)
+        outside = self.root / 'outside'
+        outside.mkdir()
+        os.symlink(str(outside), os.path.join(ctx.primary_workspace, '.interspace'))
+        _, _, outcome = self.turn({'turns': [simple_turn()]}, ctx=ctx)
+        self.assertEqual(outcome['status'], 'failed')
+        self.assertEqual(outcome['error']['code'], 'workspace_failed')
+        self.assertEqual(self.main_launches(), [])
+        self.assertEqual(list(outside.iterdir()), [])
+
     def test_cli_reports_manual_mode_as_default(self):
         _, _, outcome = self.turn({'turns': [simple_turn()]})
         self.assertEqual(outcome['status'], 'completed', outcome)  # The fake reports "default", like 2.1.322.
@@ -319,6 +417,20 @@ class LaunchTests(ClaudeCase):
         session.close()
         self.assertTrue(self.bridges[0].stopped)
         self.assertFalse(os.path.exists(path))
+
+    def test_bridge_files_live_in_denied_app_data(self):
+        data = self.root / 'data'
+        data.mkdir()
+        app = mock.Mock(storage=str(data))
+        session, ctx, outcome = self.turn({'turns': [simple_turn()]}, bridge=True, app=app)
+        self.assertEqual(outcome['status'], 'completed', outcome)
+        args = self.main_launches()[0]['launch']
+        run = os.path.realpath(str(data / 'run'))
+        self.assertTrue(args[args.index('--mcp-config') + 1].startswith(run + os.sep))
+        self.assertIn(run, json.loads(args[args.index('--settings') + 1])['sandbox']['filesystem']['denyRead'])
+        bridge = claude.ClaudeRuntime(app).bridge_factory([{'name': 'example_get', 'effect': 'read'}])
+        self.addCleanup(bridge.stop)
+        self.assertTrue(bridge.path.startswith(run + os.sep), bridge.path)
 
     def test_no_tools_no_bridge(self):
         _, _, outcome = self.turn({'turns': [simple_turn()]})
@@ -574,6 +686,21 @@ class PermissionTests(ClaudeCase):
         self.assertEqual(calls[0]['category'], 'file_write')
         self.assertEqual(calls[3]['category'], 'command')
         self.assertEqual([d['status'] for k, d, _ in ctx.events if k == 'tool_result'], ['denied'] * 11)
+
+    def test_read_only_allowlist_refuses_commands_that_write_or_run_programs(self):
+        # The command sandbox lets commands write the workspace, so these would let a read role change files.
+        for command in ('uniq notes.txt out.txt', 'uniq -c a b', 'sort --compress-program=sh a.txt',
+                        'sort --compress=sh a.txt', 'sort -uo out.txt a.txt', 'sort --out=x a.txt',
+                        'git grep -Osh todo', 'git grep -O sh todo', 'git grep --open-files-in-pager=sh todo',
+                        'git grep --open=sh todo', 'git diff --outp=x', 'git log --ext-d', 'file -C -m magic',
+                        'file --compile -m magic', 'tail -fn5 log.txt', 'tree -fo out.txt', 'rg --pr=sh x'):
+            with self.subTest(command=command):
+                self.assertFalse(claude.read_only_command({'command': command}))
+        for command in ('uniq notes.txt', 'uniq -c notes.txt', 'sort -u a.txt', 'git grep -n todo', 'file a.py',
+                        'tail -n 5 log.txt', 'git log --oneline -5', 'find . -name "*.py"', 'ls -la src',
+                        'git diff --stat', 'sort -k2 -t, a.csv'):
+            with self.subTest(command=command):
+                self.assertTrue(claude.read_only_command({'command': command}))
 
     def test_read_only_commands_go_through_authorize(self):
         steps = [INIT, self.ask('Bash', {'command': 'ls -la src'}, 'toolu_1'),
