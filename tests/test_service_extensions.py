@@ -51,5 +51,22 @@ class ExtensionMethodTests(unittest.TestCase):
                 service.extension_methods(('fake_extension',))
 
 
+class BridgeRoutingTests(unittest.TestCase):
+    def test_bridge_messages_go_to_the_bridge_and_never_to_handlers(self):
+        with tempfile.TemporaryDirectory() as folder:
+            app = service.Application(folder, provider=FakeAuth())
+            try:
+                received = []
+                app.bridge = types.SimpleNamespace(deliver=received.append)
+                router = service.Router(app, lambda message: None)
+                for kind in service.BRIDGE_TYPES:
+                    self.assertEqual(router.route('{"type": "%s", "id": "kc-1"}' % kind), 'bridge')
+                self.assertEqual([m['type'] for m in received], list(service.BRIDGE_TYPES))
+                app.bridge = None
+                self.assertEqual(router.route('{"type": "keychain_reply", "id": "kc-2"}'), 'bridge')
+            finally:
+                app.scheduler.shutdown(timeout_s=5)
+
+
 if __name__ == '__main__':
     unittest.main()

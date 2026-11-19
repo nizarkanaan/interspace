@@ -28,7 +28,10 @@ APP_METHODS = ('state', 'connection', 'cancel', 'sign_in', 'switch_project', 'se
                'select_project', 'update_project')
 # Wave 1 streams register backend methods here instead of editing this file. Each module may define
 # METHODS = {'method_name': handler(app, params)}; handlers run on the agent pool and must return JSON-safe data.
-EXTENSIONS = ('providers_api', 'orchestrator', 'worktree_merge')
+EXTENSIONS = ('providers_api', 'orchestrator', 'worktree_merge', 'research_api', 'outputs_api')
+# Messages only the Swift shell sends to the backend (research/credentials.md). They never come from the WebView:
+# Swift drops these types from the UI. They go to the optional `bridge` module, never to the request handlers.
+BRIDGE_TYPES = ('bridge_hello', 'keychain_reply', 'save_panel_reply')
 STATE_PUBLISH_INTERVAL_S = 0.25  # At most 4 coarse state updates per second (scheduler.md).
 
 
@@ -175,6 +178,11 @@ class Router:
         except ValueError:
             message = None
         if isinstance(message, dict):
+            if message.get('type') in BRIDGE_TYPES:
+                bridge = getattr(self.app, 'bridge', None)
+                if bridge is not None:
+                    bridge.deliver(message)
+                return 'bridge'
             method = message.get('method')
             if method in AGENT_METHODS or method in getattr(self.app, 'extensions', {}):
                 self.agents.submit(self._answer, message)
@@ -215,6 +223,8 @@ class Application:
         self.provider = provider or CodexAuth(codex_home=self.storage / 'codex-home')
         self.extensions = extension_methods()
         self.emit = emit or (lambda message: None)
+        bridge_module = optional_module('bridge')  # Research Wave 1A: Keychain and save-panel channel to Swift.
+        self.bridge = bridge_module.Bridge(self.emit) if bridge_module is not None else None
         self.lock = threading.RLock()
         self._publish_guard = threading.Lock()
         self._last_publish = 0.0
