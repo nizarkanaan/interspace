@@ -7,8 +7,8 @@ import {mkdtempSync,rmSync,readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 
-// TODO(2A merge): 'Claude' once agent_create without a provider uses routing.orchestrator (see the harness).
-const ORCHESTRATOR_TITLE='Codex';
+// The Orchestrator's provider comes from routing.orchestrator (the harness routes it to Claude).
+const ORCHESTRATOR_TITLE='Claude';
 
 export default async function check(page,url){
  const errors=[];page.on('pageerror',e=>errors.push(e.message));

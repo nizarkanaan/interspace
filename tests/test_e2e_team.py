@@ -190,6 +190,10 @@ class EndToEndTeamTests(unittest.TestCase):
         with self.app.lock:
             children = {t['role']: t for t in self.app.store.agent_tasks() if t.get('parent_task_id') == task_id}
         implementer, reviewer = children['implementer'], children['reviewer']
+        rows = {row['id']: row for row in self.app.public()['tasks']}
+        self.assertEqual((rows[task_id]['role'], rows[task_id]['parent_task_id']), ('orchestrator', None))
+        self.assertEqual({rows[c['id']]['parent_task_id'] for c in children.values()}, {task_id})
+        self.assertEqual(rows[implementer['id']]['role'], 'implementer')
         self.assertEqual((implementer['provider'], implementer['access'], self.state(implementer['id'])),
                          ('claude', 'write', 'idle'))
         self.assertEqual((reviewer['provider'], reviewer['access'], self.state(reviewer['id'])), ('codex', 'read', 'idle'))

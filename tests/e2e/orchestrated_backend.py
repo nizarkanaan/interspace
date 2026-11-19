@@ -6,9 +6,7 @@ Run by tests/e2e-ui.mjs as `python3 orchestrated_backend.py <scratch root>`; the
 disposable. A stdin line `#release` lets the waiting subagents finish (the browser first checks that both are
 running at once); every other line goes to the router.
 
-TODO(2A merge): routing.orchestrator is Codex here because, before 2A, agent_create without a provider falls back
-to tasks.DEFAULT_PROVIDER ('codex'). Once 2A fills an omitted provider from routing (role 'orchestrator'), set
-ORCHESTRATOR to 'claude' and the browser suite's ORCHESTRATOR_TITLE to 'Claude' to cover that path.
+The Orchestrator runs on Claude through routing.orchestrator: agent_create omits the provider, as the UI does.
 """
 import json
 from pathlib import Path
@@ -23,7 +21,7 @@ import service  # noqa: E402  (first: it puts pilot/ on the path for projects)
 import projects  # noqa: E402
 from agent_fakes import FakeRuntime  # noqa: E402
 
-ORCHESTRATOR = 'codex'
+ORCHESTRATOR = 'claude'
 ROLES = ('researcher', 'implementer', 'reviewer', 'tester', 'writer')
 ROUTING = {'v': 1, 'orchestrator': {'provider': ORCHESTRATOR, 'model': None},
            'roles': {'researcher': {'provider': 'codex', 'model': None},

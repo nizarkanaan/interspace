@@ -73,6 +73,8 @@ def providers_list(app, params):
         'routing': {'v': 1, 'orchestrator': {'provider': 'codex', 'model': None},
                     'roles': {r: {'provider': 'claude', 'model': None} for r in ('researcher', 'implementer', 'reviewer', 'tester', 'writer')}}}
 app.extensions['providers_list'] = providers_list
+# agent_create fills an omitted provider from the saved routing, so save the same routing the fake reports.
+app.state['routing'] = providers_list(app, {})['routing']
 router = service.Router(app, emit)
 for line in sys.stdin:
     router.route(line)

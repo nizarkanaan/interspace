@@ -318,7 +318,8 @@ class Application:
                 tasks.validate(task,identity)
                 row=dict(id=identity,title=task['title'],mode=task.get('mode','review'))
                 if row['mode']=='agent':
-                    row.update(status=task['agent'].get('state') or 'draft',provider=tasks.provider(task),model=task.get('model'))
+                    row.update(status=task['agent'].get('state') or 'draft',provider=tasks.provider(task),model=task.get('model'),
+                               role=task.get('role'),parent_task_id=task.get('parent_task_id'))
                 else:
                     row.update(status='read_only',read_only=True)
                 result.append(row)
