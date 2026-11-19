@@ -628,6 +628,21 @@ class PermissionTests(ClaudeCase):
         self.assertEqual(calls[3]['category'], 'command')
         self.assertEqual([d['status'] for k, d, _ in ctx.events if k == 'tool_result'], ['denied'] * 11)
 
+    def test_read_only_allowlist_refuses_commands_that_write_or_run_programs(self):
+        # The command sandbox lets commands write the workspace, so these would let a read role change files.
+        for command in ('uniq notes.txt out.txt', 'uniq -c a b', 'sort --compress-program=sh a.txt',
+                        'sort --compress=sh a.txt', 'sort -uo out.txt a.txt', 'sort --out=x a.txt',
+                        'git grep -Osh todo', 'git grep -O sh todo', 'git grep --open-files-in-pager=sh todo',
+                        'git grep --open=sh todo', 'git diff --outp=x', 'git log --ext-d', 'file -C -m magic',
+                        'file --compile -m magic', 'tail -fn5 log.txt', 'tree -fo out.txt', 'rg --pr=sh x'):
+            with self.subTest(command=command):
+                self.assertFalse(claude.read_only_command({'command': command}))
+        for command in ('uniq notes.txt', 'uniq -c notes.txt', 'sort -u a.txt', 'git grep -n todo', 'file a.py',
+                        'tail -n 5 log.txt', 'git log --oneline -5', 'find . -name "*.py"', 'ls -la src',
+                        'git diff --stat', 'sort -k2 -t, a.csv'):
+            with self.subTest(command=command):
+                self.assertTrue(claude.read_only_command({'command': command}))
+
     def test_read_only_commands_go_through_authorize(self):
         steps = [INIT, self.ask('Bash', {'command': 'ls -la src'}, 'toolu_1'),
                  self.ask('Bash', {'command': 'git log --oneline -5'}, 'toolu_2'),

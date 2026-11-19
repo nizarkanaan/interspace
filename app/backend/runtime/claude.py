@@ -93,11 +93,13 @@ READ_ONLY_COMMANDS = {
     'realpath': (), 'echo': (),
     'tail': ('-f', '-F', '--follow'),
     'find': ('-exec', '-execdir', '-ok', '-okdir', '-delete', '-fprint', '-fprint0', '-fprintf', '-fls'),
-    'sort': ('-o', '--output'),
+    'sort': ('-o', '--output', '--compress-program'),
     'rg': ('--pre',),
     'tree': ('-o',),
-    'git': ('--output', '--ext-diff', '--textconv', '--exec'),
+    'file': ('-C', '--compile'),
+    'git': ('--output', '--ext-diff', '--textconv', '--exec', '-O', '--open-files-in-pager'),
 }
+UNIQ_VALUE_OPTIONS = ('-f', '-s', '--skip-fields', '--skip-chars')  # Their next argument is a number, not a file.
 READ_ONLY_GIT = ('status', 'log', 'diff', 'show', 'grep', 'ls-files', 'ls-tree', 'blame', 'rev-parse', 'describe',
                  'shortlog', 'cat-file')
 
@@ -244,9 +246,35 @@ def read_only_command(tool_input):
     if normal['opaque'] or not argv or normal['git_config'] or argv[0] not in READ_ONLY_COMMANDS:
         return False
     refused = READ_ONLY_COMMANDS[argv[0]]
-    if any(arg == bad or arg.startswith(bad + '=') for arg in argv[1:] for bad in refused):
+    if any(_refused_arg(arg, bad) for arg in argv[1:] for bad in refused):
         return False
+    if argv[0] == 'uniq' and len(_uniq_operands(argv[1:])) > 1:
+        return False  # `uniq input output` writes the output file.
     return argv[0] != 'git' or (len(argv) > 1 and argv[1] in READ_ONLY_GIT)
+
+
+def _refused_arg(arg, bad):
+    """True when `arg` may be the refused option `bad`, however it is spelled. Refusing too much is safe."""
+    name = arg.split('=', 1)[0]
+    if bad.startswith('--'):
+        # getopt_long and git accept any unambiguous prefix of a long option (`--compress` for --compress-program).
+        return name.startswith('--') and len(name) > 2 and (name.startswith(bad) or bad.startswith(name))
+    if len(bad) == 2:
+        # A short option, alone, with its value attached (`-Osh`) or bundled with others (`-uo out`).
+        return arg.startswith('-') and not arg.startswith('--') and bad[1] in arg[1:]
+    return name == bad or name.startswith(bad)  # find's one-dash words: -fprint, -fprint0.
+
+
+def _uniq_operands(args):
+    operands, skip = [], False
+    for arg in args:
+        if skip:
+            skip = False
+        elif arg in UNIQ_VALUE_OPTIONS:
+            skip = True
+        elif arg == '-' or not arg.startswith('-'):
+            operands.append(arg)
+    return operands
 
 
 def _bounded(value, limit):
