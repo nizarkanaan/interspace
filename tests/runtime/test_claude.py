@@ -87,6 +87,8 @@ class FakeContext:
     def authorize(self, request, call_id):
         with self.lock:
             self.authorized.append((request, call_id))
+        if getattr(self, 'on_authorize', None):
+            self.on_authorize(request)
         decision = self.decisions.get(request['category'], 'allow')
         return {'decision': decision, 'rule': 'fake.' + decision, 'reason': '', 'scope_version': 1,
                 'scope_digest': 'sha256:x'}
@@ -96,9 +98,9 @@ class FakeContext:
         with self.lock:
             self.events.append((kind, data, item_id))
 
-    def call_tool(self, name, arguments, call_id):
+    def orchestrate(self, name, arguments):
         with self.lock:
-            self.tool_calls.append((name, arguments, call_id))
+            self.tool_calls.append((name, arguments))
         return {'ok': True, 'result': {'title': 'Example item'}}
 
     def report_usage(self, usage):
@@ -111,12 +113,14 @@ class FakeContext:
 class FakeBridge:
     """Stands in for 2A's `mcp_bridge.start(tools)`: a token-checked unix socket the fake CLI calls.
 
-    Like the real bridge, it runs each call through the bound turn's `ctx.call_tool` with its own call_id.
+    Like the real bridge, it runs each call through the bound target's `orchestrate(name, arguments)`.
     """
     TOKEN = 'tok-' + 'f' * 32
+    made = 0
 
     def __init__(self, root, tools):
-        self.path = str(root / 'bridge.sock')
+        FakeBridge.made += 1
+        self.path = str(root / ('bridge-%d.sock' % FakeBridge.made))
         self.tools = tools
         self.ctx = None
         self.bound = []
@@ -145,7 +149,7 @@ class FakeBridge:
             if call.get('token') != self.TOKEN or self.ctx is None:
                 reply = {'ok': False, 'error': {'code': 'invalid_request', 'message': 'not bound'}}
             else:
-                reply = self.ctx.call_tool(call['name'], call['arguments'], 'mcp_' + 'a' * 32)
+                reply = self.ctx.orchestrate(call['name'], call['arguments'])
             conn.sendall((json.dumps(reply) + '\n').encode())
             conn.close()
 
@@ -181,7 +185,8 @@ class ClaudeCase(unittest.TestCase):
             made = FakeBridge(self.root, tools)
             self.bridges.append(made)
             return made
-        options['bridge_factory'] = factory
+        if not options.pop('real_bridge', False):
+            options['bridge_factory'] = factory
         options.setdefault('interrupt_grace_s', 1.0)
         app = options.pop('app', object())
         return claude.ClaudeRuntime(app, binary=str(binary), **options)
@@ -244,7 +249,10 @@ class LaunchTests(ClaudeCase):
         for bad in ('dangerously', 'bypassPermissions', '--bare', 'dontAsk', '--resume', '--continue',
                     '--fallback-model', 'setup-token'):
             self.assertNotIn(bad, joined)
-        self.assertNotIn('--mcp-config', args)  # No bridge was given.
+        for tool in ('Edit', 'Write', 'NotebookEdit'):  # Never offered: Interspace's file tools replace them.
+            self.assertNotIn(tool, pairs['--tools'].split(','))
+            self.assertNotIn(tool, settings['permissions']['ask'])
+        self.assertIn('--mcp-config', args)  # Write sessions always get the bridge, for the file tools.
         self.assertEqual(launch['cwd'], ctx.primary_workspace)
         self.assertNotEqual(launch['pgid'], os.getpgid(0))  # Own process group.
         for entry in self.launches():
@@ -411,8 +419,8 @@ class LaunchTests(ClaudeCase):
         self.assertEqual(server['type'], 'stdio')
         self.assertEqual(server['args'], ['-I', '/fake/mcp_bridge.py'])
         self.assertEqual(server['env']['INTERSPACE_MCP_TOKEN'], FakeBridge.TOKEN)
-        self.assertEqual(self.bridges[0].tools, ctx.tool_list)
-        self.assertEqual(self.bridges[0].bound, [ctx])
+        self.assertEqual(self.bridges[0].tools, list(claude.FILE_TOOLS) + ctx.tool_list)
+        self.assertEqual([target.ctx for target in self.bridges[0].bound], [ctx])
         self.assertIsNone(self.bridges[0].ctx)  # Unbound after the turn.
         session.close()
         self.assertTrue(self.bridges[0].stopped)
@@ -432,11 +440,25 @@ class LaunchTests(ClaudeCase):
         self.addCleanup(bridge.stop)
         self.assertTrue(bridge.path.startswith(run + os.sep), bridge.path)
 
-    def test_no_tools_no_bridge(self):
-        _, _, outcome = self.turn({'turns': [simple_turn()]})
+    def test_read_session_without_tools_has_no_bridge(self):
+        ctx = FakeContext(self.root)
+        ctx.access = 'read'
+        _, _, outcome = self.turn({'turns': [simple_turn()]}, ctx=ctx)
         self.assertEqual(outcome['status'], 'completed', outcome)
         self.assertEqual(self.bridges, [])
+        self.assertNotIn('--mcp-config', self.main_launches()[0]['launch'])
 
+    def test_read_session_never_gets_file_tools(self):
+        ctx = FakeContext(self.root)
+        ctx.access = 'read'
+        _, _, outcome = self.turn({'turns': [simple_turn()]}, ctx=ctx, bridge=True)
+        self.assertEqual(outcome['status'], 'completed', outcome)
+        self.assertEqual([t['name'] for t in self.bridges[0].tools], ['example_get'])
+
+    def test_write_session_bridge_serves_the_file_tools(self):
+        _, ctx, outcome = self.turn({'turns': [simple_turn()]})
+        self.assertEqual(outcome['status'], 'completed', outcome)
+        self.assertEqual([t['name'] for t in self.bridges[0].tools], ['write_file', 'edit_file', 'edit_notebook'])
 
 class AuthTests(ClaudeCase):
     def test_only_claude_ai_subscription_runs(self):
@@ -664,10 +686,7 @@ class PermissionTests(ClaudeCase):
     def test_read_access_denies_writes_before_authorize(self):
         ctx = FakeContext(self.root)
         ctx.access = 'read'
-        steps = [INIT, self.ask('Edit', {'file_path': 'a.py', 'old_string': 'a', 'new_string': 'b'}, 'toolu_1'),
-                 self.ask('Write', {'file_path': 'b.py', 'content': 'x'}, 'toolu_2'),
-                 self.ask('NotebookEdit', {'notebook_path': 'n.ipynb', 'new_source': 'x'}, 'toolu_3'),
-                 self.ask('Bash', {'command': 'rm -rf build'}, 'toolu_4'),
+        steps = [INIT, self.ask('Bash', {'command': 'rm -rf build'}, 'toolu_4'),
                  self.ask('Bash', {'command': 'ls | sh'}, 'toolu_5'),
                  self.ask('Bash', {'command': 'find . -delete'}, 'toolu_6'),
                  self.ask('Bash', {'command': 'git -c core.pager=x log'}, 'toolu_7'),
@@ -680,12 +699,11 @@ class PermissionTests(ClaudeCase):
         self.assertEqual(outcome['status'], 'completed', outcome)
         self.assertEqual(ctx.authorized, [])
         self.assertTrue(all(a['behavior'] == 'deny' for a in self.answers()))
-        self.assertEqual(len(self.answers()), 11)
+        self.assertEqual(len(self.answers()), 8)
         calls = [d for k, d, _ in ctx.events if k == 'tool_call']
         self.assertEqual({c['decision']['rule'] for c in calls}, {'provider.claude_readonly'})
-        self.assertEqual(calls[0]['category'], 'file_write')
-        self.assertEqual(calls[3]['category'], 'command')
-        self.assertEqual([d['status'] for k, d, _ in ctx.events if k == 'tool_result'], ['denied'] * 11)
+        self.assertEqual({c['category'] for c in calls}, {'command'})
+        self.assertEqual([d['status'] for k, d, _ in ctx.events if k == 'tool_result'], ['denied'] * 8)
 
     def test_read_only_allowlist_refuses_commands_that_write_or_run_programs(self):
         # The command sandbox lets commands write the workspace, so these would let a read role change files.
@@ -723,7 +741,7 @@ class PermissionTests(ClaudeCase):
         original = claude.READ_ONLY
         claude.READ_ONLY = True
         self.addCleanup(setattr, claude, 'READ_ONLY', original)
-        steps = [INIT, self.ask('Edit', {'file_path': 'a.py', 'old_string': 'a', 'new_string': 'b'}), result()]
+        steps = [INIT, self.ask('Bash', {'command': 'rm a.py'}), result()]
         _, ctx, outcome = self.turn({'turns': [steps]})  # The context asks for write access.
         self.assertEqual(outcome['status'], 'completed', outcome)
         self.assertEqual(ctx.authorized, [])
@@ -731,21 +749,29 @@ class PermissionTests(ClaudeCase):
         prompt = dict(zip(self.main_launches()[0]['launch'], self.main_launches()[0]['launch'][1:]))['--system-prompt']
         self.assertIn('read-only', prompt)
 
+    def file_tool(self, name, tool_input, tool_use_id='toolu_1', **extra):
+        return self.ask('mcp__interspace__' + name, tool_input, tool_use_id, mcp=True, **extra)
+
     def test_write_mode_is_the_default(self):
         ctx = FakeContext(self.root)
         self.assertFalse(hasattr(ctx, 'access'))  # Run contexts before 1B's `access` field mean write.
-        edit = {'file_path': 'src/a.py', 'old_string': 'a', 'new_string': 'b'}
-        normalised = dict(edit, replace_all=False)
-        steps = [INIT, self.ask('Edit', edit, 'toolu_1', request_input=normalised),
-                 self.ask('Write', {'file_path': os.path.join(ctx.workspaces['p1'], 'new', 'deep', 'b.py'),
-                                    'content': 'x'}, 'toolu_2'),
-                 self.ask('NotebookEdit', {'notebook_path': 'n.ipynb', 'new_source': 'x'}, 'toolu_3'),
-                 self.ask('Write', {'file_path': os.path.join(ctx.workspaces['p2'], 'c.txt'), 'content': 'y'}, 'toolu_4'),
+        ws1, ws2 = ctx.workspaces['p1'], ctx.workspaces['p2']
+        os.makedirs(os.path.join(ws1, 'src'))
+        Path(ws1, 'src', 'a.py').write_text('a = 1\n')
+        Path(ws1, 'n.ipynb').write_text(json.dumps({'cells': [{'id': 'c1', 'cell_type': 'markdown', 'source': 'x',
+                                                               'metadata': {}}], 'metadata': {}, 'nbformat': 4,
+                                                    'nbformat_minor': 5}))
+        steps = [INIT, self.file_tool('edit_file', {'file_path': 'src/a.py', 'old_string': 'a = 1',
+                                                    'new_string': 'a = 2'}, 'toolu_1'),
+                 self.file_tool('write_file', {'file_path': os.path.join(ws1, 'new', 'deep', 'b.py'),
+                                               'content': 'x\n'}, 'toolu_2'),
+                 self.file_tool('edit_notebook', {'notebook_path': 'n.ipynb', 'cell_id': 'c1', 'new_source': 'y'},
+                                'toolu_3'),
+                 self.file_tool('write_file', {'file_path': os.path.join(ws2, 'c.txt'), 'content': 'y'}, 'toolu_4'),
                  self.ask('Bash', {'command': 'echo hi > out.txt'}, 'toolu_5'),
                  result()]
-        _, ctx, outcome = self.turn({'turns': [steps]}, ctx=ctx)
+        _, ctx, outcome = self.turn({'turns': [steps]}, ctx=ctx, real_bridge=True)
         self.assertEqual(outcome['status'], 'completed', outcome)
-        ws1, ws2 = ctx.workspaces['p1'], ctx.workspaces['p2']
         self.assertEqual([r for r, _ in ctx.authorized], [
             {'category': 'file_write', 'project_id': 'p1', 'paths': [os.path.join(ws1, 'src', 'a.py')]},
             {'category': 'file_write', 'project_id': 'p1', 'paths': [os.path.join(ws1, 'new', 'deep', 'b.py')]},
@@ -753,13 +779,130 @@ class PermissionTests(ClaudeCase):
             {'category': 'file_write', 'project_id': 'p2', 'paths': [os.path.join(ws2, 'c.txt')]},
             {'category': 'command', 'argv': None, 'command': 'echo hi > out.txt', 'cwd': '.', 'sandbox': 'workspace',
              'network': False, 'project_id': 'p1'}])
-        answers = self.answers()
-        self.assertTrue(all(a['behavior'] == 'allow' for a in answers))
-        # The exact input the CLI asked about is echoed back, never the model's tool_use input.
-        self.assertEqual(answers[0]['updatedInput'], normalised)
+        self.assertTrue(all(a['behavior'] == 'allow' for a in self.answers()))
+        self.assertEqual(Path(ws1, 'src', 'a.py').read_text(), 'a = 2\n')
+        self.assertEqual(Path(ws1, 'new', 'deep', 'b.py').read_text(), 'x\n')
+        self.assertEqual(json.loads(Path(ws1, 'n.ipynb').read_text())['cells'][0]['source'], 'y')
+        self.assertEqual(Path(ws2, 'c.txt').read_text(), 'y')
+        # Each change: its tool_call card, a per-call diff, then its result; the CLI's own result is not repeated.
+        edit = [(k, d) for k, d, item in ctx.events if item == 'toolu_1']
+        self.assertEqual([k for k, _ in edit], ['tool_call', 'diff', 'tool_result'])
+        self.assertEqual((edit[0][1]['tool'], edit[0][1]['category']), ('edit_file', 'file_write'))
+        diff = edit[1][1]
+        self.assertEqual(diff['files'], [{'path': 'src/a.py', 'change': 'modify', 'old_path': None, 'additions': 1,
+                                          'deletions': 1, 'binary': False}])
+        self.assertIn('-a = 1\n+a = 2\n', diff['patch'])
+        self.assertEqual(diff['workspace']['project_id'], 'p1')
+        self.assertEqual(edit[2][1]['status'], 'ok')
+        created = [d for k, d, item in ctx.events if item == 'toolu_4' and k == 'diff'][0]
+        self.assertEqual((created['files'][0]['path'], created['files'][0]['change'], created['workspace']['project_id']),
+                         ('c.txt', 'add', 'p2'))
+        replies = [e['mcp_reply'] for e in self.entries() if 'mcp_reply' in e]
+        self.assertEqual([r.get('isError') for r in replies], [False] * 4)
         prompt = dict(zip(self.main_launches()[0]['launch'], self.main_launches()[0]['launch'][1:]))['--system-prompt']
-        self.assertIn('edit files', prompt)
+        for name in ('write_file', 'edit_file', 'edit_notebook'):
+            self.assertIn(name, prompt)
         self.assertNotIn('read-only', prompt)
+
+    def test_a_failed_file_change_reports_an_error(self):
+        steps = [INIT, self.file_tool('edit_file', {'file_path': 'missing.py', 'old_string': 'a', 'new_string': 'b'}),
+                 result()]
+        _, ctx, outcome = self.turn({'turns': [steps]}, real_bridge=True)
+        self.assertEqual(outcome['status'], 'completed', outcome)
+        self.assertEqual([(k, d.get('status')) for k, d, _ in ctx.events if k in ('tool_result', 'diff')],
+                         [('tool_result', 'error')])
+        reply = [e['mcp_reply'] for e in self.entries() if 'mcp_reply' in e][0]
+        self.assertTrue(reply['isError'])
+        self.assertIn('does not exist', reply['content'][0]['text'])
+
+    def test_the_bridge_runs_only_an_authorized_input_once(self):
+        ws1 = FakeContext(self.root).workspaces['p1']
+        # Never asked about: refused, and its result for an unanswered call then fails the turn.
+        steps = [INIT, {'mcp_call': {'name': 'write_file', 'arguments': {'file_path': 'a.txt', 'content': 'x'},
+                                     'tool_use_id': 'toolu_x'}}, result()]
+        _, _, outcome = self.turn({'turns': [steps]}, real_bridge=True)
+        self.assertEqual(outcome['error']['code'], 'runtime_protocol')
+        replies = [e['mcp_reply'] for e in self.entries() if 'mcp_reply' in e]
+        self.assertIn('did not approve', replies[0]['content'][0]['text'])
+        self.assertFalse(os.path.exists(os.path.join(ws1, 'a.txt')))
+        # Allowed once: a second call with the same input is refused.
+        self.log.unlink()
+        steps = [INIT, self.file_tool('write_file', {'file_path': 'b.txt', 'content': 'ok'}, 'toolu_2'),
+                 {'mcp_call': {'name': 'write_file', 'arguments': {'file_path': 'b.txt', 'content': 'ok'},
+                               'tool_use_id': 'toolu_2'}}, result()]
+        self.turn({'turns': [steps]}, real_bridge=True)
+        replies = [e['mcp_reply'] for e in self.entries() if 'mcp_reply' in e]
+        self.assertFalse(replies[0]['isError'])
+        self.assertIn('did not approve', replies[1]['content'][0]['text'])
+        self.assertEqual(Path(ws1, 'b.txt').read_text(), 'ok')
+
+    def test_a_folder_swapped_for_a_link_between_check_and_write_is_refused(self):
+        # The race Claude Code's own Write had: the path is checked when Interspace answers, and a running
+        # command turns a checked folder into a link before the write. Here the swap happens inside authorize.
+        ctx = FakeContext(self.root)
+        ws1 = ctx.workspaces['p1']
+        os.makedirs(os.path.join(ws1, 'sub'))
+        outside = self.root / 'outside'
+        outside.mkdir()
+
+        def swap(request):
+            os.rename(os.path.join(ws1, 'sub'), os.path.join(ws1, 'sub-real'))
+            os.symlink(str(outside), os.path.join(ws1, 'sub'))
+        ctx.on_authorize = swap
+        steps = [INIT, self.file_tool('write_file', {'file_path': 'sub/x.plist', 'content': 'evil'}), result()]
+        _, ctx, outcome = self.turn({'turns': [steps]}, ctx=ctx, real_bridge=True)
+        self.assertEqual(outcome['status'], 'completed', outcome)
+        self.assertEqual(ctx.authorized[0][0]['paths'], [os.path.join(ws1, 'sub', 'x.plist')])
+        self.assertEqual(self.answers()[0]['behavior'], 'allow')
+        self.assertEqual(list(outside.iterdir()), [])
+        self.assertEqual(list(Path(ws1, 'sub-real').iterdir()), [])
+        self.assertEqual([d['status'] for k, d, _ in ctx.events if k == 'tool_result'], ['error'])
+        reply = [e['mcp_reply'] for e in self.entries() if 'mcp_reply' in e][0]
+        self.assertIn('links are not followed', reply['content'][0]['text'])
+
+    def test_links_inside_the_workspace_are_never_written_through(self):
+        ctx = FakeContext(self.root)
+        ws1 = ctx.workspaces['p1']
+        outside = self.root / 'outside'
+        outside.mkdir()
+        (outside / 'target.txt').write_text('keep')
+        os.symlink(str(outside), os.path.join(ws1, 'link'))
+        os.symlink(str(outside / 'target.txt'), os.path.join(ws1, 'file-link.txt'))
+        steps = [INIT, self.file_tool('write_file', {'file_path': 'link/x.txt', 'content': 'x'}, 'toolu_1'),
+                 self.file_tool('write_file', {'file_path': 'file-link.txt', 'content': 'x'}, 'toolu_2'),
+                 self.file_tool('edit_file', {'file_path': 'file-link.txt', 'old_string': 'keep', 'new_string': 'x'},
+                                'toolu_3'), result()]
+        _, ctx, outcome = self.turn({'turns': [steps]}, ctx=ctx, real_bridge=True)
+        self.assertEqual(outcome['status'], 'completed', outcome)
+        self.assertEqual(sorted(p.name for p in outside.iterdir()), ['target.txt'])
+        self.assertEqual((outside / 'target.txt').read_text(), 'keep')
+        self.assertEqual([d['status'] for k, d, _ in ctx.events if k == 'tool_result'], ['error'] * 3)
+
+    def test_background_commands_are_refused(self):
+        steps = [INIT, self.ask('Bash', {'command': 'make watch', 'run_in_background': True}), result()]
+        _, ctx, outcome = self.turn({'turns': [steps]})
+        self.assertEqual(outcome['status'], 'completed', outcome)
+        self.assertEqual(ctx.authorized, [])
+        self.assertEqual(self.answers()[0]['behavior'], 'deny')
+        self.assertIn('foreground', self.answers()[0]['message'])
+        self.assertEqual([d['decision']['rule'] for k, d, _ in ctx.events if k == 'tool_call'],
+                         ['provider.claude_background'])
+
+    def test_writes_wait_until_no_command_is_running(self):
+        ctx = FakeContext(self.root)
+        ws1 = ctx.workspaces['p1']
+        steps = [INIT, {'spawn': [sys.executable, '-c', 'import time; time.sleep(60)']},
+                 self.file_tool('write_file', {'file_path': 'a.txt', 'content': 'x'}, 'toolu_1'),
+                 {'kill_spawned': True},
+                 self.file_tool('write_file', {'file_path': 'a.txt', 'content': 'x'}, 'toolu_2'), result()]
+        _, ctx, outcome = self.turn({'turns': [steps]}, ctx=ctx, real_bridge=True)
+        self.assertEqual(outcome['status'], 'completed', outcome)
+        self.assertEqual([a['behavior'] for a in self.answers()], ['deny', 'allow'])
+        self.assertIn('still running', self.answers()[0]['message'])
+        calls = [d for k, d, _ in ctx.events if k == 'tool_call']
+        self.assertEqual(calls[0]['decision']['rule'], 'provider.claude_background')
+        self.assertEqual(len(ctx.authorized), 1)  # Only the second write reached the scope.
+        self.assertEqual(Path(ws1, 'a.txt').read_text(), 'x')
 
     def test_role_instructions_are_added_to_the_system_prompt(self):
         ctx = FakeContext(self.root)
@@ -773,11 +916,11 @@ class PermissionTests(ClaudeCase):
     def test_read_access_from_the_context_keeps_the_session_read_only(self):
         ctx = FakeContext(self.root)
         ctx.access = 'read'
-        steps = [INIT, self.ask('Edit', {'file_path': 'a.py', 'old_string': 'a', 'new_string': 'b'}, 'toolu_1'),
+        steps = [INIT, self.ask('Bash', {'command': 'rm a.py'}, 'toolu_1'),
                  self.ask('Bash', {'command': 'git status'}, 'toolu_2'), result()]
         _, ctx, outcome = self.turn({'turns': [steps]}, ctx=ctx)
         self.assertEqual(outcome['status'], 'completed', outcome)
-        # Only the read-only command reaches the scope; the edit is refused before it.
+        # Only the read-only command reaches the scope; the other is refused before it.
         self.assertEqual([r['category'] for r, _ in ctx.authorized], ['command'])
         self.assertEqual([d['decision']['rule'] for k, d, _ in ctx.events if k == 'tool_call'][0],
                          'provider.claude_readonly')
@@ -789,23 +932,22 @@ class PermissionTests(ClaudeCase):
         ws1 = ctx.workspaces['p1']
         outside = self.root / 'outside'
         outside.mkdir()
-        os.symlink(str(outside), os.path.join(ws1, 'link'))
-        os.symlink(str(outside / 'target.txt'), os.path.join(ws1, 'dangling.txt'))
         os.makedirs(os.path.join(ws1, '.git', 'info'))
-        bad = [str(outside / 'escaped.txt'), '../escaped.txt', 'src/../../escaped.txt', 'link/x.txt',
-               'dangling.txt', '.git/config', '.GIT/hooks/pre-commit', 'sub/.git/config', ws1, '/etc/hosts',
-               os.path.join(ws1, '.git', 'info', 'exclude')]
-        steps = [INIT] + [self.ask('Write', {'file_path': path, 'content': 'x'}, 'toolu_%d' % i)
-                          for i, path in enumerate(bad)] + [result()]
-        _, ctx, outcome = self.turn({'turns': [steps]}, ctx=ctx)
+        bad = [str(outside / 'escaped.txt'), '../escaped.txt', 'src/../../escaped.txt', '.git/config',
+               '.GIT/hooks/pre-commit', 'sub/.git/config', ws1, '/etc/hosts', os.path.join(ws1, '.git', 'info', 'exclude')]
+        steps = [INIT] + [self.file_tool('write_file', {'file_path': path, 'content': 'x'}, 'toolu_%d' % i)
+                          for i, path in enumerate(bad)]
+        steps += [self.file_tool('edit_notebook', {'notebook_path': '../n.ipynb', 'new_source': 'x'}, 'toolu_nb'),
+                  result()]
+        _, ctx, outcome = self.turn({'turns': [steps]}, ctx=ctx, real_bridge=True)
         self.assertEqual(outcome['status'], 'completed', outcome)
         self.assertEqual(ctx.authorized, [])
-        self.assertEqual(len(self.answers()), len(bad))
+        self.assertEqual(len(self.answers()), len(bad) + 1)
         self.assertTrue(all(a['behavior'] == 'deny' for a in self.answers()))
         self.assertIn('task workspace', self.answers()[0]['message'])
         calls = [d for k, d, _ in ctx.events if k == 'tool_call']
         self.assertEqual({c['decision']['rule'] for c in calls}, {'provider.claude_workspace'})
-        self.assertEqual([d['status'] for k, d, _ in ctx.events if k == 'tool_result'], ['denied'] * len(bad))
+        self.assertEqual([d['status'] for k, d, _ in ctx.events if k == 'tool_result'], ['denied'] * (len(bad) + 1))
         self.assertFalse((outside / 'escaped.txt').exists())
 
     def test_sandbox_escape_is_refused(self):
@@ -819,11 +961,12 @@ class PermissionTests(ClaudeCase):
 
     def test_policy_denial_of_a_write(self):
         ctx = FakeContext(self.root, decisions={'file_write': 'deny'})
-        steps = [INIT, self.ask('Write', {'file_path': 'a.txt', 'content': 'x'}), result()]
-        _, ctx, outcome = self.turn({'turns': [steps]}, ctx=ctx)
+        steps = [INIT, self.file_tool('write_file', {'file_path': 'a.txt', 'content': 'x'}), result()]
+        _, ctx, outcome = self.turn({'turns': [steps]}, ctx=ctx, real_bridge=True)
         self.assertEqual(outcome['status'], 'completed', outcome)
         self.assertEqual(len(ctx.authorized), 1)
         self.assertEqual(self.answers()[0]['behavior'], 'deny')
+        self.assertFalse(os.path.exists(os.path.join(ctx.workspaces['p1'], 'a.txt')))
 
     def test_access_change_restarts_the_process(self):
         ctx = FakeContext(self.root)
@@ -842,16 +985,16 @@ class PermissionTests(ClaudeCase):
         self.assertEqual(outcome['error']['code'], 'runtime_protocol')
         self.assertEqual(ctx.authorized, [])
 
-    def test_bridge_tool_runs_through_call_tool(self):
+    def test_bridge_tool_runs_through_orchestrate(self):
         steps = [INIT, self.ask('mcp__interspace__example_get', {'ref': 'item-1'}, 'toolu_7', no_result=True),
                  {'mcp_call': {'name': 'example_get', 'arguments': {'ref': 'item-1'}, 'tool_use_id': 'toolu_7'}},
                  assistant_text('ok'), result()]
         _, ctx, outcome = self.turn({'turns': [steps]}, bridge=True)
         self.assertEqual(outcome['status'], 'completed', outcome)
-        self.assertEqual(ctx.authorized, [])  # call_tool authorizes bridge calls itself.
-        self.assertEqual(ctx.tool_calls, [('example_get', {'ref': 'item-1'}, 'mcp_' + 'a' * 32)])
+        self.assertEqual(ctx.authorized, [])  # orchestrate authorizes bridge calls itself.
+        self.assertEqual(ctx.tool_calls, [('example_get', {'ref': 'item-1'})])
         self.assertEqual(self.answers()[0]['behavior'], 'allow')
-        self.assertEqual(ctx.kinds(), ['message'])  # RunContext.call_tool emits bridge call events.
+        self.assertEqual(ctx.kinds(), ['message'])  # RunContext.orchestrate emits bridge call events.
         replies = [e['mcp_reply'] for e in self.entries() if 'mcp_reply' in e]
         self.assertEqual(replies, [{'ok': True, 'result': {'title': 'Example item'}}])
 

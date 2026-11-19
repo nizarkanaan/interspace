@@ -27,6 +27,10 @@ Steps:
                            "$team_id" in arguments is replaced by the last team_id a call returned.
   {"ask": {..., "apply": {"path", "text"}}}  on allow, also write that file (relative to the working folder),
                            as the real CLI's Edit/Write would
+  {"ask": {..., "mcp": true}}  an Interspace bridge tool (tool_name mcp__interspace__<name>): on allow, call it
+                           on the bridge with the allowed input, as the real CLI does, and emit its result
+  {"spawn": [argv...]}     start a background child process (a command left running)
+  {"kill_spawned": true}   stop the children started with spawn
   {"touch": "<path>"}      create that file
   {"wait_file": "<path>"}  wait (up to 20 s, else exit 3) until that file exists
   {"control": <request>}   send a control_request and wait for its control_response
@@ -39,6 +43,7 @@ Steps:
 import json
 import os
 import socket
+import subprocess
 import sys
 import time
 
@@ -175,10 +180,11 @@ def substitute(value):
     return value
 
 
-def mcp_call(step):
+def mcp_call(step, literal=False):
     server = next(iter(mcp_servers().values()))
+    arguments = step['arguments'] if literal else substitute(step['arguments'])
     if 'FAKE_TOOLS' not in server['env']:
-        result = mcp_rpc(server, [('tools/call', {'name': step['name'], 'arguments': substitute(step['arguments'])})])[0]
+        result = mcp_rpc(server, [('tools/call', {'name': step['name'], 'arguments': arguments})])[0]
         log({'mcp_reply': result})
         text = result['content'][0]['text']
         try:
@@ -226,7 +232,10 @@ def run_step(step):
         if answer.get('behavior') == 'allow' and ask.get('apply'):
             with open(ask['apply']['path'], 'w') as handle:
                 handle.write(ask['apply']['text'])
-        if not ask.get('no_result'):
+        if ask.get('mcp') and answer.get('behavior') == 'allow':
+            mcp_call({'name': ask['tool_name'].split('__', 2)[2], 'arguments': answer['updatedInput'],
+                      'tool_use_id': ask['tool_use_id']}, literal=True)
+        elif not ask.get('no_result'):
             if answer.get('behavior') == 'allow':
                 tool_result(ask['tool_use_id'], ask.get('result', 'ok'), False)
             else:
@@ -245,6 +254,13 @@ def run_step(step):
                 time.sleep(1)
         out({'type': 'control_response', 'response': {'subtype': 'success', 'request_id': message['request_id']}})
         interrupted_result()
+    elif 'spawn' in step:
+        spawned.append(subprocess.Popen(step['spawn']))
+    elif 'kill_spawned' in step:
+        for child in spawned:
+            child.kill()
+            child.wait()
+        del spawned[:]
     elif 'touch' in step:
         open(step['touch'], 'a').close()
     elif 'wait_file' in step:
@@ -268,6 +284,7 @@ def run_step(step):
         sys.stdout.flush()
 
 
+spawned = []
 turns = scenario.get('turns', [])
 for choice in scenario.get('by_prompt', []):
     if choice['contains'] in (flag('--system-prompt') or ''):

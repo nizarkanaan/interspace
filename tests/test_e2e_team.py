@@ -115,14 +115,14 @@ class EndToEndTeamTests(unittest.TestCase):
             {'init': {}},
             {'touch': implementer_started},
             {'wait_file': reviewer_started},  # Both members must be running at once.
-            {'ask': {'tool_name': 'Edit', 'tool_use_id': 'toolu_edit',
-                     'input': {'file_path': 'main.py', 'old_string': 'print(1)', 'new_string': 'print(2)'},
-                     'apply': {'path': 'main.py', 'text': 'print(2)\n'}, 'result': 'Edited main.py'}},
+            # Interspace's own edit tool, served by the bridge (Claude Code's Edit is never offered).
+            {'ask': {'tool_name': 'mcp__interspace__edit_file', 'tool_use_id': 'toolu_edit', 'mcp': True,
+                     'input': {'file_path': 'main.py', 'old_string': 'print(1)', 'new_string': 'print(2)'}}},
             claude_text('Implemented: main.py now prints 2.'),
             claude_result(300, 40)]
         (self.root / 'claude.json').write_text(json.dumps({'by_prompt': [
             {'contains': 'You are the Orchestrator', 'turns': [orchestrator]},
-            {'contains': 'You can read, search and edit files', 'turns': [implementer]}]}))
+            {'contains': 'edit them with the Interspace tools', 'turns': [implementer]}]}))
         change = {'path': '$cwd/main.py', 'kind': {'type': 'update', 'move_path': None},
                   'diff': '@@ -1 +1 @@\n-print(1)\n+print(3)\n'}
         reviewer = [
@@ -206,7 +206,7 @@ class EndToEndTeamTests(unittest.TestCase):
         self.assertIn('read-only', orchestrator_prompt)
         self.assertIn('- reviewer: codex, model default', orchestrator_prompt)
         implementer_prompt = next(p for p in prompts if 'You are the Orchestrator' not in p)
-        self.assertIn('edit files', implementer_prompt)
+        self.assertIn('edit_file', implementer_prompt)
         # The reviewer ran Codex in the read-only sandbox, with read-only developer instructions.
         start = next(e['in']['params'] for e in self.logged(self.codex_log)
                      if 'in' in e and e['in'].get('method') == 'thread/start')
@@ -223,7 +223,7 @@ class EndToEndTeamTests(unittest.TestCase):
         self.assertEqual(self.git('show', branch + ':main.py'), 'print(2)\n')
         self.assertEqual((self.repo / 'main.py').read_text(), 'print(1)\n')
         self.assertEqual(self.git('rev-parse', '--abbrev-ref', 'HEAD').strip(), 'main')
-        edit = [e['data'] for e in self.events(implementer['id'], 'tool_call') if e['data']['tool'] == 'Edit']
+        edit = [e['data'] for e in self.events(implementer['id'], 'tool_call') if e['data']['tool'] == 'edit_file']
         self.assertEqual(edit[0]['decision']['decision'], 'allow')
 
         # The reviewer's write was refused by the read-only scope, and Codex was told to decline it.
