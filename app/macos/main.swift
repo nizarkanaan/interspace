@@ -1,4 +1,5 @@
 import AppKit
+import Security
 import WebKit
 
 /// Methods the WebView may send to the backend. Everything else is refused here.
@@ -10,7 +11,81 @@ let allowedMethods: Set<String> = [
     // Multi-provider extensions (docs/superpowers/specs/multi-provider): providers, teams, review and merge
     "providers_list", "provider_sign_in", "provider_sign_out", "provider_status", "routing_update", "team_answer",
     "review_summary", "review_merge", "review_branches",
+    // Research workspace (docs/superpowers/specs/research): sources settings and task outputs
+    "research_sources", "research_credential_set", "research_credential_delete", "research_test", "research_usage",
+    "task_outputs", "task_output_save",
 ]
+
+/// Lines only Swift and the backend exchange (research/credentials.md). They never reach or come from the WebView.
+let bridgeTypes: Set<String> = ["bridge_hello", "keychain", "keychain_reply", "save_panel", "save_panel_reply"]
+
+/// Research API keys and contact emails in the login keychain (research/credentials.md). Only this type calls
+/// Keychain APIs. One generic-password item per account: service `app.interspace.research`, this device only.
+enum ResearchKeychain {
+    static let service = "app.interspace.research"
+    static let accounts: [String: String] = ["semantic_scholar": "Semantic Scholar", "openalex": "OpenAlex",
+                                             "crossref_email": "Crossref email", "unpaywall_email": "Unpaywall email"]
+    static let maxSecretBytes = 64 * 1024
+
+    static func query(_ account: String) -> [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account,
+         kSecAttrSynchronizable as String: kCFBooleanFalse!]
+    }
+
+    static func failure(_ status: OSStatus) -> String {
+        switch status {
+        case errSecItemNotFound: return "not_found"
+        case errSecUserCanceled, errSecAuthFailed, errSecInteractionNotAllowed: return "denied"
+        default: return "unavailable"
+        }
+    }
+
+    static func reply(_ id: String, _ ok: Bool, error: String? = nil, secret: String? = nil) -> [String: Any] {
+        var message: [String: Any] = ["type": "keychain_reply", "id": id, "ok": ok]
+        if let error { message["error"] = error }
+        if let secret { message["secret"] = secret }
+        return message
+    }
+
+    /// Handles one `keychain` line and returns the reply. Secrets never leave this function except in the reply.
+    static func handle(_ message: [String: Any]) -> [String: Any]? {
+        guard let id = message["id"] as? String, id.hasPrefix("kc-"), id.count <= 64 else { return nil }
+        guard let op = message["op"] as? String, let account = message["account"] as? String, let title = accounts[account] else {
+            return reply(id, false, error: "denied")
+        }
+        switch op {
+        case "read":
+            var item = query(account)
+            item[kSecReturnData as String] = kCFBooleanTrue
+            item[kSecMatchLimit as String] = kSecMatchLimitOne
+            var result: CFTypeRef?
+            let status = SecItemCopyMatching(item as CFDictionary, &result)
+            guard status == errSecSuccess, let data = result as? Data, let secret = String(data: data, encoding: .utf8) else {
+                return reply(id, false, error: status == errSecSuccess ? "unavailable" : failure(status))
+            }
+            return reply(id, true, secret: secret)
+        case "write":
+            guard let secret = message["secret"] as? String, let data = secret.data(using: .utf8), data.count <= maxSecretBytes else {
+                return reply(id, false, error: "unavailable")
+            }
+            // Update first, so a replaced key is never briefly missing; add the item when there is none.
+            var status = SecItemUpdate(query(account) as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+            if status == errSecItemNotFound {
+                var item = query(account)
+                item[kSecValueData as String] = data
+                item[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+                item[kSecAttrLabel as String] = "Interspace: \(title)"
+                status = SecItemAdd(item as CFDictionary, nil)
+            }
+            return status == errSecSuccess ? reply(id, true) : reply(id, false, error: failure(status))
+        case "delete":
+            let status = SecItemDelete(query(account) as CFDictionary)
+            return status == errSecSuccess ? reply(id, true) : reply(id, false, error: failure(status))
+        default:
+            return reply(id, false, error: "unavailable")
+        }
+    }
+}
 
 final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNavigationDelegate, NSWindowDelegate {
     var window: NSWindow!
@@ -21,6 +96,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     var pending = Data()
     let readQueue = DispatchQueue(label: "interspace.backend.read")
     let writeLock = NSLock()
+    let keychainQueue = DispatchQueue(label: "interspace.keychain")
     var ready = false
     var queued: [[String: Any]] = []
     var resourceRoot: URL { Bundle.main.resourceURL! }
@@ -88,8 +164,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
                 self?.deliver(["type": "fatal", "error": "Local backend stopped (\(process.terminationStatus)). Reopen Interspace to restore saved work."])
             }
         }
-        do { try process.run(); backend = process }
-        catch { deliver(["type": "fatal", "error": "Could not start the local backend. Check Python installation and reopen Interspace."]) }
+        do {
+            try process.run(); backend = process
+            // The handshake is the first stdin line: the backend sends Keychain and save-panel lines only after it.
+            writeLine(["type": "bridge_hello", "keychain": 1, "save_panel": 1])
+        } catch { deliver(["type": "fatal", "error": "Could not start the local backend. Check Python installation and reopen Interspace."]) }
     }
 
     func receive(_ bytes: Data) {
@@ -98,8 +177,67 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             let line = pending.prefix(upTo: newline)
             pending.removeSubrange(...newline)
             if let message = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any] {
+                // Bridge lines are consumed here, before deliver, and never reach the WebView.
+                if let type = message["type"] as? String, bridgeTypes.contains(type) {
+                    handleBridge(type, message)
+                    continue
+                }
                 DispatchQueue.main.async { [weak self] in self?.deliver(message) }
             }
+        }
+    }
+
+    func handleBridge(_ type: String, _ message: [String: Any]) {
+        if type == "keychain" {
+            keychainQueue.async { [weak self] in
+                if let reply = ResearchKeychain.handle(message) { self?.writeLine(reply) }
+            }
+        } else if type == "save_panel" {
+            DispatchQueue.main.async { [weak self] in self?.savePanel(message) }
+        }
+        // Replies and the handshake only ever go to the backend; one coming from it is dropped.
+    }
+
+    /// The file `path` as a URL when it is a regular file inside the app data folder (symlinks resolved), else nil.
+    func appDataFile(_ path: String) -> URL? {
+        guard path.hasPrefix("/") else { return nil }
+        let root = dataRoot.standardizedFileURL.resolvingSymlinksInPath().path
+        let file = URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath()
+        guard file.path.hasPrefix(root + "/"),
+              (try? file.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else { return nil }
+        return file
+    }
+
+    /// Lets the user save a copy of one task output (research/tasks.md). Only files inside app data can be copied.
+    func savePanel(_ message: [String: Any]) {
+        guard let id = message["id"] as? String, id.hasPrefix("sp-"), id.count <= 64 else { return }
+        let answer = { [weak self] (ok: Bool, error: String?) in
+            var reply: [String: Any] = ["type": "save_panel_reply", "id": id, "ok": ok]
+            if let error { reply["error"] = error }
+            self?.writeLine(reply)
+        }
+        let name = ((message["suggested_name"] as? String) ?? "").replacingOccurrences(of: "/", with: "-")
+        guard let path = message["path"] as? String, let source = appDataFile(path), !name.isEmpty, name.count <= 255,
+              let window else { answer(false, "failed"); return }
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = name
+        panel.canCreateDirectories = true
+        panel.beginSheetModal(for: window) { result in
+            guard result == .OK, let destination = panel.url else { answer(false, "cancelled"); return }
+            do {
+                let manager = FileManager.default
+                if manager.fileExists(atPath: destination.path) {
+                    // The panel already asked before replacing; swap in a full copy so a failure leaves the old file.
+                    let staging = try manager.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: destination, create: true)
+                    let copy = staging.appendingPathComponent(destination.lastPathComponent)
+                    try manager.copyItem(at: source, to: copy)
+                    _ = try manager.replaceItemAt(destination, withItemAt: copy)
+                    try? manager.removeItem(at: staging)
+                } else {
+                    try manager.copyItem(at: source, to: destination)
+                }
+                answer(true, nil)
+            } catch { answer(false, "failed") }
         }
     }
 
@@ -129,6 +267,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         guard message.frameInfo.isMainFrame, let url = message.frameInfo.request.url,
               url.isFileURL, url.standardizedFileURL == resourceRoot.appendingPathComponent("app/ui/index.html").standardizedFileURL,
               let request = message.body as? [String: Any], let method = request["method"] as? String else { return }
+        // The WebView can never take part in the Keychain or save-panel bridge.
+        if let type = request["type"] as? String, bridgeTypes.contains(type) { return }
         if method == "choose_project" {
             let alert = NSAlert()
             alert.messageText = "Add a project folder"
