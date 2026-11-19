@@ -99,11 +99,15 @@ function beginSignIn(name){
  busy.add(name);touch();
  request('provider_sign_in',{provider:name},{manual:true}).then(r=>{signIn.set(name,r||{});}).catch(e=>{signIn.set(name,{error:e.message});}).finally(()=>{busy.delete(name);touch();});
 }
+function secureUrl(value){if(typeof value!=='string'||value.length>2048||/\s/.test(value))return false;try{const u=new URL(value);return u.protocol==='https:'&&!!u.hostname&&!u.username&&!u.password;}catch{return false;}}
 function signInBox(name,parent){
  const s=signIn.get(name);if(!s)return;
  const box=el('div','sign-in-steps',null,parent);box.setAttribute('role','status');
  if(s.error){el('p','error-text',s.error,box);return;}
  if(s.kind==='device'){
+  // A verification address is offered only when it is https; anything else (another scheme, a malformed or
+  // credential-bearing URL) is refused, with its code, so the user is never steered to an unexpected page.
+  if(!secureUrl(s.url)){el('p','error-text','The sign-in address the provider returned is not a secure https address, so Interspace does not show it. Sign in with the provider’s own command-line tool instead.',box);return;}
   el('p','','Open this address in your browser and sign in:',box);el('p','mono select-all',s.url,box);
   if(s.code){el('p','','Then enter this code:',box);el('p','device-code mono select-all',s.code,box);}
   if(s.detail)el('p','footnote',s.detail,box);el('p','footnote','When you are done, choose Check status.',box);return;
