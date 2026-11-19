@@ -30,15 +30,19 @@ New optional top-level key:
 - **Teams:** every member is `access: 'read'`. A write role is refused at `propose_team` with `ValueError('Research tasks have no project to write to. Use a project task for code.')`.
 - **Runtimes:** start in an empty, app-owned scratch folder, `<storage>/research-runs/<task_id>/`, which is not a git repo. Claude gets no file tools; Codex runs read-only.
 - **Locks:** no project lock is ever taken.
-- **State:** these tasks are stored under a synthetic `state['research']['tasks']` collection, shown in the sidebar's **Research** entry, and listed in `state.tasks` when `project_id` is `null`. Each row has `kind: 'research'`.
+- **State:** `state.research.tasks` always lists every research task row (the same row shape as `state.tasks`, plus `kind: 'research'` and `project_id: null`). `state.tasks` keeps listing the selected project's tasks, with each row carrying `kind` (`'project'` there). The sidebar's **Research** entry shows `state.research.tasks`.
+- **Creating one:**
+  - `scope_default {project_id: null, kind: 'research'}` returns `research_default`;
+  - `agent_create {project_id: null, kind: 'research', title, scope, provider?, model?}` creates the task.
 
 ## Outputs
 
 - When a research task's Orchestrator ends a turn with a final answer, the scheduler writes:
   - `tasks/<id>/outputs/report.md`: the answer text;
   - `tasks/<id>/outputs/references.bib`, but only if a `verify_citations` report exists for that turn. It holds the `research_bibtex` entries for the references marked `verified` (and `mismatch` ones marked as such in a BibTeX comment). `not_found` and `retracted` references are left out and listed in a header comment.
-- **Methods**, both in the Swift allowlist:
+- **Methods**, all in the Swift allowlist:
   - `task_outputs {task_id}` returns `{outputs: [{name, kind: 'report'|'bibtex', bytes, updated_at}]}`.
+  - `task_output_read {task_id, name}` returns `{name, kind, text, truncated}`: UTF-8 text capped at 1 MiB, with `truncated: true` past that.
   - `task_output_save {task_id, name}` asks Swift for a save panel and returns `{saved: bool}`. The backend never writes outside app data.
 - **Project tasks** may also produce outputs. Writing a report into the repository is done by a write member through the normal Review and Merge path.
 
