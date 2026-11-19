@@ -370,6 +370,7 @@ class Orchestrator:
                 raise OrchestrationError('member_ids must be a list of member IDs.')
             deadline = time.monotonic() + timeout
             run.yielded = True
+            s.hold_clock(run)  # Like paused_team: time spent waiting on children is not the parent's active time.
             s.pump()
             try:
                 while not all(self._done(m['task_id']) for m in members):
@@ -379,6 +380,7 @@ class Orchestrator:
                     s._cond.wait(min(left, 0.5))
             finally:
                 s.resume(run)
+                s.restart_clock(run)
             if run.cancel.is_set():
                 return self._refused('The task was stopped while waiting.', 'cancelled')
             results = []
@@ -397,6 +399,9 @@ class Orchestrator:
             child = s._task(member['task_id'])
             if not self._done(member['task_id']):
                 raise OrchestrationError('This member is still working. Wait for it first.')
+            if self._child_state(member['task_id']) == 'cancelled':
+                # A member stopped by the user (or with its parent) stays stopped; only the user can start it again.
+                raise OrchestrationError('This member was stopped, so it cannot be messaged.')
             try:
                 result = s.submit(member['task_id'], child['agent']['project_id'], text, None)
             except ValueError as error:
@@ -423,6 +428,9 @@ class Orchestrator:
             if team['status'] != 'proposed' or run is None or run.team_wait != team['team_id'] or run.cancel.is_set():
                 raise OrchestrationError('This team proposal is no longer open.')
             project_id = parent['agent']['project_id']
+            if decision == 'approve' and not s.approved(parent):
+                # Children inherit the parent's live scope; an edited, unapproved scope is never approved through a team.
+                raise OrchestrationError('Approve the task scope first; it changed since the task started.')
             if decision == 'decline':
                 self._audit_decline(run, team)
                 team.update(status='declined', note=note, answered_at=iso_time(s.clock()))
