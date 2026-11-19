@@ -47,7 +47,9 @@ const mentions=()=>S.mentions(current);
 
 function head(container,id,compact){
  container.replaceChildren();
- el('p','agent-status',S.statusText(status(id)),container).setAttribute('role','status');
+ const st=status(id);el('p','agent-status',S.statusText(st),container).setAttribute('role','status');
+ // After a restart nothing resumes by itself: say so plainly, and offer no resume action.
+ if(st?.state==='interrupted'&&!compact)el('p','interrupted-note','The app closed while this '+(parentOf(id)?'subagent':'task')+' was working. Nothing resumed, and nothing will on its own. Its branch and changes are kept'+(parentOf(id)?'.':'; send a message to start a new turn.'),container);
  const b=S.budget(id),q=scheduled(id);el('p','agent-budget footnote',b?S.budgetText(b):q?.tokens?'Tokens '+tokens(q.tokens.used)+' / '+tokens(q.tokens.budget):'',container);
  const provider=providerOf(id),parent=parentOf(id),model=row(id)?.model||subOf(id)?.model||null;
  const line=el('p','footnote runtime-line',null,container);
@@ -56,7 +58,7 @@ function head(container,id,compact){
  line.append(model?' · '+model:' · default model');
  if(parent&&!compact){const up=el('button','link-button','Part of “'+title(parent)+'”',container);up.type='button';up.onclick=()=>host.openAgent(parent);}
  const w=S.workspace(id);if(w)el('p','footnote mono','Branch '+w.branch+' · base '+w.base_commit,container);
- if(w&&!compact&&window.interspaceReview){const r=el('button','','Review changes',container);r.type='button';r.onclick=()=>window.interspaceReview.open(id);}
+ if(w&&!compact&&window.interspaceReview){const r=el('button','','Review changes',container);r.type='button';r.id='review-head-'+String(id).replace(/[^A-Za-z0-9_-]/g,'_');r.onclick=()=>window.interspaceReview.open(id);}
 }
 function scopeArea(id){
  const info=scopeInfo(id),box=$('agent-scope');if(box.dataset.rev===id+':'+info.rev)return;box.dataset.rev=id+':'+info.rev;
@@ -95,7 +97,7 @@ function childRows(list,id){
  for(const c of children(id)){
   const li=el('li','child-row',null,list);li.dataset.child=c.task_id;
   if(c.provider)P.badge(c.provider,li);el('strong','',P.roleTitle(c.role||'subagent'),li);
-  el('span','footnote',S.statusText(S.status(c.task_id)||{state:c.state||'queued'})+(c.tokens_used!=null?' · '+tokens(c.tokens_used)+' tokens':''),li);
+  el('span','footnote',S.statusText(S.childStatus(c.task_id,c.state))+(c.tokens_used!=null?' · '+tokens(c.tokens_used)+' tokens':''),li);
   const b=el('button','quiet','Open',li);b.type='button';b.setAttribute('aria-label','Open '+P.roleTitle(c.role||'subagent')+' subagent');b.onclick=()=>host.openAgent(c.task_id);
  }
  list.hidden=!list.children.length;
@@ -125,7 +127,7 @@ function refresh(){if(!state)return;renderAgent();renderRunning();}
 
 window.interspaceAgent={
  init(options){
-  host=options;S.init({request:options.request,open:id=>host.openAgent(id),changed:id=>{if(view==='agent'&&(id===current||parentOf(id)===current)||view==='running')refresh();}});
+  host=options;S.init({request:options.request,open:id=>host.openAgent(id),rowStatus:id=>row(id)?.status||null,stamp:id=>{const m=window.interspaceReview?.merged?.(id);return m?m.into+':'+m.merge_commit:'';},changed:id=>{if(view==='agent'&&(id===current||parentOf(id)===current)||view==='running')refresh();}});
   window.interspaceComposer.attach({input:$('agent-message'),menu:$('agent-menu'),form:$('agent-composer'),commands,mentions,onSend:send,onInput:text=>{if(current)drafts.set(current,text);}});
   $('agent-stop').onclick=()=>cancel(current);$('agent-back').onclick=()=>host.navigate('tasks');
  },

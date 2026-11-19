@@ -44,12 +44,19 @@ function send(ctx,team,d,decision,card){
  ctx.request('team_answer',params,{manual:true}).then(()=>{d.sent=decision;}).catch(e=>{d.error=e.message||'The answer was not accepted.';}).finally(()=>{d.sending=false;ctx.bump();});
 }
 function budgetLine(b){return b&&b.budget!=null?'Budget: '+tokens(b.used)+' / '+tokens(b.budget)+' tokens used by this task so far':'';}
-function marker(m,parent){if(m.default)el('span','marker default','Default',parent);else el('span','marker suggested','Suggested'+(m.reason?': '+m.reason:''),parent);}
+// Default, the Orchestrator's suggestion with its one-line reason, or the user's own change to the member.
+const ROUTED=['provider','model','access'];
+function marker(proposed,m,parent){
+ const mine=m&&ROUTED.some(f=>(proposed[f]??null)!==(m[f]??null));
+ const reason=typeof proposed.reason==='string'?proposed.reason.trim():'';
+ const e=mine?el('span','marker changed','Your change',parent):proposed.default?el('span','marker default','Default',parent):el('span','marker suggested',reason?'Suggested: '+reason:'Suggested (no reason given)',parent);
+ return e;
+}
 
 function memberEditor(ctx,team,d,m,label,list,locked){
  const proposed=(team.members||[]).find(x=>x.member_id===m.member_id)||m,removed=d.removed.has(m.member_id);
  const box=el('li','team-member'+(removed?' removed':''),null,list);box.dataset.member=m.member_id;
- const head=el('div','member-head',null,box);el('h4','',label,head);P.badge(m.provider,head);marker(proposed,head);if(removed)el('span','marker removed-tag','Removed',head);
+ const head=el('div','member-head',null,box);el('h4','',label,head);P.badge(m.provider,head);marker(proposed,m,head);if(removed)el('span','marker removed-tag','Removed',head);
  const base='tm-'+safeId(ctx.taskId).slice(0,12)+'-'+safeId(team.team_id).slice(0,12)+'-'+safeId(m.member_id);
  if(removed){el('p','footnote',m.brief,box);}
  else{
@@ -63,9 +70,10 @@ function memberEditor(ctx,team,d,m,label,list,locked){
   for(const v of ['read','write']){const o=el('option','',ACCESS[v],access);o.value=v;}
   const sync=()=>{const w=access.querySelector('option[value=write]');const can=!P.get(m.provider)||P.canWrite(m.provider);w.disabled=!can;w.textContent=can?ACCESS.write:ACCESS.write+' (not available on '+P.title(m.provider)+')';if(!can&&m.access==='write')m.access='read';access.value=m.access==='write'?'write':'read';};
   sync();
-  provider.onchange=()=>{m.provider=provider.value;model.setProvider(provider.value);if(model.value&&P.checkModel(m.provider,model.value)){model.value='';m.model=null;}sync();head.querySelector('.provider-badge').replaceWith(P.badge(m.provider));};
-  model.oninput=()=>{model.setCustomValidity('');m.model=model.value.trim()||null;};
-  access.onchange=()=>{m.access=access.value;};
+  const remark=()=>head.querySelector('.marker').replaceWith(marker(proposed,m));
+  provider.onchange=()=>{m.provider=provider.value;model.setProvider(provider.value);if(model.value&&P.checkModel(m.provider,model.value)){model.value='';m.model=null;}sync();head.querySelector('.provider-badge').replaceWith(P.badge(m.provider));remark();};
+  model.oninput=()=>{model.setCustomValidity('');m.model=model.value.trim()||null;remark();};
+  access.onchange=()=>{m.access=access.value;remark();};
  }
  if(!locked){const b=el('button','quiet',removed?'Keep':'Remove',box);b.type='button';b.setAttribute('aria-label',(removed?'Keep ':'Remove ')+label);b.onclick=()=>{if(removed)d.removed.delete(m.member_id);else d.removed.add(m.member_id);ctx.bump();};}
 }
@@ -111,22 +119,26 @@ function teamCard(card,ctx){
  const no=el('button','','Decline',actions);no.type='button';no.disabled=d.sending;no.onclick=()=>{d.declining=true;ctx.bump();};
 }
 
-// One child run: provider, role, state and tokens; its own stream loads on demand.
+// One child run: provider, role, state, tokens and its latest activity line, live without expanding;
+// its full stream loads on demand.
 function subagentCard(card,ctx){
- const s=ctx.sub,label=P.roleTitle(s.role||'subagent');
- card.classList.add('subagent');card.setAttribute('aria-label',label+' subagent');
+ const s=ctx.sub,label=P.roleTitle(s.role||'subagent'),st=ctx.status||{state:s.state||'queued'};
+ card.classList.add('subagent');card.setAttribute('aria-label',label+' subagent');card.dataset.child=s.task_id;
  const head=el('div','card-head',null,card);P.badge(s.provider,head);el('strong','',label,head);
- el('span','state '+(s.state||''),ctx.statusText({state:s.state||'queued'}),head);
+ el('span','state '+(st.state||''),ctx.statusText({state:st.state}),head);
  const facts=[(s.model||'default model'),ACCESS[s.access]||s.access];if(s.tokens_used!=null)facts.push(tokens(s.tokens_used)+' tokens');
  el('p','footnote',facts.filter(Boolean).join(' · '),card);
  if(s.brief)el('p','',s.brief,card);
+ if(ctx.activity){const a=el('p','sub-activity',null,card);a.setAttribute('aria-label',label+' latest activity');el('span','footnote','Latest: ',a);a.append(ctx.activity);}
  const diff=s.diff_summary;
  if(diff&&Array.isArray(diff.files)){const add=diff.files.reduce((a,f)=>a+(f.additions||0),0),del=diff.files.reduce((a,f)=>a+(f.deletions||0),0);el('p','footnote mono',diff.files.length+' file'+(diff.files.length===1?'':'s')+' changed · +'+add+' −'+del+(diff.branch?' · '+diff.branch:''),card);}
  if(s.report_excerpt){const det=el('details','report',null,card);el('summary','','Report',det);ctx.markdown(s.report_excerpt,det);}
+ const merged=window.interspaceReview?.merged?.(s.task_id);
+ if(merged)el('p','merged-line',merged.merge_commit?'Merged into '+merged.into+' · '+String(merged.merge_commit).slice(0,8):'Already merged into '+merged.into,card).setAttribute('role','status');
  const actions=el('div','actions',null,card);
- const toggle=el('button','',ctx.expanded?'Hide activity':'Show activity',actions);toggle.type='button';toggle.setAttribute('aria-expanded',String(ctx.expanded));toggle.setAttribute('aria-label',(ctx.expanded?'Hide ':'Show ')+label+' activity');toggle.onclick=ctx.toggle;
- const open=el('button','','Open',actions);open.type='button';open.setAttribute('aria-label','Open '+label+' subagent');open.onclick=ctx.open;
- if(s.access==='write'||diff){const r=el('button','','Review changes',actions);r.type='button';r.setAttribute('aria-label','Review '+label+' changes');r.disabled=!window.interspaceReview;r.onclick=()=>window.interspaceReview?.open(s.task_id);}
+ const toggle=el('button','',ctx.expanded?'Hide activity':'Show activity',actions);toggle.type='button';toggle.id='sub-toggle-'+ctx.key;toggle.setAttribute('aria-expanded',String(ctx.expanded));toggle.setAttribute('aria-label',(ctx.expanded?'Hide ':'Show ')+label+' activity');toggle.onclick=ctx.toggle;
+ const open=el('button','','Open',actions);open.type='button';open.id='sub-open-'+ctx.key;open.setAttribute('aria-label','Open '+label+' subagent');open.onclick=ctx.open;
+ if(s.access==='write'||diff){const r=el('button','','Review changes',actions);r.type='button';r.id='review-'+ctx.key;r.setAttribute('aria-label','Review '+label+' changes');r.disabled=!window.interspaceReview;r.onclick=()=>window.interspaceReview?.open(s.task_id);}
  if(ctx.expanded){toggle.setAttribute('aria-controls',ctx.childBox.id);card.append(ctx.childBox);}
 }
 

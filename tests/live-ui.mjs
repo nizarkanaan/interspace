@@ -134,7 +134,7 @@ export default async function check(page,url){
   await page.getByRole('button',{name:'Create task',exact:true}).click();
   await until(()=>page.locator('#agent-view').isVisible(),'the new agent task');
   const create1=calls('agent_create')[0];
-  assert(create1.params.provider==='codex'&&create1.params.model===null&&create1.params.scope.projects[0].deny[0]==='secrets/**'&&create1.params.scope.projects[0].read[0]==='src/**','agent_create params '+JSON.stringify(create1.params));
+  assert(!('provider' in create1.params)&&!('model' in create1.params)&&create1.params.scope.projects[0].deny[0]==='secrets/**'&&create1.params.scope.projects[0].read[0]==='src/**','agent_create params '+JSON.stringify(create1.params));
   const taskA=reply(create1).result.task_id;
   await until(async()=>(await text(page.locator('#agent-view .scope-chips'))).includes('Needs approval'),'unapproved scope chips');
   assert((await text(page.locator('#agent-view .scope-chips'))).includes('Network: off'),'Network chip missing');

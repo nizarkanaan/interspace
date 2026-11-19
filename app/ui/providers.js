@@ -10,7 +10,7 @@ const el=(tag,cls,text,parent)=>{const e=document.createElement(tag);if(cls)e.cl
 const roleTitle=role=>role==='orchestrator'?'Orchestrator':String(role).charAt(0).toUpperCase()+String(role).slice(1);
 let request=()=>Promise.reject(Error('No bridge')),changed=()=>{};
 let providers=[],status=new Map(),routing=null,loadError='',loading=null,rev=0,listSeq=0;
-const signIn=new Map(),busy=new Set();
+const signIn=new Map(),busy=new Set(),signingOut=new Set();
 let draft=null,dirty=false,saving=false,saveNote='',saveError='';
 
 const get=name=>providers.find(p=>p.name===name)||null;
@@ -78,6 +78,23 @@ function refreshStatus(name){
  request('provider_status',{provider:name},{manual:true}).then(r=>{if(r?.provider===name)status.set(name,r);if(r?.state==='signed_in')signIn.delete(name);})
   .catch(e=>{signIn.set(name,{error:e.message});}).finally(()=>{busy.delete(name);touch();});
 }
+// Sign-in completion arrives in the normal state message (state.provider_status[provider], auth_status shape),
+// so nothing polls; Check status stays as a manual refresh.
+const STATES=new Set(Object.keys(STATE));
+function fromState(map){
+ if(!map||typeof map!=='object')return;let moved=false;
+ for(const [name,s] of Object.entries(map)){
+  if(!s||typeof s!=='object'||s.provider!==name||!STATES.has(s.state))continue;
+  const was=status.get(name);if(was&&was.state===s.state&&was.account===s.account&&was.detail===s.detail)continue;
+  status.set(name,s);if(s.state==='signed_in')signIn.delete(name);moved=true;
+ }
+ if(moved)touch();
+}
+function signOut(name){
+ signingOut.delete(name);busy.add(name);touch();
+ request('provider_sign_out',{provider:name},{manual:true}).then(r=>{if(r?.provider===name&&STATES.has(r.state))status.set(name,r);else status.set(name,{provider:name,state:'signed_out',account:null,detail:''});signIn.delete(name);})
+  .catch(e=>{signIn.set(name,{error:e.message});}).finally(()=>{busy.delete(name);touch();});
+}
 function beginSignIn(name){
  busy.add(name);touch();
  request('provider_sign_in',{provider:name},{manual:true}).then(r=>{signIn.set(name,r||{});}).catch(e=>{signIn.set(name,{error:e.message});}).finally(()=>{busy.delete(name);touch();});
@@ -137,6 +154,14 @@ function renderSettings(container){
   const actions=el('div','actions',null,li);
   const check=el('button','','Check status',actions);check.type='button';check.disabled=busy.has(p.name);check.setAttribute('aria-label','Check '+p.title+' status');check.onclick=()=>refreshStatus(p.name);
   if(s?.state!=='signed_in'){const b=el('button','primary','Sign in',actions);b.type='button';b.disabled=busy.has(p.name)||s?.state==='missing_cli';b.setAttribute('aria-label','Sign in to '+p.title);b.onclick=()=>beginSignIn(p.name);}
+  else if(!signingOut.has(p.name)){const b=el('button','','Sign out',actions);b.type='button';b.id='sign-out-'+p.name;b.disabled=busy.has(p.name);b.setAttribute('aria-label','Sign out of '+p.title);b.onclick=()=>{signingOut.add(p.name);touch();document.getElementById('sign-out-confirm-'+p.name)?.focus();};}
+  if(s?.state==='signed_in'&&signingOut.has(p.name)){
+   const box=el('div','sign-in-steps',null,li);box.setAttribute('role','group');box.setAttribute('aria-label','Sign out of '+p.title);
+   el('p','','Sign out of '+p.title+' on this Mac? Tasks on '+p.title+' cannot start until you sign in again.',box);
+   const row=el('div','actions',null,box);
+   const yes=el('button','primary','Sign out',row);yes.type='button';yes.id='sign-out-confirm-'+p.name;yes.onclick=()=>signOut(p.name);
+   const no=el('button','','Cancel',row);no.type='button';no.onclick=()=>{signingOut.delete(p.name);touch();document.getElementById('sign-out-'+p.name)?.focus();};
+  }
   signInBox(p.name,li);
  }
  if(draft&&providers.length){
@@ -155,7 +180,7 @@ function renderSettings(container){
 
 window.interspaceProviders={
  init(options){request=options.request;changed=options.changed||changed;},
- load,loaded:()=>!!providers.length,list:()=>providers.slice(),get,title,canWrite,badge,checkModel,modelInput,providerSelect,providerOptions,
+ load,fromState,loaded:()=>!!providers.length,list:()=>providers.slice(),get,title,canWrite,badge,checkModel,modelInput,providerSelect,providerOptions,
  routing:()=>routing,routeFor:role=>role==='orchestrator'?routing?.orchestrator||null:routing?.roles?.[role]||null,
  roleTitle,ROLES,isWriteRole:role=>WRITE_ROLES.has(role),renderSettings
 };
