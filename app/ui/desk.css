@@ -69,3 +69,8 @@
 .route-row{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(0,1fr);gap:8px 12px;align-items:end;border-top:1px solid var(--line);padding-top:10px}
 .route-role{display:grid;align-self:center}
 @media(max-width:700px){.route-row{grid-template-columns:minmax(0,1fr)}}
+.marker.changed{color:var(--ink);font-weight:600}
+.sub-activity{margin:0;font-size:14px;overflow-wrap:anywhere;white-space:pre-wrap;color:var(--ink)}
+.merged-line{margin:0;font-size:14px;color:var(--accent);overflow-wrap:anywhere}
+.interrupted-note{margin:6px 0 0;border-left:3px solid var(--warn);background:var(--surface);padding:8px 12px;overflow-wrap:anywhere}
+.review-back{justify-self:start}

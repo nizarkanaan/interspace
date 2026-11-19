@@ -61,8 +61,9 @@ async function create(doc){
  const s=step;if(!s||s.saving)return;s.saving=true;s.error='';host.refresh();
  try{
   const params={project_id:s.project_id,title:s.title,scope:doc};
-  // Without a known routing default and no override, the backend applies routing.orchestrator itself.
-  if(s.provider){params.provider=s.provider;params.model=s.model;}
+  // The backend applies routing.orchestrator itself (role 'orchestrator'); only what the user changed is sent.
+  // A model typed for the default provider names that provider too, since the model is checked against it.
+  if(s.overridden){if(s.provider)params.provider=s.provider;params.model=s.model;}
   const result=await host.request('agent_create',params,{manual:true});
   if(!result?.task_id)throw Error('The task could not be created.');
   if(step===s)step=null;

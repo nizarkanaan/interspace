@@ -2,7 +2,9 @@
    picker and an explicit Merge. Every text from the backend is set with textContent, never parsed as markup.
    The host calls init({request}) once; open(taskId, {project_id}) renders into #review-view. */
 (()=>{
-let host=null,current=null,ticket=0;
+let host=null,current=null,ticket=0,returnFocus=null;
+// Merges done in this session, by task, so the child card can show its merged state.
+const merges=new Map();
 const el=(tag,cls,text,parent)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=String(text);if(parent)parent.append(e);return e;};
 const short=commit=>String(commit||'').slice(0,8);
 const CHANGE={add:'Added',modify:'Modified',delete:'Deleted',rename:'Renamed',copy:'Copied'};
@@ -41,7 +43,8 @@ function open(taskId,options={}){
  const mount=root();if(!mount)return;
  style();
  const mine=++ticket;
- current={task_id:taskId,project_id:options.project_id||null,summary:null,branches:null,current:null,into:null,error:'',merging:false,result:null,loading:true};
+ if(!options.reload){const from=document.activeElement;returnFocus=from&&from.id&&!mount.contains(from)?from.id:null;}
+ current={task_id:taskId,project_id:options.project_id||host?.projectOf?.(taskId)||null,summary:null,branches:null,current:null,into:null,error:'',merging:false,result:null,loading:true};
  const view=current;
  render(true);
  const live=()=>ticket===mine;
@@ -58,14 +61,19 @@ function open(taskId,options={}){
  });
 }
 
-function reload(){if(current)open(current.task_id,{project_id:current.project_id});}
+function reload(){if(current)open(current.task_id,{project_id:current.project_id,reload:true});}
+// Back to the view Review was opened from, with focus on the control that opened it.
+function back(){
+ ticket++;const id=returnFocus;host?.back?.();
+ if(id)document.getElementById(id)?.focus();
+}
 
 function merge(){
  const view=current;if(!view||view.merging||!view.summary||!view.into)return;
  const mine=ticket;
  view.merging=true;view.result=null;view.error='';render(false);
  request('review_merge',{task_id:view.task_id,into:view.into,expected_head:view.summary.head_commit})
-  .then(r=>{if(ticket===mine)view.result=r;})
+  .then(r=>{if(r?.status==='merged'){merges.set(view.task_id,{into:view.into,merge_commit:r.merge_commit||null});host?.changed?.();}if(ticket===mine)view.result=r;})
   .catch(e=>{if(ticket===mine)view.error=e.message||String(e);})
   .finally(()=>{if(ticket!==mine)return;view.merging=false;render(false,true);});
 }
@@ -74,6 +82,7 @@ function render(focusHeading,focusResult){
  const mount=root(),view=current;if(!mount||!view)return;
  mount.replaceChildren();
  mount.setAttribute('aria-busy',view.loading||view.merging?'true':'false');
+ if(host?.back){const b=el('button','review-back','← Back to the task',mount);b.type='button';b.setAttribute('aria-label','Back to the task');b.addEventListener('click',back);}
  const h=el('h2',null,'Review changes',mount);h.tabIndex=-1;
  const s=view.summary;
  if(view.loading){el('p','review-note','Loading the changes…',mount);if(focusHeading)h.focus();return;}
@@ -133,5 +142,7 @@ function render(focusHeading,focusResult){
  else if(focusHeading)h.focus();
 }
 
-window.interspaceReview={init(options){host=options||null;},open};
+window.interspaceReview={init(options){host=options||null;},
+ open(taskId,options){open(taskId,options);host?.show?.();if(!current?.loading)return;root()?.querySelector('h2')?.focus();},
+ merged:taskId=>merges.get(taskId)||null};
 })();

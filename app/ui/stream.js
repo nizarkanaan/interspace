@@ -13,12 +13,12 @@ const OPTION={allow_once:'Allow once',add_to_scope:'Add to scope',deny:'Deny'};
 const ANSWERED={allow_once:'Allowed once',add_to_scope:'Added to scope',deny:'Denied',text:'Replied',cancelled:'Closed: the task was cancelled'};
 const MAX_PAGES=20,COMPACT_ITEMS=5;
 const tasks=new Map(),views=new WeakMap(),parents=new Map();
-let request=()=>Promise.reject(Error('No bridge')),changed=()=>{},hostChanged=()=>{},open=()=>{};
+let request=()=>Promise.reject(Error('No bridge')),changed=()=>{},hostChanged=()=>{},open=()=>{},rowStatus=()=>null,stampOf=()=>'';
 
 const el=(tag,cls,text,parent)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=String(text);if(parent)parent.append(e);return e;};
 const tokens=n=>Number(n||0).toLocaleString('en-US');
 function model(id){
- if(!tasks.has(id))tasks.set(id,{id,lastSeq:0,buffer:new Map(),fetching:false,items:new Map(),status:null,budget:null,scopeEvent:null,workspace:null,openAsk:null,paths:new Set(),loadError:'',children:new Map()});
+ if(!tasks.has(id))tasks.set(id,{id,rev:0,lastSeq:0,buffer:new Map(),fetching:false,items:new Map(),status:null,budget:null,scopeEvent:null,workspace:null,openAsk:null,paths:new Set(),loadError:'',children:new Map()});
  return tasks.get(id);
 }
 function item(m,key){let it=m.items.get(key);if(!it){it={key,version:0};m.items.set(key,it);}it.version++;return it;}
@@ -35,8 +35,8 @@ function apply(m,e){
  if(e.v!==1){row(m,e,'unsupported',{text:'Unsupported event (format version '+String(e.v)+')'});return;}
  switch(e.kind){
   case 'status':{m.status=d;if(NOTABLE.has(d.state))row(m,e,'status',{text:statusText(d)});
-   // An open proposal closes when the task ends, so its card is rebuilt without the answer controls.
-   if(TERMINAL.has(d.state))for(const it of m.items.values())if(it.team&&!it.team.answered)it.version++;return;}
+   // An open proposal closes for good when its turn ends (stopped, interrupted, idle): a later turn never reopens it.
+   if(TERMINAL.has(d.state)||d.state==='idle')for(const it of m.items.values())if(it.team&&!it.team.answered&&!it.team.closed){it.team.closed=statusText(d).toLowerCase();it.version++;}return;}
   case 'message_delta':{const it=item(m,key);it.message={role:d.role||'assistant',text:(it.message&&!it.message.final?it.message.text:'')+(d.text_delta||''),final:false};return;}
   case 'message':{if(d.role==='user'&&d.client_id)m.items.delete('client:'+d.client_id);item(m,key).message={role:d.role==='user'?'user':'assistant',text:String(d.text??''),final:true};return;}
   case 'reasoning':item(m,key).reasoning=String(d.text??'');return;
@@ -59,16 +59,17 @@ function apply(m,e){
  }
  row(m,e,'unsupported',{text:'Unsupported event ('+e.kind+')'});
 }
-function drain(m){while(m.buffer.has(m.lastSeq+1)){const e=m.buffer.get(m.lastSeq+1);m.buffer.delete(e.seq);apply(m,e);m.lastSeq=e.seq;}}
+function drain(m){while(m.buffer.has(m.lastSeq+1)){const e=m.buffer.get(m.lastSeq+1);m.buffer.delete(e.seq);apply(m,e);m.lastSeq=e.seq;m.rev++;}}
 function accept(m,e){if(valid(e)&&e.task_id===m.id&&e.seq>m.lastSeq&&!m.buffer.has(e.seq))m.buffer.set(e.seq,e);}
 // Replays missed events from the last seen seq; a gap the backend cannot fill is noted, then skipped.
+// Live events that arrive while a page loads are buffered; if they still leave a hole, it asks once more.
 async function sync(m){
  if(m.fetching)return;m.fetching=true;m.loadError='';
- try{for(let page=0;page<MAX_PAGES;page++){const before=m.lastSeq,r=await request('task_events',{task_id:m.id,after_seq:m.lastSeq},{manual:true});for(const e of r?.events||[])accept(m,e);drain(m);if(r?.complete!==false||m.lastSeq===before)break;}}
+ try{for(let page=0;page<MAX_PAGES;page++){const before=m.lastSeq,r=await request('task_events',{task_id:m.id,after_seq:m.lastSeq},{manual:true});for(const e of r?.events||[])accept(m,e);drain(m);if(r?.complete!==false&&!m.buffer.size||m.lastSeq===before)break;}}
  catch(error){m.loadError=error.message||'Earlier events could not be loaded.';}
  finally{m.fetching=false;}
  if(m.buffer.size){const next=Math.min(...m.buffer.keys());row(m,{seq:'gap-'+next},'gap',{text:'Some earlier events could not be loaded.'});m.lastSeq=next-1;drain(m);}
- changed(m.id);
+ m.rev++;changed(m.id);
 }
 function receive(e){
  if(!valid(e))return;const m=model(e.task_id);if(e.seq<=m.lastSeq||m.buffer.has(e.seq))return;
@@ -80,6 +81,27 @@ function statusText(s){
  if(s.state==='failed'&&s.reason)text+=': '+s.reason;
  if(s.detail&&['waiting_lock','paused_ask','paused_scope','cancelling'].includes(s.state))text+=' · '+s.detail;
  return text;
+}
+// The latest thing a task did, as one short line: the newest agent text, tool call, question, change or error.
+const oneLine=t=>{const lines=String(t).split('\n').map(x=>x.trim()).filter(Boolean),last=lines.at(-1)||'';return Array.from(last).length>160?Array.from(last).slice(0,159).join('')+'…':last;};
+function activity(id){
+ const m=tasks.get(id);if(!m)return '';const list=[...m.items.values()];
+ for(let i=list.length-1;i>=0;i--){const it=list[i];
+  if(it.error)return 'Error: '+oneLine(it.error.message||it.error.code||'');
+  if(it.ask)return (it.answer?'Answered: ':'Needs your answer: ')+oneLine(it.ask.title||'');
+  if(it.call)return (CATEGORY[it.call.category]||'Tool')+': '+oneLine(it.call.title||it.call.tool||'');
+  if(it.diff&&(it.diff.files||[]).length)return 'Changed '+(it.diff.files||[]).length+' file'+((it.diff.files||[]).length===1?'':'s');
+  if(it.message&&it.message.role==='assistant'&&String(it.message.text).trim())return oneLine(it.message.text);
+  if(it.plan){const step=it.plan.find(s=>s.status==='in_progress');if(step)return 'Plan: '+oneLine(step.text??'');}
+ }
+ return '';
+}
+// A child's state: its own stream when loaded, else a terminal task row (after a restart the parent never hears
+// that a child was interrupted), else the parent's subagent events.
+function childStatus(id,fallback){
+ const own=tasks.get(id)?.status;if(own)return own;
+ const r=rowStatus(id);if(r&&TERMINAL.has(r))return {state:r,detail:'',queue_position:null,reason:null};
+ return {state:fallback||'queued',detail:'',queue_position:null,reason:null};
 }
 function budgetText(b){if(!b)return '';let text='Tokens '+tokens(b.used)+' / '+tokens(b.budget);if(b.reserved)text+=' · '+tokens(b.reserved)+' reserved for this turn';if(b.overshoot)text+=' · over budget by '+tokens(b.overshoot);return text;}
 
@@ -146,7 +168,9 @@ function build(m,it){
  if(it.row){const r=el('p','row-event '+it.row,it.text);r.dataset.item=it.key;return r;}
  if(it.message){const msg=el('div','message '+it.message.role+(it.message.pending?' pending':''));msg.dataset.item=it.key;el('small','',it.message.role==='user'?'You':'Agent',msg);markdown(it.message.text,msg);if(!it.message.final&&!it.message.pending)el('span','streaming footnote','Writing…',msg);if(it.message.pending&&!it.message.failed)el('span','footnote','Sending…',msg);if(it.message.failed)el('p','error-text','Not sent: '+it.message.failed,msg);return msg;}
  const card=el('article','card');card.dataset.item=it.key;
- if(it.team)window.interspaceTeam.teamCard(card,{taskId:m.id,team:it.team,request,closed:terminal(m.status),closedText:statusText(m.status).toLowerCase(),bump:()=>{it.version++;changed(m.id);}});
+ if(it.team){const row=rowStatus(m.id),late=!BUSY.has(m.status?.state)&&TERMINAL.has(row);
+  window.interspaceTeam.teamCard(card,{taskId:m.id,team:it.team,request,closed:!!it.team.closed||terminal(m.status)||late,
+   closedText:it.team.closed||(terminal(m.status)||!late?statusText(m.status).toLowerCase():statusText({state:row}).toLowerCase()),bump:()=>{it.version++;changed(m.id);}});}
  else if(it.sub)window.interspaceTeam.subagentCard(card,subContext(m,it));
  else if(it.ask)askCard(m,it,card);
  else if(it.call||it.result||it.output!=null)toolCard(m,it,card);
@@ -158,12 +182,14 @@ function build(m,it){
  return card;
 }
 const terminal=s=>!!s&&TERMINAL.has(s.state);
+// A subagent card also changes with its child's own stream, the child's task row and host state (a merge).
+const stamp=(m,it)=>it.sub?it.version+'|'+(tasks.get(it.sub.task_id)?.rev||0)+'|'+(rowStatus(it.sub.task_id)||'')+'|'+stampOf(it.sub.task_id):it.version;
 // A child's own stream renders into one container that lives as long as its card, so it reconciles in place.
 function subContext(m,it){
- const child=it.sub.task_id;
- if(it.expanded&&!it.childBox){it.childBox=el('div','stream nested');it.childBox.id='child-'+child.replace(/[^A-Za-z0-9_-]/g,'_');it.childBox.setAttribute('role','log');it.childBox.setAttribute('aria-label','Subagent activity');}
+ const child=it.sub.task_id,key=String(child).replace(/[^A-Za-z0-9_-]/g,'_');
+ if(it.expanded&&!it.childBox){it.childBox=el('div','stream nested');it.childBox.id='child-'+key;it.childBox.setAttribute('role','log');it.childBox.setAttribute('aria-label','Subagent activity');}
  if(it.expanded)render(it.childBox,child);
- return {sub:it.sub,expanded:!!it.expanded,childBox:it.childBox,statusText,markdown,
+ return {sub:it.sub,key,expanded:!!it.expanded,childBox:it.childBox,statusText,markdown,status:childStatus(child,it.sub.state),activity:activity(child),
   toggle:()=>{it.expanded=!it.expanded;it.version++;if(it.expanded)sync(model(child));changed(m.id);},
   open:()=>open(child)};
 }
@@ -177,7 +203,7 @@ function render(container,taskId,options={}){
  const focus=document.activeElement&&container.contains(document.activeElement)&&document.activeElement.id?document.activeElement.id:null;
  let list=[...m.items.values()];
  if(options.compact){const open=m.openAsk&&m.items.get(m.openAsk);list=list.slice(-COMPACT_ITEMS);if(open&&!list.includes(open))list.push(open);}
- const nodes=list.map(it=>{const hit=cache.get(it.key);if(hit&&hit.version===it.version)return hit.node;const next=build(m,it);if(hit){const was=hit.node.querySelector('details');const now=next.querySelector('details');if(was&&now)now.open=was.open;}cache.set(it.key,{version:it.version,node:next});return next;});
+ const nodes=list.map(it=>{const hit=cache.get(it.key),version=stamp(m,it);if(hit&&hit.version===version)return hit.node;const next=build(m,it);if(hit){const was=hit.node.querySelector('details');const now=next.querySelector('details');if(was&&now)now.open=was.open;}cache.set(it.key,{version,node:next});return next;});
  for(const key of [...cache.keys()])if(!m.items.has(key))cache.delete(key);
  nodes.forEach((n,i)=>{if(container.children[i]!==n)container.insertBefore(n,container.children[i]||null);});
  while(container.children.length>nodes.length)container.lastElementChild.remove();
@@ -196,8 +222,8 @@ function optimistic(taskId,text,clientId){const m=model(taskId);item(m,'client:'
 function failed(taskId,clientId,reason){const it=model(taskId).items.get('client:'+clientId);if(!it)return;it.message.failed=reason;it.version++;changed(taskId);}
 
 window.interspaceStream={
- init(options){request=options.request;hostChanged=options.changed||hostChanged;open=options.open||open;changed=id=>{hostChanged(id);childChanged(id);};},
- receive,sync:id=>sync(model(id)),render,optimistic,failed,statusText,budgetText,
+ init(options){request=options.request;hostChanged=options.changed||hostChanged;open=options.open||open;rowStatus=options.rowStatus||rowStatus;stampOf=options.stamp||stampOf;changed=id=>{hostChanged(id);childChanged(id);};},
+ receive,sync:id=>sync(model(id)),render,activity,childStatus,optimistic,failed,statusText,budgetText,
  has:id=>tasks.has(id)&&tasks.get(id).lastSeq>0,ids:()=>[...tasks.keys()],
  parentOf:id=>parents.get(id)||null,
  children:id=>{const m=tasks.get(id);return m?[...m.children.values()].map(k=>m.items.get(k)?.sub).filter(Boolean):[];},

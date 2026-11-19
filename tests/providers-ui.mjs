@@ -26,13 +26,15 @@ export default async function check(page,url){
    else if(r.method==='providers_list')result=JSON.parse(JSON.stringify(list));
    else if(r.method==='provider_sign_in')result=p.provider==='codex'?{provider:'codex',kind:'device',url:'https://auth.example.invalid/device',code:'ABCD-1234',detail:'The code expires in 15 minutes.'}:{provider:p.provider,kind:'terminal',command:'claude auth login'};
    else if(r.method==='provider_status'){const s={provider:p.provider,state:'signed_in',account:'Ada <b>Lovelace</b>',detail:''};list.status=list.status.map(x=>x.provider===p.provider?s:x);result=s;}
+   else if(r.method==='provider_sign_out'){const s={provider:p.provider,state:'signed_out',account:null,detail:''};list.status=list.status.map(x=>x.provider===p.provider?s:x);result=s;}
    else if(r.method==='routing_update'){list.routing=p.routing;result=p.routing;}
    else if(r.method==='scope_default')result={scope};
-   else if(r.method==='agent_create'){rows.push({id:'N'+rows.length,mode:'agent',title:p.title,status:'idle',provider:p.provider,model:p.model});result={task_id:'N'+(rows.length-1)};queueMicrotask(()=>window.interspaceReceive({type:'state',state:state()}));}
+   else if(r.method==='agent_create'){rows.push({id:'N'+rows.length,mode:'agent',title:p.title,status:'idle',provider:p.provider||list.routing.orchestrator.provider,model:'provider' in p?p.model:list.routing.orchestrator.model});result={task_id:'N'+(rows.length-1)};queueMicrotask(()=>window.interspaceReceive({type:'state',state:state()}));}
    else if(r.method==='task_events')result={events:[],last_seq:0,complete:true};
    else if(r.method==='scope_get')result={scope:{...scope,task_id:p.task_id},scope_digest:'sha256:aa',scope_approval:null};
    queueMicrotask(()=>f.respond(r,result));
   }}}};
+  f.state=state;
   window.interspaceReceive({type:'state',state:state()});
  });
  const req=method=>page.evaluate(m=>window.provFixture.requests.filter(r=>r.method===m).map(r=>r.params),method);
@@ -67,6 +69,28 @@ export default async function check(page,url){
  assert(signedIn.includes('Signed in as Ada <b>Lovelace</b>')&&!signedIn.includes('ABCD-1234')&&await item('codex').getByRole('button',{name:'Sign in to Codex'}).count()===0,'Signed-in state wrong: '+signedIn);
  assert(JSON.stringify(await req('provider_status'))==='[{"provider":"codex"}]','Status params wrong');
  assert(await item('codex').locator('b').count()===0,'Account inserted as markup');
+ // Sign out asks first, then sends provider_sign_out and shows the signed-out status; Cancel sends nothing.
+ await item('codex').getByRole('button',{name:'Sign out of Codex',exact:true}).click();
+ assert((await text(item('codex'))).includes('Sign out of Codex on this Mac?'),'Sign-out confirmation missing');
+ await item('codex').getByRole('button',{name:'Cancel',exact:true}).click();
+ assert((await req('provider_sign_out')).length===0&&(await text(item('codex'))).includes('Signed in as'),'Cancel signed out');
+ await item('codex').getByRole('button',{name:'Sign out of Codex',exact:true}).focus();
+ await page.keyboard.press('Enter');
+ await page.waitForFunction(()=>document.activeElement?.textContent==='Sign out');
+ await page.keyboard.press('Enter');
+ await page.waitForFunction(()=>document.querySelector('#providers-settings .provider-item[data-provider=codex]').textContent.includes('Signed out'));
+ assert(JSON.stringify(await req('provider_sign_out'))==='[{"provider":"codex"}]','Sign-out params wrong');
+ assert(await item('codex').getByRole('button',{name:'Sign in to Codex',exact:true}).count()===1,'Sign in not offered after signing out');
+ // Device sign-in completes through state.provider_status: no polling, the instructions close by themselves.
+ await item('codex').getByRole('button',{name:'Sign in to Codex',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelector('#providers-settings .provider-item[data-provider=codex] .device-code'));
+ const statusCalls=(await req('provider_status')).length,listCalls=(await req('providers_list')).length;
+ await page.waitForTimeout(400);
+ assert((await req('provider_status')).length===statusCalls&&(await req('providers_list')).length===listCalls,'Sign-in still polls');
+ await page.evaluate(()=>{const f=window.provFixture;window.interspaceReceive({type:'state',state:{...f.state(),provider_status:{codex:{provider:'codex',state:'signed_in',account:'Grace <i>H</i>',detail:''},bogus:{provider:'other',state:'signed_in'}}}});});
+ await page.waitForFunction(()=>document.querySelector('#providers-settings .provider-item[data-provider=codex]').textContent.includes('Signed in as Grace <i>H</i>'));
+ assert(await item('codex').locator('.device-code,i').count()===0,'Sign-in steps kept after state reported signed in');
+ assert(await settings.locator('.provider-item[data-provider=other]').count()===0,'Mismatched status entry applied');
  // A failed status check is shown on that provider and keeps the rest usable.
  await page.evaluate(()=>{window.provFixture.failNext.provider_status='The status check timed out.';});
  await item('claude').getByRole('button',{name:'Check Claude status',exact:true}).click();
@@ -110,7 +134,8 @@ export default async function check(page,url){
  await page.getByRole('button',{name:'Create task',exact:true}).click();
  await page.waitForFunction(()=>!document.querySelector('#agent-view').hidden);
  let creates=await req('agent_create');
- assert(creates.length===1&&creates[0].provider==='claude'&&creates[0].model==='claude-opus-5-5'&&creates[0].title==='Default orchestrator','Default create params: '+JSON.stringify(creates));
+ // Routing defaults are applied by the backend: without an override nothing names a provider or model.
+ assert(creates.length===1&&!('provider' in creates[0])&&!('model' in creates[0])&&!('role' in creates[0])&&creates[0].title==='Default orchestrator','Default create params: '+JSON.stringify(creates));
  assert((await text(page.locator('#agent-head'))).includes('Orchestrator on Claude · claude-opus-5-5'),'Header misses the Orchestrator provider');
  // Override with a free-text model on a provider without a model list; a list provider refuses other names.
  await page.getByRole('button',{name:'New task',exact:true}).click();
@@ -142,5 +167,5 @@ export default async function check(page,url){
  }}
  await page.emulateMedia({colorScheme:'light'});await page.setViewportSize({width:1280,height:1000});
  assert(!errors.length,'Page errors: '+errors.join(' | '));
- return {checks:'provider status per provider (signed out, missing CLI, signed in, failed check), literal detail/account text, device sign-in URL and code by keyboard, terminal instruction, Check status, routing editor with write-role gating, model validation, failed save keeps the draft, exact routing_update, New task Orchestrator default from routing and override with exact agent_create params, no old runtime picker, light/dark 320-1280 fit',responsiveStates:fits.length};
+ return {checks:'sign out with confirmation, sign-in completion from state.provider_status without polling, defaults omitted from agent_create, provider status per provider (signed out, missing CLI, signed in, failed check), literal detail/account text, device sign-in URL and code by keyboard, terminal instruction, Check status, routing editor with write-role gating, model validation, failed save keeps the draft, exact routing_update, New task Orchestrator default from routing and override with exact agent_create params, no old runtime picker, light/dark 320-1280 fit',responsiveStates:fits.length};
 }

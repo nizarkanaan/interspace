@@ -23,7 +23,7 @@ window.interspaceReceive=message=>{
  if(message.error){if(!stale)error(message.error);call.reject(Error(message.error));}
  else{if(message.result?.projects&&!stale)apply(message.result);call.resolve(message.result);}
 };
-function apply(next){const changed=!state||state.project_id!==next.project_id||state.task_id!==next.task_id;state=next;if(changed)taskTab='conversation';error(state.error);render();}
+function apply(next){P.fromState(next.provider_status);const changed=!state||state.project_id!==next.project_id||state.task_id!==next.task_id;state=next;if(changed)taskTab='conversation';error(state.error);render();}
 function navigate(next){selectionEpoch++;view=next;if(next==='settings'||next==='new')P.load();render();}
 function openProject(id){const epoch=++selectionEpoch;return request('switch_project',{project_id:id}).then(()=>{if(epoch===selectionEpoch)navigate('tasks');}).catch(()=>{});}
 function openAgent(id){selectionEpoch++;window.interspaceAgent.open(id);navigate('agent');}
@@ -41,7 +41,7 @@ function render(){if(!state)return;
  $('new-task').hidden=view==='new';$('new-task').disabled=!state.project_id;
  $('task-desk').hidden=view!=='tasks';$('new-task-panel').hidden=view!=='new';$('settings').hidden=view!=='settings';$('review-view').hidden=view!=='review';$('task-detail').hidden=!detail;
  // Subagents are child tasks: they appear under their task, not as desk rows.
- const rows=(state.tasks||[]).filter(t=>!t.parent_task_id);
+ const rows=(state.tasks||[]).filter(t=>!t.parent_task_id&&!window.interspaceAgent.parentOf(t.id));
  $('task-project').textContent=state.project||'No project selected';$('task-count').textContent=rows.length+' tasks';$('desk-tasks').replaceChildren();
  $('desk-empty').hidden=!!rows.length;
  for(const t of rows){const row=node('button','',$('desk-tasks'));row.className='desk-task';row.dataset.openTask=t.id;row.disabled=t.status==='unavailable';const title=node('div','',row);node('strong',t.title,title);const sub=node('small',t.status==='unavailable'?'Saved data unavailable — other tasks remain usable':t.mode==='agent'?'':'Earlier task (read-only) · '+(MODES[t.mode]||t.mode),title);if(t.mode==='agent'&&t.status!=='unavailable'){sub.append('Orchestrator on ');if(t.provider)P.badge(t.provider,sub);else sub.append('your default provider');sub.append((t.model?' · '+t.model:'')+' · own task branch');}node('span',t.mode==='agent'?String(t.status).replaceAll('_',' '):t.status==='unavailable'?'unavailable':'read only',row);row.onclick=()=>openTask(t.id);}
@@ -88,7 +88,11 @@ window.interspaceAgentNew.init({request,refresh:()=>{if(state&&view==='new')rend
 window.interspaceAgent.init({request,navigate,openAgent});
 P.init({request,changed:()=>{if(state)render();}});
 // Review and merge (stream 1D) registers here: it gets the bridge and a view of its own.
-window.interspaceReview?.init?.({request,navigate,show:()=>navigate('review'),mount:$('review-view')});
+// It returns to the view it was opened from; the task's project comes from the open task or the desk.
+let reviewFrom='tasks';
+window.interspaceReview?.init?.({request,navigate,mount:$('review-view'),
+ show:()=>{if(view!=='review')reviewFrom=view;navigate('review');},back:()=>navigate(reviewFrom),changed:()=>render(),
+ projectOf:id=>state?.task?.id===id&&state.task.agent?.project_id||state?.project_id||null});
 document.querySelector('[data-action=choose]').onclick=()=>{selectionEpoch++;request('choose_project').then(()=>navigate('settings')).catch(()=>{});};
 $('stop').onclick=()=>request('cancel').catch(()=>{});
 window.interspaceBoot=()=>request('state').then(()=>P.load()).catch(e=>error(e.message));
