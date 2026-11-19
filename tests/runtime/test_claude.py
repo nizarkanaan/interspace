@@ -183,7 +183,8 @@ class ClaudeCase(unittest.TestCase):
             return made
         options['bridge_factory'] = factory
         options.setdefault('interrupt_grace_s', 1.0)
-        return claude.ClaudeRuntime(object(), binary=str(binary), **options)
+        app = options.pop('app', object())
+        return claude.ClaudeRuntime(app, binary=str(binary), **options)
 
     def entries(self):
         if not self.log.exists():
@@ -269,6 +270,44 @@ class LaunchTests(ClaudeCase):
         # `claude auth status` keeps the user's own TMPDIR.
         auth = [e for e in self.launches() if e['launch'][:2] == ['auth', 'status']][0]
         self.assertNotEqual(auth['env'].get('TMPDIR'), tmp)
+
+    def test_command_sandbox_denies_reads_of_credentials_and_app_data(self):
+        # Claude's command sandbox lets commands read any file unless told otherwise, so a command (a script, a
+        # glob) could read the app-owned Codex token or other tasks' clones. The same paths the Codex profile
+        # denies are passed as sandbox.filesystem.denyRead; the task's own workspaces stay readable.
+        data = self.root / 'data'
+        own = data / 'workspaces' / 'task1'
+        for path in (own / 'p1', own / 'p2', data / 'workspaces' / 'task2' / 'p1', data / 'codex-home',
+                     data / 'tasks', data / 'audit'):
+            path.mkdir(parents=True)
+        (data / 'state.json').write_text('{}')
+        ctx = FakeContext(self.root)
+        ctx.workspaces = {'p1': str(own / 'p1'), 'p2': str(own / 'p2')}
+        ctx.primary_workspace = ctx.workspaces['p1']
+        app = mock.Mock(storage=str(data))
+        _, _, outcome = self.turn({'turns': [simple_turn()]}, ctx=ctx, app=app)
+        self.assertEqual(outcome['status'], 'completed', outcome)
+        args = self.main_launches()[0]['launch']
+        settings = json.loads(args[args.index('--settings') + 1])
+        denied = settings['sandbox']['filesystem']['denyRead']
+        home = os.environ['HOME']
+        for path in (data / 'codex-home', data / 'state.json', data / 'tasks', data / 'audit',
+                     data / 'workspaces' / 'task2'):
+            self.assertIn(str(path), denied)
+        for name in ('.ssh', '.aws', '.codex', '.config/gh', 'Library/Keychains'):
+            self.assertIn(os.path.join(home, name), denied)
+        self.assertIn(os.path.join(home, '.claude', '.credentials.json'), denied)
+        self.assertNotIn(os.path.join(home, '.claude'), denied)  # The CLI's own shell snapshots live there.
+        for path in denied:
+            for workspace in ctx.workspaces.values():
+                self.assertFalse(workspace == path or workspace.startswith(path + os.sep), (path, workspace))
+
+    def test_command_sandbox_denies_credentials_without_app_data(self):
+        _, _, outcome = self.turn({'turns': [simple_turn()]})
+        self.assertEqual(outcome['status'], 'completed', outcome)
+        args = self.main_launches()[0]['launch']
+        denied = json.loads(args[args.index('--settings') + 1])['sandbox']['filesystem']['denyRead']
+        self.assertIn(os.path.join(os.environ['HOME'], '.ssh'), denied)
 
     def test_cli_reports_manual_mode_as_default(self):
         _, _, outcome = self.turn({'turns': [simple_turn()]})

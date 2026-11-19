@@ -41,6 +41,7 @@ import time
 import uuid
 
 import scope
+import runtime
 from runtime import registry
 
 # Multi-provider user decision 4: Claude may write inside its task workspace. True forces every session
@@ -66,6 +67,10 @@ COMMAND_TOOLS = ('Bash',)
 WRITE_TOOLS = ('Edit', 'Write', 'NotebookEdit')
 SEARCH_TOOLS = ('WebSearch',)
 TOOLS = READ_TOOLS + SEARCH_TOOLS + COMMAND_TOOLS + WRITE_TOOLS
+
+# Credential locations the command sandbox may not read (runtime.CREDENTIAL_PATHS). The CLI keeps its shell
+# snapshots in ~/.claude and sources one before every command, so only its credentials file is denied there.
+CREDENTIAL_PATHS = tuple(p for p in runtime.CREDENTIAL_PATHS if p != '.claude') + ('.claude/.credentials.json',)
 
 # Only these variables reach the CLI, so no ANTHROPIC_API_KEY, token or cloud-provider switch can outrank
 # the subscription login or change which account is billed.
@@ -275,6 +280,8 @@ class ClaudeRuntime:
 
     def __init__(self, app, *, binary=None, bridge_factory=start_bridge, interrupt_grace_s=INTERRUPT_GRACE_S):
         self.app = app
+        storage = getattr(app, 'storage', None)
+        self.app_data = str(storage) if isinstance(storage, (str, os.PathLike)) else None
         self.binary = str(binary) if binary else find_claude()
         self.bridge_factory = bridge_factory
         self.interrupt_grace_s = interrupt_grace_s
@@ -457,7 +464,9 @@ class ClaudeSession:
             raise _Fail('workspace_failed', 'Interspace could not prepare the task workspace for Claude Code.')
         settings = {'permissions': {'allow': [], 'deny': [], 'ask': list(TOOLS) + ['mcp__' + BRIDGE_SERVER]},
                     'disableAllHooks': True, 'enableAllProjectMcpServers': False,
-                    'sandbox': {'enabled': True, 'autoAllowBashIfSandboxed': False, 'allowUnsandboxedCommands': False}}
+                    'sandbox': {'enabled': True, 'autoAllowBashIfSandboxed': False, 'allowUnsandboxedCommands': False,
+                                # The sandbox limits writes, not reads (0B-8): deny what Codex's profile denies.
+                                'filesystem': {'denyRead': self._deny_reads(ctx)}}}
         command = [self.runtime.binary, '-p', '--input-format', 'stream-json', '--output-format', 'stream-json',
                    '--verbose', '--model', model, '--effort', DEFAULT_EFFORT, '--system-prompt', prompt,
                    '--tools', ','.join(TOOLS), '--permission-mode', PERMISSION_MODE,
@@ -507,6 +516,11 @@ class ClaudeSession:
                 self._system(message)
             elif message.get('type') not in IGNORED_TYPES:
                 raise _Fail('runtime_protocol', 'Claude Code sent an unexpected message while starting.')
+
+    def _deny_reads(self, ctx):
+        home = os.environ.get('HOME') or os.path.expanduser('~')
+        return runtime.deny_paths(ctx.workspaces.values(), home=home, app_data=self.runtime.app_data,
+                                  credential_paths=CREDENTIAL_PATHS)
 
     def _write_mcp_config(self):
         # A private file, not a command-line string: the bridge token must never appear in argv.
