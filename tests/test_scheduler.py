@@ -843,5 +843,96 @@ class WorkspaceTests(unittest.TestCase):
             self.assertEqual(clones.diff(info)['files'][0]['path'], 'a.py')
 
 
+
+class WorkspaceSafetyTests(unittest.TestCase):
+    """Interspace runs git unsandboxed in a clone the agent can write: agent-written git metadata never runs code,
+    never redirects a commit into another repository, and publishing never drops a commit the user added."""
+
+    def setUp(self):
+        import subprocess
+        self.run_git = lambda *args, **kw: subprocess.run(list(args), capture_output=True, text=True, **kw)
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name).resolve()
+        self.repo = self.root / 'repo'
+        self.repo.mkdir()
+        self.git = ['git', '-c', 'user.name=T', '-c', 'user.email=t@example.invalid']
+        subprocess.run(self.git + ['init', '-q', '-b', 'main', str(self.repo)], check=True)
+        (self.repo / 'a.py').write_text('one\n')
+        subprocess.run(self.git + ['-C', str(self.repo), 'add', '.'], check=True)
+        subprocess.run(self.git + ['-C', str(self.repo), 'commit', '-qm', 'base'], check=True)
+        self.clones = scheduler.Workspaces(self.root / 'workspaces')
+        self.info = self.clones.prepare('c' * 32, 'p1', str(self.repo))
+        self.work = Path(self.info['path'])
+
+    def head(self, ref='main'):
+        return self.run_git('git', '-C', str(self.repo), 'rev-parse', ref).stdout.strip()
+
+    def test_agent_written_git_config_never_runs_a_command(self):
+        marker = self.root / 'ran'
+        script = self.root / 'evil.sh'
+        script.write_text('#!/bin/sh\necho ran >> "%s"\ncat\n' % marker)
+        script.chmod(0o755)
+        with (self.work / '.git' / 'config').open('a') as handle:
+            handle.write('[core]\n\tfsmonitor = %s\n[filter "x"]\n\tclean = %s\n\trequired = true\n'
+                         '[diff]\n\texternal = %s\n[alias]\n\tstatus = !%s\n' % (script, script, script, script))
+        (self.work / '.gitattributes').write_text('* filter=x\n')
+        (self.work / 'a.py').write_text('two\n')
+        commit = self.clones.commit(self.info, 'Interspace task turn u1')
+        self.clones.diff(self.info)
+        self.clones.publish(self.info, str(self.repo))
+        self.assertFalse(marker.exists(), 'a command from the agent-written git config ran')
+        self.assertRegex(commit, r'^[0-9a-f]{40}$')
+        self.assertEqual(self.clones.prepare('c' * 32, 'p1', str(self.repo))['base_commit'], self.info['base_commit'])
+
+    def test_a_redirected_git_directory_is_refused(self):
+        before = self.head()
+        real = self.work / '.git'
+        real.rename(self.work / 'moved-git')
+        for redirect in ('file', 'symlink'):
+            if redirect == 'file':
+                (self.work / '.git').write_text('gitdir: %s\n' % (self.repo / '.git'))
+            else:
+                (self.work / '.git').unlink()
+                (self.work / '.git').symlink_to(self.repo / '.git')
+            (self.work / 'a.py').write_text('agent ' + redirect + '\n')
+            with self.assertRaises(ValueError):
+                self.clones.commit(self.info, 'Interspace task turn u1')
+            with self.assertRaises(ValueError):
+                self.clones.diff(self.info)
+            self.assertEqual(self.head(), before)
+            self.assertEqual(self.run_git('git', '-C', str(self.repo), 'status', '--porcelain').stdout, '')
+        (self.work / '.git').unlink()
+        (self.work / 'moved-git').rename(real)
+        (real / 'commondir').write_text(str(self.repo / '.git') + '\n')
+        with self.assertRaises(ValueError):
+            self.clones.commit(self.info, 'Interspace task turn u1')
+        self.assertEqual(self.head(), before)
+
+    def test_publish_never_drops_a_commit_the_user_added_on_the_task_branch(self):
+        (self.work / 'a.py').write_text('two\n')
+        self.clones.commit(self.info, 'Interspace task turn u1')
+        published = self.clones.publish(self.info, str(self.repo))
+        self.assertEqual(published, 'interspace/task-cccccccc')
+        (self.work / 'b.py').write_text('more\n')
+        self.clones.commit(self.info, 'Interspace task turn u2')
+        self.assertEqual(self.clones.publish(self.info, str(self.repo)), published, 'a fast-forward keeps the name')
+        # The user adds a commit on the task branch in their own repository (here through a worktree).
+        side = self.root / 'side'
+        self.run_git(*self.git, '-C', str(self.repo), 'worktree', 'add', '-q', str(side), published, check=True)
+        (side / 'user.txt').write_text('mine\n')
+        self.run_git(*self.git, '-C', str(side), 'add', '.', check=True)
+        self.run_git(*self.git, '-C', str(side), 'commit', '-qm', 'user fix', check=True)
+        self.run_git('git', '-C', str(self.repo), 'worktree', 'remove', str(side), check=True)
+        user_head = self.head(published)
+        (self.work / 'c.py').write_text('later\n')
+        self.clones.commit(self.info, 'Interspace task turn u3')
+        moved = self.clones.publish(self.info, str(self.repo))
+        self.assertEqual(self.head(published), user_head, 'the user commit is still on the branch')
+        self.assertEqual(moved, 'interspace/task-cccccccc-2')
+        self.assertEqual(self.info['target_branch'], moved)
+        log = self.run_git('git', '-C', str(self.repo), 'log', '--format=%s', moved).stdout.split('\n')
+        self.assertIn('Interspace task turn u3', log)
+
 if __name__ == '__main__':
     unittest.main()

@@ -300,6 +300,14 @@ def _git_env():
 
 
 SCRATCH_EXCLUDES = ('/.interspace/', '/.claude/')  # Provider scratch folders never committed from a task clone.
+# The only settings a task clone's own git config keeps. Interspace runs git outside any sandbox in a folder the agent
+# can write, so everything else (fsmonitor, filters, diff programs, aliases, includes, worktree) is dropped before use.
+_BOOL = re.compile(r'^(true|false)$')
+CLONE_CONFIG = (('core', 'repositoryformatversion', re.compile(r'^[01]$')), ('core', 'filemode', _BOOL),
+                ('core', 'bare', re.compile(r'^false$')), ('core', 'logallrefupdates', _BOOL),
+                ('core', 'ignorecase', _BOOL), ('core', 'precomposeunicode', _BOOL), ('core', 'symlinks', _BOOL),
+                ('extensions', 'objectformat', re.compile(r'^(sha1|sha256)$')),
+                ('interspace', 'base-commit', re.compile(r'^[0-9a-f]{40}([0-9a-f]{24})?$')))
 
 
 class Workspaces:
@@ -315,13 +323,46 @@ class Workspaces:
         return subprocess.run(command, check=check, capture_output=True, text=True, timeout=GIT_TIMEOUT_S,
                               env=env or _git_env(), stdin=subprocess.DEVNULL)
 
+    def _clone(self, work):
+        """Git options that pin a task clone's own repository, after checking and cleaning its metadata.
+
+        The agent can write its clone, so `.git` must be a real folder of this clone (not a `gitdir:` file, a
+        symlink or a `commondir` redirect into another repository), and its config keeps only `CLONE_CONFIG`.
+        """
+        work = Path(work)
+        git_dir = work / '.git'
+        config = git_dir / 'config'
+        if (git_dir.is_symlink() or not git_dir.is_dir() or os.path.lexists(str(git_dir / 'commondir'))
+                or config.is_symlink() or not config.is_file()):
+            raise ValueError('The task workspace repository was changed, so Interspace will not use it.')
+        listed = self._git(['config', '--file', str(config), '--list', '-z']).stdout
+        values = {}
+        for item in listed.split('\0'):
+            key, _, value = item.partition('\n')
+            values[key.lower()] = value  # The last value of a key wins, as in git.
+        lines, section = [], None
+        for name, key, pattern in CLONE_CONFIG:
+            value = values.get(name + '.' + key)
+            if value is None or not pattern.match(value):
+                continue
+            if name != section:
+                lines.append('[%s]' % name)
+                section = name
+            lines.append('\t%s = %s' % (key, value))
+        text = '\n'.join(lines) + '\n'
+        if config.read_text(encoding='utf-8', errors='replace') != text:
+            fresh = git_dir / ('config.interspace-' + uuid.uuid4().hex)
+            fresh.write_text(text, encoding='utf-8')
+            os.replace(str(fresh), str(config))
+        return ['-c', 'core.fsmonitor=false', '--git-dir=' + str(git_dir), '--work-tree=' + str(work), '-C', str(work)]
+
     def prepare(self, task_id, project_id, source_path):
         if not IDENTIFIER.match(task_id) or not IDENTIFIER.match(project_id):
             raise ValueError('Invalid task or project.')
         path = self.root / task_id / project_id
         branch = 'interspace/task-' + task_id[:8]
-        if (path / '.git').is_dir():
-            base = self._git(['-C', str(path), 'config', 'interspace.base-commit']).stdout.strip()
+        if os.path.lexists(str(path / '.git')):
+            base = self._git(self._clone(path) + ['config', 'interspace.base-commit']).stdout.strip()
             return {'path': str(path), 'branch': branch, 'base_commit': base, 'target_branch': None}
         base = self._git(['-C', str(source_path), 'rev-parse', 'HEAD']).stdout.strip()
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -344,27 +385,40 @@ class Workspaces:
         `info/exclude`. The user's own git identity is used when the clone has one, else a local Interspace
         identity. No signing, no hooks and a one-line message, so nothing can add a trailer.
         """
-        work = info['path']
-        exclude = Path(work) / '.git' / 'info' / 'exclude'
+        clone = self._clone(info['path'])
+        info_dir = Path(info['path']) / '.git' / 'info'
+        if info_dir.is_symlink() or (info_dir / 'exclude').is_symlink():
+            raise ValueError('The task workspace repository was changed, so Interspace will not use it.')
+        exclude = info_dir / 'exclude'
         exclude.parent.mkdir(parents=True, exist_ok=True)
         lines = exclude.read_text(encoding='utf-8').splitlines() if exclude.exists() else []
         missing = [line for line in SCRATCH_EXCLUDES if line not in lines]
         if missing:
             with exclude.open('a', encoding='utf-8') as handle:
                 handle.write('\n' + '\n'.join(missing) + '\n')
-        if not self._git(['-C', work, 'status', '--porcelain', '--untracked-files=all']).stdout.strip():
+        if not self._git(clone + ['status', '--porcelain', '--untracked-files=all']).stdout.strip():
             return None
         identity = []
-        if self._git(['-C', work, 'config', 'user.email'], check=False).returncode != 0:
+        if self._git(clone + ['config', 'user.email'], check=False).returncode != 0:
             identity = ['-c', 'user.name=Interspace', '-c', 'user.email=interspace@localhost']
-        self._git(['-C', work, 'add', '--all'])
-        self._git(identity + ['-c', 'commit.gpgsign=false', '-C', work, 'commit', '--quiet', '--no-verify',
-                              '-m', ' '.join(message.split())])
-        return self._git(['-C', work, 'rev-parse', 'HEAD']).stdout.strip()
+        self._git(clone + ['add', '--all'])
+        self._git(identity + ['-c', 'commit.gpgsign=false'] + clone + ['commit', '--quiet', '--no-verify',
+                                                                        '-m', ' '.join(message.split())])
+        return self._git(clone + ['rev-parse', 'HEAD']).stdout.strip()
 
     def publish(self, info, source_path):
         """Write only the task's branch into the user's repository. The chosen name is kept in `info`."""
+        clone = self._clone(info['path'])
+        head = self._git(clone + ['rev-parse', '--verify', 'refs/heads/' + info['branch'] + '^{commit}']).stdout.strip()
         target = info.get('target_branch')
+        if target:
+            found = self._git(['-C', str(source_path), 'rev-parse', '--verify', '--quiet',
+                               'refs/heads/' + target + '^{commit}'], check=False)
+            published = found.stdout.strip() if found.returncode == 0 else None
+            # Only a fast-forward updates the published branch: a commit the user added there is never dropped.
+            if published and published != head and self._git(
+                    clone + ['merge-base', '--is-ancestor', published, head], check=False).returncode != 0:
+                target = None
         if not target:
             target, number = info['branch'], 1
             while self._git(['-C', str(source_path), 'show-ref', '--verify', '--quiet', 'refs/heads/' + target],
@@ -372,23 +426,24 @@ class Workspaces:
                 number += 1
                 target = info['branch'] + '-' + str(number)
             info['target_branch'] = target
-        self._git(['-C', str(source_path), 'fetch', '--quiet', '--no-tags', info['path'],
-                   '+refs/heads/' + info['branch'] + ':refs/heads/' + target])
+        self._git(['-C', str(source_path), 'fetch', '--quiet', '--no-tags', str(Path(info['path']) / '.git'),
+                   'refs/heads/' + info['branch'] + ':refs/heads/' + target])
         return target
 
     def diff(self, info):
         """The whole workspace (committed, staged, unstaged and new files) against the base commit."""
-        work = info['path']
-        git_dir = Path(work) / '.git'
+        clone = self._clone(info['path'])
+        git_dir = Path(info['path']) / '.git'
         handle, index = tempfile.mkstemp(prefix='interspace-index-', dir=str(git_dir))
         os.close(handle)
         try:
             shutil.copyfile(str(git_dir / 'index'), index)
             env = dict(_git_env(), GIT_INDEX_FILE=index)  # The agent's own index is never touched.
-            self._git(['-C', work, 'add', '--all'], env=env)
-            names = self._git(['-C', work, 'diff', '--cached', '--no-renames', '--name-status', info['base_commit']], env=env).stdout
-            counts = self._git(['-C', work, 'diff', '--cached', '--no-renames', '--numstat', info['base_commit']], env=env).stdout
-            patch = self._git(['-C', work, 'diff', '--cached', '--no-renames', info['base_commit']], env=env).stdout
+            self._git(clone + ['add', '--all'], env=env)
+            common = clone + ['diff', '--cached', '--no-renames', '--no-ext-diff', '--no-textconv', '--no-color']
+            names = self._git(common + ['--name-status', info['base_commit']], env=env).stdout
+            counts = self._git(common + ['--numstat', info['base_commit']], env=env).stdout
+            patch = self._git(common + [info['base_commit']], env=env).stdout
         finally:
             os.unlink(index)
         changes = {'A': 'add', 'M': 'modify', 'D': 'delete'}
@@ -757,6 +812,18 @@ class Scheduler:
             self._cond.notify_all()
         if not run.cancel.is_set():
             run.yielded = False
+
+    def hold_clock(self, run):
+        """Stop counting a running parent's active time while it waits on its children (`wait_for`); under the lock."""
+        if run.counted_since is not None:
+            agent = self._task(run.task_id)['agent']
+            agent['active_s'] = agent.get('active_s', 0.0) + (self.monotonic() - run.counted_since)
+            run.counted_since = None
+
+    def restart_clock(self, run):
+        """Count active time again after `hold_clock`, unless the run left a counted state meanwhile."""
+        if run.counted_since is None and self._task(run.task_id)['agent'].get('state') in COUNTED:
+            run.counted_since = self.monotonic()
 
     def _renumber(self):
         for index, task_id in enumerate(self._queue):

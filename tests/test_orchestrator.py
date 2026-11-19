@@ -566,6 +566,88 @@ class CancelAndRestartTests(OrchestratorCase):
         self.assertFalse([t for t in store.agent_tasks() if t.get('parent_task_id')])
 
 
+class ReviewFixTests(OrchestratorCase):
+    """Wave 3B review: approval binding, user stops and the parent's time limit while it waits."""
+
+    def test_team_approval_is_refused_while_the_parent_scope_is_not_approved(self):
+        self.make(orchestrating(self.results))
+        self.parent()
+        self.sched.submit('parent', 'p1', 'x', None)
+        team_id = self.proposal()['team_id']
+        self.wait_state('parent', 'paused_team')
+        with self.store.lock:
+            # The user edits the parent scope (scope_update clears its approval) but does not approve it.
+            parent = self.store.task('parent')
+            parent['scope']['projects'][0]['write'] = ['**', 'extra/**']
+            parent['scope_approval'] = None
+        with self.assertRaisesRegex(ValueError, 'Approve the task scope'):
+            self.sched.orchestrator.answer({'task_id': 'parent', 'team_id': team_id, 'decision': 'approve'})
+        self.assertEqual(self.children(), [])
+        self.assertEqual(self.store.task('parent')['agent']['teams'][team_id]['status'], 'proposed')
+        self.sched.cancel('parent')
+        self.wait_state('parent', 'cancelled')
+
+    def test_message_member_cannot_restart_a_child_the_user_cancelled(self):
+        gate = threading.Event()
+        cancelled = threading.Event()
+
+        def stuck(session, text, ctx):
+            if text == 'Try again anyway.':
+                return {'status': 'completed', 'usage': dict(CODEX_USAGE), 'error': None}
+            session.interrupted.wait(10)
+            return {'status': 'cancelled', 'usage': None, 'error': None}
+
+        def then(ctx, proposed):
+            cancelled.wait(5)
+            self.results.append(ctx.orchestrate('message_member', {'team_id': proposed['team_id'], 'member_id': 'm1',
+                                                                    'text': 'Try again anyway.'}))
+            gate.set()
+        team = {'summary': 's', 'members': [{'role': 'researcher', 'brief': 'a'}]}
+
+        def parent_script(session, text, ctx):
+            proposed = ctx.orchestrate('propose_team', team)
+            self.results.append(proposed)
+            then(ctx, proposed)
+            return {'status': 'completed', 'usage': dict(CLAUDE_USAGE), 'error': None}
+        self.make(parent_script, codex=stuck)
+        self.parent()
+        self.sched.submit('parent', 'p1', 'x', None)
+        self.sched.orchestrator.answer({'task_id': 'parent', 'team_id': self.proposal()['team_id'], 'decision': 'approve'})
+        wait_for(lambda: self.children() and self.state(self.children()[0]['id']) == 'running', message='child running')
+        child_id = self.children()[0]['id']
+        self.sched.cancel(child_id)  # The user stops this member from its card.
+        self.wait_state(child_id, 'cancelled')
+        cancelled.set()
+        gate.wait(5)
+        self.wait_state('parent', 'idle')
+        messaged = self.results[1]
+        self.assertFalse(messaged['ok'])
+        self.assertIn('stopped', messaged['error']['message'])
+        self.assertEqual(self.state(child_id), 'cancelled')
+        self.assertEqual([t for t in self.codex.turns if t[1] == 'Try again anyway.'], [])
+
+    def test_waiting_for_children_does_not_count_against_the_parent_time_limit(self):
+        def slow(session, text, ctx):
+            time.sleep(1.5)
+            ctx.emit('message', {'role': 'assistant', 'text': 'done', 'final': True}, item_id='m1')
+            return {'status': 'completed', 'usage': dict(CODEX_USAGE), 'error': None}
+
+        def parent_script(session, text, ctx):
+            time.sleep(1.2)  # The parent's own work before it proposes a team.
+            proposed = ctx.orchestrate('propose_team', {'summary': 's', 'members': [{'role': 'researcher', 'brief': 'a'}]})
+            self.results.append(ctx.orchestrate('wait_for', {'team_id': proposed['team_id'], 'timeout_s': 10}))
+            return {'status': 'completed', 'usage': dict(CLAUDE_USAGE), 'error': None}
+        self.make(parent_script, codex=slow)
+        task = self.store.add_task('parent', 'p1', time_limit_s=2)
+        task.update(role='orchestrator', provider='claude')
+        self.sched.submit('parent', 'p1', 'x', None)
+        self.sched.orchestrator.answer({'task_id': 'parent', 'team_id': self.proposal()['team_id'], 'decision': 'approve'})
+        self.wait_state('parent', 'idle', 'time_limit', timeout=10)
+        self.assertEqual(self.state('parent'), 'idle')
+        self.assertEqual(self.results[0]['members'][0]['state'], 'idle')
+        self.assertLess(self.store.task('parent')['agent']['active_s'], 2)
+
+
 class MethodTests(unittest.TestCase):
     def test_team_answer_is_registered_for_the_service(self):
         import service
