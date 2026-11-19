@@ -90,7 +90,7 @@ function activity(id){
   if(it.error)return 'Error: '+oneLine(it.error.message||it.error.code||'');
   if(it.ask)return (it.answer?'Answered: ':'Needs your answer: ')+oneLine(it.ask.title||'');
   if(it.call)return (CATEGORY[it.call.category]||'Tool')+': '+oneLine(it.call.title||it.call.tool||'');
-  if(it.diff)return 'Changed '+(it.diff.files||[]).length+' file'+((it.diff.files||[]).length===1?'':'s');
+  if(it.diff&&(it.diff.files||[]).length)return 'Changed '+(it.diff.files||[]).length+' file'+((it.diff.files||[]).length===1?'':'s');
   if(it.message&&it.message.role==='assistant'&&String(it.message.text).trim())return oneLine(it.message.text);
   if(it.plan){const step=it.plan.find(s=>s.status==='in_progress');if(step)return 'Plan: '+oneLine(step.text??'');}
  }
