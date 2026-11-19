@@ -101,6 +101,15 @@ function teamCard(card,ctx){
   return;
  }
  const d=draftFor(ctx.taskId,team),locked=d.sending||!!d.sent||ctx.closed,n=names(d.members);
+ // The Running view shows a read-only copy that leads to the task: one editable form per proposal, so the team
+ // that is approved is always the one on screen, and no control id appears twice.
+ if(ctx.compact){
+  for(const m of d.members)if(!d.removed.has(m.member_id))memberSummary(m,n.get(m.member_id),list);
+  if(ctx.closed&&!d.sent){el('p','footnote','This proposal is no longer open: the task is '+ctx.closedText+'.',card);return;}
+  if(d.sent){el('p','footnote',(d.sent==='approve'?'Approved':'Declined')+'. Waiting for the Orchestrator.',card);return;}
+  const go=el('button','primary','Review the proposed team',el('div','actions',null,card));go.type='button';go.onclick=ctx.open;
+  return;
+ }
  for(const m of d.members)memberEditor(ctx,team,d,m,n.get(m.member_id),list,locked);
  if(ctx.closed&&!d.sent){el('p','footnote','This proposal is no longer open: the task is '+ctx.closedText+'.',card);return;}
  if(d.error)el('p','error-text',d.error,card).setAttribute('role','alert');
@@ -136,10 +145,12 @@ function subagentCard(card,ctx){
  const merged=window.interspaceReview?.merged?.(s.task_id);
  if(merged)el('p','merged-line',merged.merge_commit?'Merged into '+merged.into+' · '+String(merged.merge_commit).slice(0,8):'Already merged into '+merged.into,card).setAttribute('role','status');
  const actions=el('div','actions',null,card);
- const toggle=el('button','',ctx.expanded?'Hide activity':'Show activity',actions);toggle.type='button';toggle.id='sub-toggle-'+ctx.key;toggle.setAttribute('aria-expanded',String(ctx.expanded));toggle.setAttribute('aria-label',(ctx.expanded?'Hide ':'Show ')+label+' activity');toggle.onclick=ctx.toggle;
- const open=el('button','','Open',actions);open.type='button';open.id='sub-open-'+ctx.key;open.setAttribute('aria-label','Open '+label+' subagent');open.onclick=ctx.open;
- if(s.access==='write'||diff){const r=el('button','','Review changes',actions);r.type='button';r.id='review-'+ctx.key;r.setAttribute('aria-label','Review '+label+' changes');r.disabled=!window.interspaceReview;r.onclick=()=>window.interspaceReview?.open(s.task_id);}
- if(ctx.expanded){toggle.setAttribute('aria-controls',ctx.childBox.id);card.append(ctx.childBox);}
+ // The compact copy (Running view) has no ids and no expansion: the task view owns those.
+ const id=name=>ctx.compact?'':name+ctx.key;
+ if(!ctx.compact){const toggle=el('button','',ctx.expanded?'Hide activity':'Show activity',actions);toggle.type='button';toggle.id=id('sub-toggle-');toggle.setAttribute('aria-expanded',String(ctx.expanded));toggle.setAttribute('aria-label',(ctx.expanded?'Hide ':'Show ')+label+' activity');toggle.onclick=ctx.toggle;if(ctx.expanded){toggle.setAttribute('aria-controls',ctx.childBox.id);}}
+ const open=el('button','','Open',actions);open.type='button';if(!ctx.compact)open.id=id('sub-open-');open.setAttribute('aria-label','Open '+label+' subagent');open.onclick=ctx.open;
+ if(s.access==='write'||diff){const r=el('button','','Review changes',actions);r.type='button';if(!ctx.compact)r.id=id('review-');r.setAttribute('aria-label','Review '+label+' changes');r.disabled=!window.interspaceReview;r.onclick=()=>window.interspaceReview?.open(s.task_id);}
+ if(ctx.expanded)card.append(ctx.childBox);
 }
 
 window.interspaceTeam={teamCard,subagentCard};

@@ -2,11 +2,11 @@
 
 A personal observatory for projects, research, knowledge, and specialist AI agents.
 
-**Status: native Mac development app with agent tasks (Codex or Claude Code) and per-task token budgets; a multi-provider revamp is in progress.** Launch `dist/Interspace.app` after [building](app/README.md). Each agent task works in its own copy of the project under a scope you approve and commits to its own `interspace/task-…` branch. Tasks from the earlier Read-only review and Fix & test modes stay readable but no longer run. The design preview and earlier offline pilot remain separate.
+**Status: native Mac development app. Claude Code and Codex run as agents under one Orchestrator; Gemini comes later.** Launch `dist/Interspace.app` after [building](app/README.md). Every task is a conversation with the Orchestrator, which can propose a team of subagents on mixed providers. You approve each team before it runs. Each writing subagent works in its own copy of the project and commits to its own `interspace/task-…` branch, which you review and merge. Tasks from the earlier Read-only review and Fix & test modes stay readable but no longer run. The design preview and earlier offline pilot remain separate.
 
 ## Mac app
 
-Double-click `dist/Interspace.app`. Add or select a Git project, then choose **New task**: pick the runtime, review and approve the task scope, and message the agent. See [app setup and limits](app/README.md).
+Double-click `dist/Interspace.app`. Add or select a Git project and sign in to your providers under **Settings → Providers**. Then choose **New task**: approve the task scope, describe the outcome, approve the team the Orchestrator proposes, follow the subagents as they work, and use **Review changes → Merge**. See [app setup and limits](app/README.md).
 
 ## Design preview
 
@@ -30,7 +30,7 @@ Each person installs Interspace on their own machine and uses their own files, p
 - Configurable specialist agents have explicit tools, context, outputs, and run limits.
 - A decision inbox shows proposed actions before execution.
 - Local project history and selected-folder access are the default.
-- OpenAI is the first proposed provider; other providers can be added later.
+- Claude Code and Codex are the first providers, each on your own sign-in; Gemini can be added later.
 - Subscription authentication must be verified against the provider's supported integration path. API access is a separate billing path; this prototype promises neither subscription coverage nor unlimited usage.
 
 ## Design
@@ -46,7 +46,7 @@ Each person installs Interspace on their own machine and uses their own files, p
 - [Engineering and debugging conventions](docs/engineering.md)
 - [Standalone prototype](design/index.html)
 
-The Mac app implements bounded read-only review, controlled Python editing and a Codex connection. Broader role execution, external integrations, notarized distribution and additional-platform packaging remain future work.
+The Mac app runs Orchestrator tasks with approved teams of Claude Code and Codex subagents, and reviews and merges their branches. Gemini, notarized distribution and additional-platform packaging remain future work.
 
 ## Maintaining the preview
 
@@ -64,4 +64,4 @@ The preview build regenerates both the standalone preview and the bundled `desig
 
 ### Multi-project workspaces
 
-The native app now keeps a local project registry with separate conversations, proposals and review histories. Add a Git project, set its brief and priority, then use Workspace scope to compare next actions across projects. Detailed evidence stays project-scoped; one interaction runs at a time, even when browsing another project. Existing single-project state migrates with a backup. See [the Mac app guide](app/README.md#multiple-projects) for source-selection and runtime limits.
+The native app keeps a local project registry. Each project has its own tasks, and its name, brief and priority are saved locally. Several tasks, in one project or across projects, can run at once. Existing single-project state migrates with a backup. See [the Mac app guide](app/README.md#projects-and-tasks).

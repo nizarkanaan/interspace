@@ -132,7 +132,7 @@ function diffBlock(m,it,d,parent){
  if(patch){const pre=el('pre','diff-patch',null,box);pre.tabIndex=0;pre.setAttribute('aria-label','Patch');for(const line of patch.replace(/\n$/,'').split('\n')){const cls=/^(\+\+\+|---|diff |index )/.test(line)?'meta':line[0]==='+'?'add':line[0]==='-'?'del':line.startsWith('@@')?'hunk':'ctx';el('span','diff-line '+cls,line+'\n',pre);}}
  if(d.truncated)blobButton(m,it,'Show full diff',d.blob_id,'fullDiff',box);
 }
-function askCard(m,it,card){
+function askCard(m,it,card,compact){
  const a=it.ask;card.classList.add('ask');card.setAttribute('role','group');card.setAttribute('aria-label',a.title||'Question');
  el('p','badge',REASON[a.reason]||a.reason,card);el('h3','',a.title,card);if(a.detail)el('p','',a.detail,card);
  if(a.request)pairs(a.request,card);
@@ -142,7 +142,7 @@ function askCard(m,it,card){
  if(it.answerError)el('p','error-text',it.answerError,card).setAttribute('role','alert');
  const actions=el('div','actions',null,card),busy=!!it.sending||!!it.sent;
  let reply=null;
- if(options.includes('text')){const id='reply-'+m.id+'-'+it.key;const label=el('label','footnote','Your reply',actions);label.htmlFor=id;reply=el('textarea','ask-reply',null,actions);reply.id=id;reply.disabled=busy;const b=el('button','primary','Reply',actions);b.type='button';b.disabled=busy;b.onclick=()=>{if(reply.value.trim())answer(m.id,it.key,'text',reply.value);};}
+ if(options.includes('text')){const id='reply-'+m.id+'-'+it.key+(compact?'-compact':'');const label=el('label','footnote','Your reply',actions);label.htmlFor=id;reply=el('textarea','ask-reply',null,actions);reply.id=id;reply.disabled=busy;const b=el('button','primary','Reply',actions);b.type='button';b.disabled=busy;b.onclick=()=>{if(reply.value.trim())answer(m.id,it.key,'text',reply.value);};}
  for(const option of ['allow_once','add_to_scope','deny']){
   if(!options.includes(option)||option==='add_to_scope'&&!(a.scope_patch&&a.patched_scope_digest))continue;
   const b=el('button',option==='allow_once'?'primary':'',OPTION[option],actions);b.type='button';b.disabled=busy;b.onclick=()=>answer(m.id,it.key,option);
@@ -164,15 +164,15 @@ function toolCard(m,it,card){
  if(r?.error)el('p','error-text',(r.error.code?r.error.code+': ':'')+r.error.message,card);
  if(it.diff)diffBlock(m,it,it.diff,card);
 }
-function build(m,it){
+function build(m,it,compact){
  if(it.row){const r=el('p','row-event '+it.row,it.text);r.dataset.item=it.key;return r;}
  if(it.message){const msg=el('div','message '+it.message.role+(it.message.pending?' pending':''));msg.dataset.item=it.key;el('small','',it.message.role==='user'?'You':'Agent',msg);markdown(it.message.text,msg);if(!it.message.final&&!it.message.pending)el('span','streaming footnote','Writing…',msg);if(it.message.pending&&!it.message.failed)el('span','footnote','Sending…',msg);if(it.message.failed)el('p','error-text','Not sent: '+it.message.failed,msg);return msg;}
  const card=el('article','card');card.dataset.item=it.key;
  if(it.team){const row=rowStatus(m.id),late=!BUSY.has(m.status?.state)&&TERMINAL.has(row);
-  window.interspaceTeam.teamCard(card,{taskId:m.id,team:it.team,request,closed:!!it.team.closed||terminal(m.status)||late,
+  window.interspaceTeam.teamCard(card,{taskId:m.id,team:it.team,request,compact:!!compact,open:()=>open(m.id),closed:!!it.team.closed||terminal(m.status)||late,
    closedText:it.team.closed||(terminal(m.status)||!late?statusText(m.status).toLowerCase():statusText({state:row}).toLowerCase()),bump:()=>{it.version++;changed(m.id);}});}
- else if(it.sub)window.interspaceTeam.subagentCard(card,subContext(m,it));
- else if(it.ask)askCard(m,it,card);
+ else if(it.sub)window.interspaceTeam.subagentCard(card,subContext(m,it,compact));
+ else if(it.ask)askCard(m,it,card,compact);
  else if(it.call||it.result||it.output!=null)toolCard(m,it,card);
  else if(it.diff){card.classList.add('diff-card');diffBlock(m,it,it.diff,card);}
  else if(it.reasoning!=null){const d=el('details','reasoning',null,card);el('summary','','Reasoning summary',d);markdown(it.reasoning,d);}
@@ -185,8 +185,10 @@ const terminal=s=>!!s&&TERMINAL.has(s.state);
 // A subagent card also changes with its child's own stream, the child's task row and host state (a merge).
 const stamp=(m,it)=>it.sub?it.version+'|'+(tasks.get(it.sub.task_id)?.rev||0)+'|'+(rowStatus(it.sub.task_id)||'')+'|'+stampOf(it.sub.task_id):it.version;
 // A child's own stream renders into one container that lives as long as its card, so it reconciles in place.
-function subContext(m,it){
+// Only the task view's card holds it: a compact copy (Running view) never expands, so the container is never moved.
+function subContext(m,it,compact){
  const child=it.sub.task_id,key=String(child).replace(/[^A-Za-z0-9_-]/g,'_');
+ if(compact)return {sub:it.sub,key,compact:true,expanded:false,childBox:null,statusText,markdown,status:childStatus(child,it.sub.state),activity:activity(child),toggle:()=>{},open:()=>open(child)};
  if(it.expanded&&!it.childBox){it.childBox=el('div','stream nested');it.childBox.id='child-'+key;it.childBox.setAttribute('role','log');it.childBox.setAttribute('aria-label','Subagent activity');}
  if(it.expanded)render(it.childBox,child);
  return {sub:it.sub,key,expanded:!!it.expanded,childBox:it.childBox,statusText,markdown,status:childStatus(child,it.sub.state),activity:activity(child),
@@ -203,7 +205,7 @@ function render(container,taskId,options={}){
  const focus=document.activeElement&&container.contains(document.activeElement)&&document.activeElement.id?document.activeElement.id:null;
  let list=[...m.items.values()];
  if(options.compact){const open=m.openAsk&&m.items.get(m.openAsk);list=list.slice(-COMPACT_ITEMS);if(open&&!list.includes(open))list.push(open);}
- const nodes=list.map(it=>{const hit=cache.get(it.key),version=stamp(m,it);if(hit&&hit.version===version)return hit.node;const next=build(m,it);if(hit){const was=hit.node.querySelector('details');const now=next.querySelector('details');if(was&&now)now.open=was.open;}cache.set(it.key,{version,node:next});return next;});
+ const nodes=list.map(it=>{const hit=cache.get(it.key),version=stamp(m,it);if(hit&&hit.version===version)return hit.node;const next=build(m,it,options.compact);if(hit){const was=hit.node.querySelector('details');const now=next.querySelector('details');if(was&&now)now.open=was.open;}cache.set(it.key,{version,node:next});return next;});
  for(const key of [...cache.keys()])if(!m.items.has(key))cache.delete(key);
  nodes.forEach((n,i)=>{if(container.children[i]!==n)container.insertBefore(n,container.children[i]||null);});
  while(container.children.length>nodes.length)container.lastElementChild.remove();
