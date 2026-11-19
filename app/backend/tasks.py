@@ -30,12 +30,16 @@ MAX_REPORT_CHARS = 24000
 # Agent task roles (orchestration.md): every new task is an Orchestrator task; subagents are child tasks with a
 # team role. `implementer` and `tester` are write roles (providers.md); the other team roles read only.
 ORCHESTRATOR = 'orchestrator'
-TEAM_ROLES = ('researcher','implementer','reviewer','tester','writer')
+TEAM_ROLES = ('researcher','implementer','reviewer','tester','writer','citation_checker')
 WRITE_ROLES = ('implementer','tester')
 ROLES = (ORCHESTRATOR,)+TEAM_ROLES
 ACCESS = ('read','write')
 MAX_BRIEF_CHARS = 6000
 CHILD_FIELDS = ('parent_task_id','brief','access','team_id','member_id')
+# research/tasks.md: a task without a project (`project_id` null) is a research task; tasks saved before kinds
+# existed are project tasks.
+KINDS = ('project','research')
+RESEARCH_WRITE_REFUSED = 'Research tasks have no project to write to. Use a project task for code.'
 
 
 def title(value):
@@ -83,10 +87,26 @@ def provider(task):
     return task.get('provider',LEGACY_PROVIDER)
 
 
-def create(name='New agent task', *, project_id, provider=None, model=None, token_budget=budget.DEFAULT_BUDGET):
-    """A new Orchestrator task. The scope (scope.md) is attached by the caller, which needs the task ID to build it."""
-    if not isinstance(project_id,str) or not project_id:raise ValueError('An agent task needs a project.')
-    return {'id':uuid.uuid4().hex,'title':title(name),'mode':'agent','role':ORCHESTRATOR,'draft':'',
+def kind(task):
+    """'research' for a task without a project, else 'project' (also for rows saved before kinds existed)."""
+    return 'research' if task.get('kind')=='research' else 'project'
+
+
+def is_research(task):
+    return kind(task)=='research'
+
+
+def create(name='New agent task', *, project_id, provider=None, model=None, token_budget=budget.DEFAULT_BUDGET, kind=None):
+    """A new Orchestrator task. The scope (scope.md) is attached by the caller, which needs the task ID to build it.
+
+    `project_id` None needs `kind='research'` (research/tasks.md); tasks with a project are `kind='project'`.
+    """
+    kind=kind or 'project'
+    if kind not in KINDS:raise ValueError('Unknown task kind.')
+    if kind=='research':
+        if project_id is not None:raise ValueError('A research task has no project.')
+    elif not isinstance(project_id,str) or not project_id:raise ValueError('An agent task needs a project.')
+    return {'id':uuid.uuid4().hex,'title':title(name),'mode':'agent','role':ORCHESTRATOR,'draft':'','kind':kind,
             'token_budget':budget.validate(token_budget),'thread':[],'pending':None,'run_id':None,'run_ids':[],
             'error':'','error_status':None,'scope':None,'scope_approval':None,
             'provider':validate_provider(registry.DEFAULT_PROVIDER if provider is None else provider),
@@ -113,10 +133,11 @@ def validate_access(value):
 def child(parent, *, role, brief_text, provider, model, access, team_id, member_id):
     """A subagent row (orchestration.md): a normal agent task with the child fields. Scope is attached by the caller."""
     if role not in TEAM_ROLES:raise ValueError('Unknown subagent role.')
+    if is_research(parent) and (role in WRITE_ROLES or access!='read'):raise ValueError(RESEARCH_WRITE_REFUSED)
     text=brief(brief_text)
-    label=role.capitalize()+': '+' '.join(text.split())
+    label=role.replace('_',' ').capitalize()+': '+' '.join(text.split())
     task=create(label if len(label)<=160 else label[:159]+'…',project_id=parent['agent']['project_id'],
-                provider=provider,model=model,token_budget=parent.get('token_budget'))
+                provider=provider,model=model,token_budget=parent.get('token_budget'),kind=kind(parent))
     task.update(role=role,brief=text,access=validate_access(access),parent_task_id=parent['id'],
                 team_id=team_id,member_id=member_id)
     return task
@@ -131,7 +152,11 @@ def imported(name):
 def validate_agent(task):
     """Shape checks for the agent fields; scope contents are validated by scope.validate at the boundary."""
     agent=task.get('agent')
-    if not isinstance(agent,dict) or not isinstance(agent.get('project_id'),str):raise ValueError()
+    if task.get('kind') is not None and task['kind'] not in KINDS:raise ValueError()
+    if not isinstance(agent,dict):raise ValueError()
+    if is_research(task):
+        if agent.get('project_id') is not None:raise ValueError()
+    elif not isinstance(agent.get('project_id'),str):raise ValueError()
     if agent.get('state') is not None and agent['state'] not in AGENT_STATES:raise ValueError()
     if type(agent.get('turns',0)) is not int or not isinstance(agent.get('workspaces',{}),dict):raise ValueError()
     if not isinstance(agent.get('active_s',0.0),(int,float)) or isinstance(agent.get('active_s'),bool):raise ValueError()

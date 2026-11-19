@@ -252,15 +252,46 @@ class MemoryStore:
         for project in self.state['projects'].values():
             if task_id in project['tasks']:
                 return project['tasks'][task_id]
+        research = self.state.get('research', {}).get('tasks', {})
+        if task_id in research:
+            return research[task_id]
         raise ValueError('Unknown task.')
 
     def project(self, project_id):
         return self.state['projects'].get(project_id)
 
+    def collection(self, task):
+        """The dict that holds `task`'s row: its project's tasks, or the Research collection."""
+        if task['agent'].get('project_id') is None:
+            return self.state.setdefault('research', {'tasks': {}})['tasks']
+        return self.state['projects'][task['agent']['project_id']]['tasks']
+
+    def add_research_task(self, task_id, token_budget=250000, sources=None, approve=True, rules=None):
+        """A task without a project (research/tasks.md), its scope allowing `sources` (default crossref, arxiv)."""
+        task = {'id': task_id, 'title': 'R', 'mode': 'agent', 'kind': 'research', 'token_budget': token_budget,
+                'role': 'orchestrator', 'provider': 'claude',
+                'agent': {'project_id': None, 'state': None, 'turns': 0, 'active_s': 0.0, 'workspaces': {}}}
+        scope = self.scope_api.default(task, [])
+        scope.update(commands={'workspace': 'deny', 'allow': [], 'deny': []}, web_search='deny',
+                     network={'default': 'deny', 'allow_hosts': [], 'deny_hosts': []},
+                     research={'sources': dict(sources or {'crossref': 'allow', 'arxiv': 'allow'})})
+        scope['limits'] = {'token_budget': token_budget, 'time_limit_s': 3600}
+        if rules:
+            scope['fake_rules'] = rules
+        task['scope'] = scope
+        task['scope_approval'] = None
+        if approve:
+            task['scope_approval'] = {'v': 1, 'scope_version': 1, 'scope_digest': self.scope_api.digest(scope),
+                                      'approved_at': '2026-11-19T00:00:00.000Z', 'by': 'user'}
+        self.state.setdefault('research', {'tasks': {}})['tasks'][task_id] = task
+        return task
+
     def agent_tasks(self):
         for project in self.state['projects'].values():
             for task in project['tasks'].values():
                 yield task
+        for task in self.state.get('research', {}).get('tasks', {}).values():
+            yield task
 
     def changed(self, task_id=None):
         self.changes += 1

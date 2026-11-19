@@ -261,5 +261,42 @@ class TaskStorageTests(unittest.TestCase):
                 self.assertEqual(restored.public()['error'],'')
 
 
+
+class ResearchTaskRowTests(unittest.TestCase):
+    """research/tasks.md "Tasks without a project": kind, project_id null, the citation_checker role."""
+
+    def test_roles_include_the_citation_checker_as_a_read_role(self):
+        self.assertEqual(tasks.TEAM_ROLES,('researcher','implementer','reviewer','tester','writer','citation_checker'))
+        self.assertNotIn('citation_checker',tasks.WRITE_ROLES)
+
+    def test_project_tasks_default_to_kind_project(self):
+        task=tasks.create('T',project_id='p1')
+        self.assertEqual(task['kind'],'project')
+        self.assertEqual(tasks.kind(task),'project')
+        legacy=dict(task);legacy.pop('kind')
+        self.assertEqual(tasks.kind(tasks.validate(legacy,legacy['id'])),'project')
+
+    def test_research_tasks_have_no_project(self):
+        task=tasks.create('Related work',project_id=None,kind='research')
+        self.assertEqual((task['kind'],task['agent']['project_id']),('research',None))
+        tasks.validate(task,task['id'])
+        self.assertTrue(tasks.is_research(task))
+        for kwargs in (dict(project_id=None),dict(project_id=None,kind='project'),dict(project_id='p1',kind='research'),
+                       dict(project_id='p1',kind='other')):
+            with self.subTest(kwargs=kwargs),self.assertRaises(ValueError):tasks.create('T',**kwargs)
+        for bad in (dict(task,kind='project'),dict(task,kind='other'),dict(task,agent=dict(task['agent'],project_id='p1'))):
+            with self.assertRaises(ValueError):tasks.validate(bad,bad['id'])
+
+    def test_research_children_read_only(self):
+        parent=tasks.create('Related work',project_id=None,kind='research')
+        child=tasks.child(parent,role='citation_checker',brief_text='Check',provider='codex',model=None,access='read',
+                          team_id='t',member_id='m1')
+        self.assertEqual((child['kind'],child['agent']['project_id']),('research',None))
+        tasks.validate(child,child['id'])
+        for role,access in (('implementer','write'),('researcher','write'),('tester','read')):
+            with self.subTest(role=role,access=access),self.assertRaisesRegex(ValueError,'no project to write to'):
+                tasks.child(parent,role=role,brief_text='b',provider='claude',model=None,access=access,team_id='t',member_id='m1')
+
+
 if __name__ == '__main__':
     unittest.main()

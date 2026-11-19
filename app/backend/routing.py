@@ -6,7 +6,7 @@ import copy
 
 from runtime import registry
 
-ROLES = ('researcher', 'implementer', 'reviewer', 'tester', 'writer')
+ROLES = ('researcher', 'implementer', 'reviewer', 'tester', 'writer', 'citation_checker')
 WRITE_ROLES = ('implementer', 'tester')  # These need a provider with `capabilities.write`.
 
 DEFAULT_ROUTING = {
@@ -15,7 +15,8 @@ DEFAULT_ROUTING = {
               'implementer': {'provider': 'claude', 'model': None},
               'reviewer': {'provider': 'codex', 'model': None},
               'tester': {'provider': 'claude', 'model': None},
-              'writer': {'provider': 'claude', 'model': None}},
+              'writer': {'provider': 'claude', 'model': None},
+              'citation_checker': {'provider': 'codex', 'model': None}},
 }
 
 
@@ -45,8 +46,10 @@ def validate(value):
     if value.get('v', 1) != 1 or set(value) - {'v', 'orchestrator', 'roles'}:
         raise ValueError('Routing has fields this version does not know.')
     roles = value.get('roles')
-    if not isinstance(roles, dict) or set(roles) != set(ROLES):
+    if not isinstance(roles, dict) or set(roles) - set(ROLES):
         raise ValueError('Routing must name a provider for each role: ' + ', '.join(ROLES) + '.')
+    # Routing saved before a role existed (citation_checker, research/tasks.md) is completed from the defaults.
+    roles = dict({role: DEFAULT_ROUTING['roles'][role] for role in ROLES if role not in roles}, **roles)
     return {'v': 1, 'orchestrator': _choice(value.get('orchestrator'), 'orchestrator'),
             'roles': {role: _choice(roles[role], role, role in WRITE_ROLES) for role in ROLES}}
 

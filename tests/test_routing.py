@@ -15,7 +15,7 @@ from runtime import registry  # noqa: E402
 
 class RoutingTests(unittest.TestCase):
     def test_defaults_match_the_contract(self):
-        self.assertEqual(routing.ROLES, ('researcher', 'implementer', 'reviewer', 'tester', 'writer'))
+        self.assertEqual(routing.ROLES, ('researcher', 'implementer', 'reviewer', 'tester', 'writer', 'citation_checker'))
         self.assertEqual(routing.WRITE_ROLES, ('implementer', 'tester'))
         self.assertEqual(routing.DEFAULT_ROUTING, {
             'v': 1, 'orchestrator': {'provider': 'claude', 'model': None},
@@ -23,8 +23,19 @@ class RoutingTests(unittest.TestCase):
                       'implementer': {'provider': 'claude', 'model': None},
                       'reviewer': {'provider': 'codex', 'model': None},
                       'tester': {'provider': 'claude', 'model': None},
-                      'writer': {'provider': 'claude', 'model': None}}})
+                      'writer': {'provider': 'claude', 'model': None},
+                      'citation_checker': {'provider': 'codex', 'model': None}}})
         self.assertEqual(routing.validate(routing.DEFAULT_ROUTING), routing.DEFAULT_ROUTING)
+
+    def test_missing_roles_are_completed_from_the_defaults(self):
+        saved = routing.default()
+        del saved['roles']['citation_checker']
+        saved['roles']['writer'] = {'provider': 'codex', 'model': None}
+        checked = routing.validate(saved)
+        self.assertEqual(checked['roles']['citation_checker'], {'provider': 'codex', 'model': None})
+        self.assertEqual(checked['roles']['writer'], {'provider': 'codex', 'model': None})
+        self.assertEqual(routing.current({'routing': saved})['roles']['writer']['provider'], 'codex')
+        self.assertEqual(list(checked['roles']), list(routing.ROLES))
 
     def test_current_falls_back_to_defaults(self):
         self.assertEqual(routing.current({}), routing.DEFAULT_ROUTING)
@@ -57,7 +68,6 @@ class RoutingTests(unittest.TestCase):
             changed(lambda v: v.update(v=2)),
             changed(lambda v: v.update(extra=1)),
             changed(lambda v: v.pop('orchestrator')),
-            changed(lambda v: v['roles'].pop('writer')),
             changed(lambda v: v['roles'].update(painter={'provider': 'claude', 'model': None})),
             changed(lambda v: v['roles'].update(writer={'provider': 'gemini', 'model': None})),
             changed(lambda v: v['roles'].update(writer={'provider': 'claude', 'model': 'sonnet'})),
