@@ -208,9 +208,10 @@ class AppServer:
 class _DeviceSignIn:
     """One pending device sign-in: its app-server stays up until the login completes, fails or expires."""
 
-    def __init__(self, server, login_id):
+    def __init__(self, server, login_id, on_finish=None):
         self.server = server
         self.login_id = login_id
+        self.on_finish = on_finish  # Called with the outcome when this attempt ends on its own (not replaced).
         self.stop = threading.Event()
         self.done = threading.Event()
         self.outcome = None  # 'success' | 'failed' | 'expired' | 'cancelled'
@@ -227,11 +228,18 @@ class _DeviceSignIn:
                 self.outcome = 'success' if params.get('success') is True else 'failed'
         finally:
             with _lock:
-                if _active.get(home) is self:
+                current = _active.get(home) is self
+                if current:
                     del _active[home]
                     _outcomes[home] = self.outcome
             self.server.close()
             self.done.set()
+        # A replaced or cancelled attempt reports nothing: the user started another one, or the app is closing.
+        if current and self.outcome != 'cancelled' and self.on_finish is not None:
+            try:
+                self.on_finish(self.outcome)
+            except Exception:
+                pass  # The caller's report failing must not break sign-in; the next status read still answers.
 
     def cancel(self):
         try:
@@ -346,8 +354,13 @@ class CodexAuth:
             detail = OUTCOME_DETAILS.get(outcome, 'Sign in to Codex with your ChatGPT account.')
         return {'state': 'signed_out', 'account': None, 'detail': detail}
 
-    def begin_device_sign_in(self):
-        """Start a device sign-in; returns {'kind': 'device', 'url', 'code', 'detail'} and keeps waiting."""
+    def begin_device_sign_in(self, on_finish=None):
+        """Start a device sign-in; returns {'kind': 'device', 'url', 'code', 'detail'} and keeps waiting.
+
+        `on_finish(outcome)` runs on the waiting thread once the sign-in succeeds, fails or expires
+        ('success' | 'failed' | 'expired'), after the attempt is over. It is not called when the attempt is
+        replaced by a new sign-in, signed out or cancelled.
+        """
         if not self.command:
             raise AuthError('Install Codex CLI or the ChatGPT Mac app before signing in.')
         home = str(self.codex_home)
@@ -367,7 +380,7 @@ class CodexAuth:
         except AuthError:
             server.close()
             raise
-        attempt = _DeviceSignIn(server, login_id)
+        attempt = _DeviceSignIn(server, login_id, on_finish)
         with _lock:
             _active[home] = attempt
         threading.Thread(target=attempt.run, args=(home,), daemon=True, name='codex-device-sign-in').start()

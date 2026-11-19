@@ -634,6 +634,29 @@ class PermissionTests(ClaudeCase):
         self.assertIn('edit files', prompt)
         self.assertNotIn('read-only', prompt)
 
+    def test_role_instructions_are_added_to_the_system_prompt(self):
+        ctx = FakeContext(self.root)
+        ctx.instructions = 'You are the Orchestrator of an Interspace task.\nRoles: researcher (read)'
+        _, ctx, outcome = self.turn({'turns': [[INIT, result()]]}, ctx=ctx)
+        self.assertEqual(outcome['status'], 'completed', outcome)
+        prompt = dict(zip(self.main_launches()[0]['launch'], self.main_launches()[0]['launch'][1:]))['--system-prompt']
+        self.assertTrue(prompt.startswith('You are an agent working inside Interspace'))
+        self.assertTrue(prompt.endswith('\n\n' + ctx.instructions))
+
+    def test_read_access_from_the_context_keeps_the_session_read_only(self):
+        ctx = FakeContext(self.root)
+        ctx.access = 'read'
+        steps = [INIT, self.ask('Edit', {'file_path': 'a.py', 'old_string': 'a', 'new_string': 'b'}, 'toolu_1'),
+                 self.ask('Bash', {'command': 'git status'}, 'toolu_2'), result()]
+        _, ctx, outcome = self.turn({'turns': [steps]}, ctx=ctx)
+        self.assertEqual(outcome['status'], 'completed', outcome)
+        # Only the read-only command reaches the scope; the edit is refused before it.
+        self.assertEqual([r['category'] for r, _ in ctx.authorized], ['command'])
+        self.assertEqual([d['decision']['rule'] for k, d, _ in ctx.events if k == 'tool_call'][0],
+                         'provider.claude_readonly')
+        prompt = dict(zip(self.main_launches()[0]['launch'], self.main_launches()[0]['launch'][1:]))['--system-prompt']
+        self.assertIn('read-only', prompt)
+
     def test_file_changes_outside_the_workspace_are_refused_before_authorize(self):
         ctx = FakeContext(self.root)
         ws1 = ctx.workspaces['p1']

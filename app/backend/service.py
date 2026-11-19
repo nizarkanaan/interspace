@@ -14,10 +14,12 @@ import time
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'pilot'))
 import runner
+import codex_auth
 from codex_auth import AuthError, CodexAuth
 import projects
 import tasks
 import budget
+import routing
 import scheduler
 
 AGENT_METHODS = ('agent_create', 'agent_message', 'agent_answer', 'agent_cancel', 'task_events', 'task_blob',
@@ -203,13 +205,14 @@ class Router:
 
 
 class Application:
-    """The backend for one data root. `provider` is the Codex sign-in helper (`codex_auth.CodexAuth` or a fake)."""
+    """The backend for one data root. `provider` is the Codex sign-in helper for the legacy `connection` and
+    `sign_in` methods (`codex_auth.CodexAuth` on the app-owned `<data root>/codex-home`, or a fake)."""
 
     def __init__(self, storage, provider=None, emit=None, *, scope_api=None, audit_api=None, runtime_factory=None,
                  interrupt_grace_s=scheduler.INTERRUPT_GRACE_S):
         self.storage = Path(storage).resolve()
         self.storage.mkdir(parents=True, exist_ok=True)
-        self.provider = provider or CodexAuth()
+        self.provider = provider or CodexAuth(codex_home=self.storage / 'codex-home')
         self.extensions = extension_methods()
         self.emit = emit or (lambda message: None)
         self.lock = threading.RLock()
@@ -220,6 +223,8 @@ class Application:
         self.cancel = threading.Event()
         self.worker = None
         self.state = projects.load(self.storage)
+        # Sign-in results reported since this start (providers.md "Sign-in completion"); never trusted across restarts.
+        self.state['provider_status'] = {}
         budget.recover(self.state)  # A reservation held at shutdown is charged its estimate, never released.
         if self.state.get('active'):
             # A sign-in, or an interaction of an earlier version, was running when the app quit. Nothing resumes.
@@ -329,6 +334,7 @@ class Application:
                 try:task=tasks.selected(project)
                 except ValueError as error:task_error=str(error)
             data = copy.deepcopy({key:self.state[key] for key in ('version','active','connection')})
+            data['provider_status'] = copy.deepcopy(self.state.get('provider_status') or {})
             data.update(task_id=project.get('selected_task_id') if project and isinstance(project.get('selected_task_id'),str) else None,
                         task=self.task_view(task) if task else None,
                         tasks=self.task_summaries(project) if project else [],
@@ -511,9 +517,8 @@ class Application:
             project=self.state['projects'].get(project_id) if isinstance(project_id,str) else None
             if project is None:raise ValueError('Unknown project.')
             if not isinstance(project.get('tasks',{}),dict):raise ValueError('Saved tasks are unavailable; preserve app data before recovery.')
-            runtime=tasks.validate_provider(params.get('provider',tasks.DEFAULT_PROVIDER))
-            task=tasks.create(params.get('title','New agent task'),project_id=project_id,
-                              provider=runtime,model=tasks.validate_model(params.get('model')))
+            runtime,model=self.orchestrator_choice(params)
+            task=tasks.create(params.get('title','New agent task'),project_id=project_id,provider=runtime,model=model)
             proposed=params.get('scope')
             document=self.scope.default(task,[project_id]) if proposed is None else copy.deepcopy(proposed)
             if not isinstance(document,dict):raise ValueError('Scope must be an object.')
@@ -527,6 +532,19 @@ class Application:
             self.scope_event(task,'edited','Scope drafted; approve it to start.')
             self.publish()
             return {'task_id':task['id'],'scope_digest':digest}
+
+    def orchestrator_choice(self, params):
+        """(provider, model) for a new Orchestrator task: `routing.orchestrator` unless the request names them.
+
+        An explicit `provider` without `model` runs that provider's default model. A blank model means the default.
+        """
+        default=routing.current(self.state)['orchestrator']
+        provider=tasks.validate_provider(params['provider'] if 'provider' in params else default['provider'])
+        if 'model' in params:
+            model=params['model']
+        else:
+            model=default['model'] if provider==default['provider'] else None
+        return provider,tasks.validate_model(provider,model)
 
     def scope_update(self, task, params):
         current=task['scope']
@@ -596,6 +614,7 @@ def main():
     finally:
         if router:
             router.close()
+        codex_auth.cancel_all()  # A pending device sign-in's app-server never outlives the backend.
         if app:
             app.cancel.set()
             app.scheduler.shutdown()

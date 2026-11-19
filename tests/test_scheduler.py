@@ -811,5 +811,37 @@ class WorkspaceTests(unittest.TestCase):
             self.assertEqual(log.split(), ['agent', 'base'])
 
 
+    def test_commit_records_the_agent_changes_on_the_task_branch_only(self):
+        import subprocess
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            repo = root / 'repo'
+            repo.mkdir()
+            git = ['git', '-c', 'user.name=T', '-c', 'user.email=t@example.invalid']
+            subprocess.run(git + ['init', '-q', '-b', 'main', str(repo)], check=True)
+            (repo / 'a.py').write_text('one\n')
+            subprocess.run(git + ['-C', str(repo), 'add', '.'], check=True)
+            subprocess.run(git + ['-C', str(repo), 'commit', '-qm', 'base'], check=True)
+            clones = scheduler.Workspaces(root / 'workspaces')
+            info = clones.prepare('b' * 32, 'p1', str(repo))
+            work = Path(info['path'])
+            self.assertIsNone(clones.commit(info, 'Interspace task turn u1'), 'nothing to commit')
+            (work / 'a.py').write_text('two\n')
+            (work / 'c.py').write_text('new\n')
+            for scratch in ('.interspace/tmp/x', '.claude/settings.json'):
+                (work / scratch).parent.mkdir(parents=True, exist_ok=True)
+                (work / scratch).write_text('scratch\n')
+            commit = clones.commit(info, 'Interspace task turn u1')
+            self.assertRegex(commit, r'^[0-9a-f]{40}$')
+            files = subprocess.run(['git', '-C', str(work), 'show', '--format=%s%n%b', '--name-only', commit],
+                                   capture_output=True, text=True).stdout.split()
+            self.assertEqual(files, ['Interspace', 'task', 'turn', 'u1', 'a.py', 'c.py'])  # No trailers, no scratch.
+            published = clones.publish(info, str(repo))
+            shown = subprocess.run(['git', '-C', str(repo), 'show', published + ':a.py'], capture_output=True, text=True)
+            self.assertEqual(shown.stdout, 'two\n')
+            self.assertEqual((repo / 'a.py').read_text(), 'one\n')
+            self.assertEqual(clones.diff(info)['files'][0]['path'], 'a.py')
+
+
 if __name__ == '__main__':
     unittest.main()

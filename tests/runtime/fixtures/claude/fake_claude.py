@@ -8,6 +8,9 @@ answer it gets is appended to the log so tests can assert what the adapter sent.
 Scenario keys:
   auth: {"exit": 0, "stdout": "<text>"}         answer to `claude auth status`
   turns: [[step, ...], ...]                      steps replayed for each user message
+  by_prompt: [{"contains": "<text>", "turns": [...]}, ...]
+                                                 the first entry whose text is in --system-prompt replaces
+                                                 `turns` (one scenario file for several sessions)
 Steps:
   {"emit": <object>}       write one JSON line (the string "$MODEL" is replaced by --model)
   {"raw": "<text>"}        write a raw line
@@ -18,8 +21,14 @@ Steps:
                            given, is the input in can_use_tool (the real CLI normalises the model's input
                            before asking, spike-0b.md gotcha 1); the tool_use block keeps `input`.
   {"mcp_call": {"name", "arguments", "tool_use_id"}}
-                           call the fake bridge socket named in the --mcp-config file (with its token),
-                           then emit a tool_result
+                           call the bridge socket named in the --mcp-config file (with its token), then emit a
+                           tool_result. A server with FAKE_TOOLS in its env is the tests' fake bridge (one JSON
+                           line each way); otherwise it is the real Interspace bridge, spoken to as MCP.
+                           "$team_id" in arguments is replaced by the last team_id a call returned.
+  {"ask": {..., "apply": {"path", "text"}}}  on allow, also write that file (relative to the working folder),
+                           as the real CLI's Edit/Write would
+  {"touch": "<path>"}      create that file
+  {"wait_file": "<path>"}  wait (up to 20 s, else exit 3) until that file exists
   {"control": <request>}   send a control_request and wait for its control_response
   {"wait_interrupt": true} wait for an interrupt control_request, answer it, emit an interrupted result
   {"ignore_interrupt": true} like wait_interrupt but never answers and never ends
@@ -59,6 +68,7 @@ def flag(name):
 
 MODEL = flag('--model')
 counter = [0]
+saved = {}
 
 
 def out(obj):
@@ -103,12 +113,41 @@ def mcp_servers():
     return loaded['mcpServers']
 
 
+def mcp_rpc(server, requests):
+    """Speak MCP to the real Interspace bridge: hello with the token, then each request; returns the results."""
+    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    client.connect(server['env']['INTERSPACE_MCP_SOCKET'])
+    reader = client.makefile('rb')
+
+    def send(message):
+        client.sendall((json.dumps(message) + '\n').encode())
+    send({'token': server['env']['INTERSPACE_MCP_TOKEN']})
+    send({'jsonrpc': '2.0', 'id': 0, 'method': 'initialize', 'params': {'protocolVersion': '2025-06-18'}})
+    send({'jsonrpc': '2.0', 'method': 'notifications/initialized'})
+    results = {}
+    for index, (method, params) in enumerate(requests, 1):
+        send({'jsonrpc': '2.0', 'id': index, 'method': method, 'params': params})
+    while len(results) < len(requests):
+        line = reader.readline()
+        if not line:
+            break
+        message = json.loads(line)
+        if message.get('id'):
+            results[message['id']] = message.get('result')
+    client.close()
+    return [results.get(i) for i in range(1, len(requests) + 1)]
+
+
 def init(overrides):
     tools = [t for t in (flag('--tools') or '').split(',') if t]
     servers = []
     for name, server in mcp_servers().items():
         servers.append({'name': name, 'status': 'connected'})
-        tools += ['mcp__%s__%s' % (name, tool) for tool in server['env']['FAKE_TOOLS'].split(',')]
+        if 'FAKE_TOOLS' in server['env']:
+            names = server['env']['FAKE_TOOLS'].split(',')
+        else:
+            names = [t['name'] for t in mcp_rpc(server, [('tools/list', {})])[0]['tools']]
+        tools += ['mcp__%s__%s' % (name, tool) for tool in names]
     message = {'type': 'system', 'subtype': 'init', 'session_id': 's1', 'cwd': os.getcwd(), 'tools': tools,
                # Like Claude Code 2.1.322: `--permission-mode manual` is reported as "default".
                'mcp_servers': servers, 'model': MODEL,
@@ -126,8 +165,30 @@ def interrupted_result():
                                 'cacheCreationInputTokens': 0, 'costUSD': 0.01}}})
 
 
+def substitute(value):
+    if isinstance(value, str):
+        return saved.get(value[1:], value) if value.startswith('$') else value
+    if isinstance(value, list):
+        return [substitute(v) for v in value]
+    if isinstance(value, dict):
+        return {k: substitute(v) for k, v in value.items()}
+    return value
+
+
 def mcp_call(step):
     server = next(iter(mcp_servers().values()))
+    if 'FAKE_TOOLS' not in server['env']:
+        result = mcp_rpc(server, [('tools/call', {'name': step['name'], 'arguments': substitute(step['arguments'])})])[0]
+        log({'mcp_reply': result})
+        text = result['content'][0]['text']
+        try:
+            parsed = json.loads(text)
+        except ValueError:
+            parsed = None
+        if isinstance(parsed, dict) and isinstance(parsed.get('team_id'), str):
+            saved['team_id'] = parsed['team_id']
+        tool_result(step['tool_use_id'], text, bool(result.get('isError')))
+        return
     client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     client.connect(server['env']['INTERSPACE_MCP_SOCKET'])
     client.sendall((json.dumps({'token': server['env']['INTERSPACE_MCP_TOKEN'], 'name': step['name'],
@@ -162,6 +223,9 @@ def run_step(step):
                             'tool_use_id': ask['tool_use_id'], 'permission_suggestions': []})
         answer = response.get('response', {})
         log({'answer': answer})
+        if answer.get('behavior') == 'allow' and ask.get('apply'):
+            with open(ask['apply']['path'], 'w') as handle:
+                handle.write(ask['apply']['text'])
         if not ask.get('no_result'):
             if answer.get('behavior') == 'allow':
                 tool_result(ask['tool_use_id'], ask.get('result', 'ok'), False)
@@ -181,6 +245,15 @@ def run_step(step):
                 time.sleep(1)
         out({'type': 'control_response', 'response': {'subtype': 'success', 'request_id': message['request_id']}})
         interrupted_result()
+    elif 'touch' in step:
+        open(step['touch'], 'a').close()
+    elif 'wait_file' in step:
+        deadline = time.monotonic() + 20
+        while not os.path.exists(step['wait_file']):
+            if time.monotonic() > deadline:
+                log({'timeout': step['wait_file']})
+                sys.exit(3)
+            time.sleep(0.02)
     elif 'hang' in step:
         while True:
             time.sleep(1)
@@ -196,6 +269,10 @@ def run_step(step):
 
 
 turns = scenario.get('turns', [])
+for choice in scenario.get('by_prompt', []):
+    if choice['contains'] in (flag('--system-prompt') or ''):
+        turns = choice['turns']
+        break
 turn = 0
 while True:
     message = read()

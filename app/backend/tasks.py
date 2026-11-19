@@ -10,16 +10,17 @@ import re
 import uuid
 
 import budget
+from runtime import registry
 
 MODES = ('agent',)
 LEGACY_MODES = ('review','python_fix')
 # Agent task run states (events.md `status`); None means no turn has started yet.
 AGENT_STATES = ('queued','starting','running','waiting_lock','paused_ask','paused_scope','paused_team','idle','cancelling',
                 'completed','failed','cancelled','budget_exhausted','time_limit','interrupted')
-# Agent runtimes (scheduler.md runtime adapter): Codex app-server (2A) or Claude Code (2B).
-PROVIDERS = ('codex','claude')
-DEFAULT_PROVIDER = 'codex'
-MODEL = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:/\[\]-]{0,127}$')
+# Agent providers and their models come from the provider registry (multi-provider/providers.md). Agent task rows
+# saved before providers existed have no `provider`; they ran on Codex.
+LEGACY_PROVIDER = 'codex'
+SAVED_MODEL = re.compile(registry.MODEL_RE)
 MAX_SAFE_INTEGER = 9007199254740991
 # Saved run stages that ended; any other saved stage was cut off when an earlier version quit.
 FINISHED_STAGES = ('completed','completed_unreviewed','accepted','needs_revision','blocked','failed','cancelled',
@@ -62,23 +63,24 @@ def validate_specialist_limit(value):
 
 
 def validate_provider(value):
-    if value not in PROVIDERS:raise ValueError('Choose the codex or claude runtime.')
+    """A registered provider name."""
+    if not isinstance(value,str) or value not in registry.names():
+        raise ValueError('Choose a provider: '+', '.join(registry.names())+'.')
     return value
 
 
-def validate_model(value):
-    """An optional model name passed to the runtime; None (or blank) means the runtime's default."""
+def validate_model(provider_name, value):
+    """An optional model for `provider_name`, checked by the registry; None (or blank) means the provider's default."""
     if value is None:return None
     if not isinstance(value,str):raise ValueError('The model must be a model name.')
     value=value.strip()
     if not value:return None
-    if not MODEL.match(value):raise ValueError('The model must be a model name of at most 128 letters, digits and . _ : / - [ ].')
-    return value
+    return registry.check_model(validate_provider(provider_name),value)
 
 
 def provider(task):
-    """The runtime an agent task runs on; agent tasks saved before Wave 2 run on Codex."""
-    return task.get('provider',DEFAULT_PROVIDER)
+    """The provider an agent task runs on; agent tasks saved before providers existed run on Codex."""
+    return task.get('provider',LEGACY_PROVIDER)
 
 
 def create(name='New agent task', *, project_id, provider=None, model=None, token_budget=budget.DEFAULT_BUDGET):
@@ -87,7 +89,8 @@ def create(name='New agent task', *, project_id, provider=None, model=None, toke
     return {'id':uuid.uuid4().hex,'title':title(name),'mode':'agent','role':ORCHESTRATOR,'draft':'',
             'token_budget':budget.validate(token_budget),'thread':[],'pending':None,'run_id':None,'run_ids':[],
             'error':'','error_status':None,'scope':None,'scope_approval':None,
-            'provider':validate_provider(DEFAULT_PROVIDER if provider is None else provider),'model':validate_model(model),
+            'provider':validate_provider(registry.DEFAULT_PROVIDER if provider is None else provider),
+            'model':validate_model(registry.DEFAULT_PROVIDER if provider is None else provider,model),
             'agent':{'project_id':project_id,'state':None,'detail':'','reason':None,'turns':0,'active_s':0.0,'workspaces':{}}}
 
 
@@ -132,14 +135,17 @@ def validate_agent(task):
     if agent.get('state') is not None and agent['state'] not in AGENT_STATES:raise ValueError()
     if type(agent.get('turns',0)) is not int or not isinstance(agent.get('workspaces',{}),dict):raise ValueError()
     if not isinstance(agent.get('active_s',0.0),(int,float)) or isinstance(agent.get('active_s'),bool):raise ValueError()
-    validate_provider(task.get('provider',DEFAULT_PROVIDER))
+    validate_provider(provider(task))
     if task.get('role') is not None and task['role'] not in ROLES:raise ValueError()
     if task.get('parent_task_id') is not None:
         if task.get('role') not in TEAM_ROLES or task.get('access') not in ACCESS:raise ValueError()
         brief(task.get('brief'))
         if any(not isinstance(task.get(k),str) or not task[k] for k in ('parent_task_id','team_id','member_id')):raise ValueError()
     elif any(task.get(k) is not None for k in CHILD_FIELDS):raise ValueError()
-    if validate_model(task.get('model'))!=task.get('model'):raise ValueError()
+    # A saved model only needs the registry's name shape: the runtime checks it against the provider at run time, so a
+    # model a provider no longer offers fails that turn instead of hiding the whole saved task.
+    model=task.get('model')
+    if model is not None and (not isinstance(model,str) or not SAVED_MODEL.match(model)):raise ValueError()
     if task.get('scope') is not None and not isinstance(task['scope'],dict):raise ValueError()
     if task.get('scope_approval') is not None and not isinstance(task['scope_approval'],dict):raise ValueError()
 

@@ -1,6 +1,6 @@
 # Multi-provider workspace: frozen interface contracts (Wave 0A)
 
-Date: 2026-11-15. Status: frozen by the coordinator for Wave 1, under the plan the user approved on 2026-11-15: `docs/superpowers/plans/2026-11-15-multi-provider.md`.
+Date: 2026-11-15. Status: frozen by the coordinator for Wave 1, under the plan the user approved on 2026-11-15: `docs/superpowers/plans/2026-11-15-multi-provider.md`. Wave 1 is merged. Wave 2A (2026-11-19) wired the backend end to end and recorded its additions in each file, marked "Wave 2A"; `tests/test_e2e_team.py` runs the whole flow with the fake CLIs.
 
 These contracts let the four Wave 1 streams build in parallel. Each stream codes against the shapes here and fakes everything it does not own.
 
