@@ -1,8 +1,8 @@
 # Review and merge
 
-Owner: 1D (`app/backend/worktree_merge.py`, `app/ui/review.js`). Conventions: [README.md](README.md).
+Owner: 1D (`app/backend/worktree_merge.py`, `app/ui/review.js`). Status: implemented (Wave 1D); exercised end to end in Wave 2A. Conventions: [README.md](README.md).
 
-The scheduler already publishes each task's clone into the user's repository as the branch `interspace/task-<id8>` (or `-2`, `-3` and so on when that name is taken). This happens after every turn, and the branch name is recorded as `target_branch`. Merging into the user's branches is new.
+The scheduler already publishes each task's clone into the user's repository as the branch `interspace/task-<id8>` (or `-2`, `-3` and so on when that name is taken). This happens after every turn, and the branch name is recorded as `target_branch`. Since Wave 2A a `write` run's changes are first committed in its clone, so the branch carries them (orchestration.md, "Changes"). Merging into the user's branches is new.
 
 ## API (`worktree_merge.py`)
 

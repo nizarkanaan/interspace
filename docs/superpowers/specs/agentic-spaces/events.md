@@ -1,6 +1,6 @@
 # Agent event stream (backend → UI)
 
-Status: approved by the user on 2026-11-12, Wave 0A. The 0B fields were reconciled in Wave 2A (2026-11-12); 0C fields await their reconciliation. Conventions and the provisional register are in [README.md](README.md).
+Status: approved by the user on 2026-11-12, Wave 0A. The 0B fields were reconciled in Wave 2A (2026-11-12); 0C fields await their reconciliation. Multi-provider additions (team events, `paused_team`, `orchestrate` tools, child budgets) are recorded here and in `docs/superpowers/specs/multi-provider/orchestration.md` (2026-11-19). Conventions and the provisional register are in [README.md](README.md).
 
 The task view streams what an agent does as cards: messages, tool calls and results, diffs, app actions, ask prompts, budget charges, status and errors. Events travel over the existing JSON-lines bridge (backend stdout → Swift → `window.interspaceReceive`). The full `state` projection still exists and stays the source of truth for task lists and status; events carry the detail.
 
@@ -67,6 +67,7 @@ Swift forwards it unchanged, like `state`. `app.js` routes `type === "event"` to
 | `waiting_lock` | waiting for a project or resource lock; `detail` names it | no |
 | `paused_ask` | waiting for the user to answer an `ask` | no |
 | `paused_scope` | the scope was edited and needs approval before the next action | no |
+| `paused_team` | an Orchestrator waiting for the user to answer its team proposal (multi-provider/orchestration.md) | no |
 | `idle` | the turn finished; the task waits for the user's next message | no |
 | `cancelling` | cancel requested; stopping the runtime | no |
 | `completed` | the user closed the task, or a one-shot task finished | yes |
@@ -111,11 +112,12 @@ Both are optional to render. `status` is `pending` | `in_progress` | `completed`
   "output": {"text": "FAIL: test_dates …", "truncated": false, "blob_id": null}, "error": null}}
 ```
 
-- `category`: `file_read` | `file_write` | `command` | `network` | `app` | `web_search` | `mcp`. It matches the scope request categories (scope.md), including `web_search` (Codex's hosted search, governed by the scope's `web_search` setting, not by command network) and `mcp` (an MCP server other than Interspace's own, which always asks in v1).
+- `category`: `file_read` | `file_write` | `command` | `network` | `app` | `web_search` | `mcp` | `orchestrate` (an Orchestrator's own tool; multi-provider/orchestration.md). It matches the scope request categories (scope.md), including `web_search` (Codex's hosted search, governed by the scope's `web_search` setting, not by command network) and `mcp` (an MCP server other than Interspace's own, which always asks in v1).
 - `tool` is the runtime's tool name (`shell`, `apply_patch`, `read_file`, a connector tool name such as `notion_page_append`, …). `title` is one line for the card, at most 200 characters.
 - `input` is the call's arguments, bounded to 8 KB (longer values are cut and marked). For Codex commands `input` is `{command, cwd, sandbox, network}` (the unwrapped shell string, scope.md Requests), for network asks `{host}`, for file changes `{paths}`, for web searches `{query}`, and for other MCP servers `{arguments}`. The UI shows unknown fields as a key–value list.
 - `decision` is the **final** decision that let the call run or stopped it: `allow` or `deny`, never `ask`. The runtime calls `RunContext.authorize` first and emits `tool_call` after it returns. If the policy asked, the `ask` and `answer` events come before the `tool_call`, and `decision.rule` is `ask.allow_once`, `ask.add_to_scope` or `ask.deny`. A denied call gets a `tool_call` and a `tool_result` with `status: "denied"`.
-- **Connector tools are the exception:** `RunContext.app_tool` emits all of their events itself — `tool_call`/`tool_result` for reads, a single `app_action` card for writes. The runtime emits nothing for them.
+- **Orchestration tools are the exception:** `RunContext.orchestrate` emits their `tool_call`/`tool_result` itself (`category: 'orchestrate'`, rule `orchestrate`). The runtime emits nothing for them. (This replaced the connector path `RunContext.app_tool`, removed with connected apps.)
+- A run with `access: 'read'` gets `decision: {"decision": "deny", "rule": "access.read"}` for any file change or command that leaves the sandbox, without an `ask` (multi-provider/orchestration.md).
 - `tool_result.status`: `ok` | `error` (ran and failed) | `denied` (policy or user refused; it never ran) | `cancelled`. `exit_code` only for commands. `error` is `{"code", "message"}` or `null`.
 - Output shown in the card is at most 16 KB; the rest is in the blob.
 
@@ -188,7 +190,8 @@ UI → backend:
 ```
 
 - `charge_kind`: `reserved` (an estimate held before a turn), `reported` (the provider's counts), `estimated` (the turn ended without counts and is charged its estimate). Same meaning as `budget.py`.
-- `used`, `reserved`, `remaining`, `overshoot` are the task's ledger totals after this charge.
+- `used`, `reserved`, `remaining`, `overshoot` are the task's ledger totals after this charge. For a subagent (child task) they are the **root task's** totals: one budget covers the Orchestrator and all its children. The child's `budget` events go to the child's own stream, `provider` is the child's provider and `tokens` is charged by that provider's rule.
+- Ledger entries (`state['usage']`, budget.py) of a child's turns are recorded against the root task with `source_task_id` = the child's task ID; the root's own entries have no `source_task_id`. `team_status` and `subagent_status` `tokens_used` sum a member's entries by `source_task_id`.
 - When usage arrives (0B-2, decided): Codex reports usage after every model request. The runtime passes the turn's cumulative usage to `RunContext.report_usage` each time, and the scheduler stops the turn when it no longer fits the budget; the `reported` charge is made once, at the end of the turn.
 - Tokens only. No field ever holds money or account allowance.
 

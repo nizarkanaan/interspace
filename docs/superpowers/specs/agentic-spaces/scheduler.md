@@ -1,6 +1,6 @@
 # Scheduler, task runner and runtime adapter
 
-Status: approved by the user on 2026-11-12, Wave 0A. The 0B fields were reconciled in Wave 2A (2026-11-12); 0C fields await their reconciliation. Conventions and the provisional register are in [README.md](README.md).
+Status: approved by the user on 2026-11-12, Wave 0A. The 0B fields were reconciled in Wave 2A (2026-11-12); 0C fields await their reconciliation. The multi-provider changes (child runs, team pauses, run-slot yielding, read access, write commits) are in the section "Multi-provider (2026-11-19)" at the end; where they differ, that section wins. Conventions and the provisional register are in [README.md](README.md).
 
 1F owns `app/backend/scheduler.py` and the `service.py` changes for parallel tasks. 2A (Codex app-server) and 2B (Claude Code) implement the runtime adapter against this file. 1F tests with a fake runtime; it never needs a real provider.
 
@@ -209,3 +209,15 @@ UI → backend: `workspace_merge {task_id, project_id, branch, base_commit}` →
 | `spaces_*` | connectors.md | 1F wires, 1A–1D implement |
 
 Each new method must also be added to the `main.swift` allowlist by its owner (README, shared-file ownership).
+
+## Multi-provider (2026-11-19)
+
+Connected apps, the legacy slot and `workspace_merge` are gone (multi-provider plan). What the scheduler does now, as built in Waves 1B and 2A:
+
+- **`RunContext`** has `orchestrate(name, arguments)` (Orchestrator sessions only; replaces `app_tool`/`call_tool`), `tools()` (the orchestration tool descriptors for Orchestrator sessions, else none), `role`, `access` (`'read'` or `'write'`; the Orchestrator reads only) and `instructions` (the Orchestrator's added system prompt, else `None`). Runtimes pass `instructions` into the provider's system prompt and start a read-only session when `access` is `'read'`.
+- **Child runs.** A subagent is a child task (`parent_task_id`, `role`, `access`, `team_id`, `member_id`) submitted through `submit` after the user approves the team. It has its own run slot, workspace clone, branch, events and asks. Cancelling a parent cancels its running and queued children. `paused_team` is a non-terminal state; after a restart an open proposal becomes `interrupted` and no child starts.
+- **Run slots.** A parent waiting in `propose_team` or `wait_for` yields its slot. When it resumes it waits for a free slot ahead of the FIFO queue (`Scheduler.resume`), so the running count never exceeds `max_running`.
+- **Read access.** For a run with `access: 'read'`, `authorize` denies a `file_write` request or a command that leaves the sandbox with rule `access.read`, audited, without asking.
+- **Publishing.** Before publishing a `write` run's branch, `Workspaces.commit` commits everything the agent changed in its clone (one-line message, no hooks, no signing, no trailers; `.interspace/` and `.claude/` excluded). Read runs are never committed. Merge is `review_merge` (multi-provider/merge.md).
+- **Budgets.** One budget per root task. `BudgetGate.reserve(root, …, source_task_id=child)` records a child's turns on the root's ledger with `source_task_id`; each is charged by the child's own provider rule.
+- **Public state.** `running` and `queued` entries carry `parent_task_id`, `role` and `provider`.
