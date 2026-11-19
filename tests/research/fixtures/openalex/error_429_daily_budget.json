@@ -1,0 +1,32 @@
+{
+ "_fixture": {
+  "source": "openalex",
+  "captured": "2026-11-19",
+  "note": "keyless search after the per-IP keyless daily budget ran out: 429, reason daily_budget, Retry-After = seconds to midnight UTC"
+ },
+ "request": {
+  "url": "https://api.openalex.org/works?search=attention+is+all+you+need&filter=publication_year:2017&per_page=3&select=id,doi,display_name,title,publication_year,ids,authorships,primary_location,best_oa_location,open_access,cited_by_count,is_retracted,abstract_inverted_index,type",
+  "accept": null
+ },
+ "status": 429,
+ "headers": {
+  "content-type": "application/json",
+  "content-length": "825",
+  "retry-after": "1433",
+  "x-ratelimit-limit": "1000",
+  "x-ratelimit-remaining": "0",
+  "x-ratelimit-reset": "1433"
+ },
+ "body": {
+  "error": "Rate limit exceeded",
+  "message": "Insufficient budget. This request has no API key, so it counts against the free daily budget shared by everyone on your network's IP address, and that budget is used up ($0 remaining; resets at midnight UTC). Use your own key instead: add ?api_key=YOUR_KEY to the URL, or send it as an \"Authorization: Bearer YOUR_KEY\" header. Keys are free and have their own budget: https://help.openalex.org/api/authentication/ An AI agent can get one for its user in one call: POST https://api.openalex.org/api-keys with {\"email\": \"<your user's email>\"}; we email them a link, and the key works once they click it.",
+  "reason": "daily_budget",
+  "retryAfter": 1433,
+  "costUsd": 0.001,
+  "dailyRemainingUsd": 0,
+  "prepaidRemainingUsd": 0,
+  "creditsRequired": 10,
+  "creditsRemaining": 0,
+  "onetimeCreditsRemaining": 0
+ }
+}

@@ -1,0 +1,46 @@
+{
+ "_fixture": {
+  "source": "semantic_scholar",
+  "captured": "2026-11-19",
+  "note": ""
+ },
+ "request": {
+  "url": "https://api.semanticscholar.org/graph/v1/paper/ARXIV:1706.03762/citations?fields=paperId,title,year,externalIds&limit=2",
+  "accept": null
+ },
+ "status": 200,
+ "headers": {
+  "content-type": "application/json",
+  "content-length": "705"
+ },
+ "body": {
+  "offset": 0,
+  "next": 2,
+  "data": [
+   {
+    "citingPaper": {
+     "paperId": "cdceaedf406a3bac0d441a7a9880a6ce711dcbef",
+     "externalIds": {
+      "DBLP": "journals/rcim/QiuZYPW27",
+      "DOI": "10.1016/j.rcim.2026.103375",
+      "CorpusId": 290129826
+     },
+     "title": "Closed-loop intelligent quality control for robotic welding: A survey on architecture, technologies, and system integration",
+     "year": 2027
+    }
+   },
+   {
+    "citingPaper": {
+     "paperId": "29f1060406d7cdc48183812d940a7822d66263e4",
+     "externalIds": {
+      "DBLP": "journals/rcim/LiuZS27",
+      "DOI": "10.1016/j.rcim.2026.103392",
+      "CorpusId": 290556244
+     },
+     "title": "Sim-to-real robotic grinding control via physics-enhanced learning and predictive optimization for unknown surface features",
+     "year": 2027
+    }
+   }
+  ]
+ }
+}

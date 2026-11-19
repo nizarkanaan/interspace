@@ -1,0 +1,20 @@
+{
+ "_fixture": {
+  "source": "crossref",
+  "captured": "2026-11-19",
+  "note": ""
+ },
+ "request": {
+  "url": "https://doi.org/10.1038/nature14539",
+  "accept": "application/x-bibtex"
+ },
+ "status": 200,
+ "headers": {
+  "content-type": "application/x-bibtex",
+  "x-rate-limit-limit": "5",
+  "x-rate-limit-interval": "1s",
+  "x-concurrency-limit": "1",
+  "x-api-pool": "public-single"
+ },
+ "text": " @article{LeCun_2015, title={Deep learning}, volume={521}, ISSN={1476-4687}, url={http://dx.doi.org/10.1038/nature14539}, DOI={10.1038/nature14539}, number={7553}, journal={Nature}, publisher={Springer Science and Business Media LLC}, author={LeCun, Yann and Bengio, Yoshua and Hinton, Geoffrey}, year={2015}, month=May, pages={436–444} }\n"
+}
