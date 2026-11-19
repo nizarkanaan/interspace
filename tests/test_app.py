@@ -16,6 +16,25 @@ sys.path.insert(0, str(ROOT / 'tests'))
 from codex_auth import AuthError, CodexAuth
 from service import Application
 
+WARM_ENV = 'INTERSPACE_FAKE_WARM_UP'
+
+
+def fake_header():
+    """First lines of a fake `codex`: with WARM_ENV set it exits at once (see `warm_up`)."""
+    return ('#!' + sys.executable + '\nimport json,os,sys,time\nif os.environ.get(%r):\n sys.exit(0)\n' % WARM_ENV)
+
+
+def warm_up(path):
+    """Run a freshly written fake once before a test times anything.
+
+    macOS checks every new executable on its first run, one at a time across the machine: with eight processes
+    writing fresh scripts, a first run took a median 0.9 s and up to 1.9 s, a second run 0.02 s. Under a parallel
+    full-suite load that wait alone overran this file's deadlines (the pidfile wait below). Running each fake once
+    here moves the check out of the timed part of the test.
+    """
+    subprocess.run([str(path)], env=dict(os.environ, **{WARM_ENV: '1'}), check=True, timeout=120,
+                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+
 
 class ProviderTests(unittest.TestCase):
     def setUp(self):
@@ -25,8 +44,9 @@ class ProviderTests(unittest.TestCase):
 
     def executable(self, body):
         path = self.root / 'fake-codex'
-        path.write_text('#!' + sys.executable + '\nimport sys,json,time\n' + body)
+        path.write_text(fake_header() + body)
         path.chmod(0o755)
+        warm_up(path)
         return path
 
     def test_status_reports_signed_in_signed_out_and_missing(self):
@@ -69,8 +89,9 @@ class ProviderTests(unittest.TestCase):
                 "if '--device-auth' not in sys.argv:\n print('Logged in using ChatGPT')\n sys.exit(0)\n"
                 + 'open(' + repr(str(pidfile)) + ",'w').write(str(os.getpid()))\n"
                 + 'time.sleep(2)\nopen(' + repr(str(marker)) + ",'w').write('bad')\n")
-        binary.write_text('#!' + sys.executable + '\nimport sys,time\n' + body)
+        binary.write_text(fake_header() + body)
         binary.chmod(0o755)
+        warm_up(binary)
         env = dict(os.environ, PATH=str(self.root) + os.pathsep + os.environ.get('PATH', ''))
         process = subprocess.Popen([sys.executable, str(ROOT / 'app/backend/service.py'), '--data-root', str(self.root / 'quit-data')],
                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
@@ -97,8 +118,8 @@ class ProviderTests(unittest.TestCase):
             if pidfile.exists():
                 try:
                     os.killpg(int(pidfile.read_text()), 9)
-                except OSError:
-                    pass
+                except (OSError, ValueError):
+                    pass  # Gone already, or the fake had not written its pid yet.
             process.stderr.close()
 
 
