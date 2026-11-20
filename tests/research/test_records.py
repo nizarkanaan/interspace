@@ -82,6 +82,11 @@ class RecordTests(unittest.TestCase):
 
 
 class TitleTests(unittest.TestCase):
+    def test_source_formatting_markup_is_removed_but_other_angle_brackets_stay(self):
+        self.assertEqual(records.clean_text('Hubble constant to 1 km s <sup>−1</sup> Mpc<SUB>0</SUB> <jats:italic>H</jats:italic>'),
+                         'Hubble constant to 1 km s −1 Mpc0 H')
+        self.assertEqual(records.clean_text('p < 0.05 and <img src=x onerror=1>'), 'p < 0.05 and <img src=x onerror=1>')
+
     def test_normalize_title(self):
         self.assertEqual(records.normalize_title('Attention is All you Need'), 'attention is all you need')
         self.assertEqual(records.normalize_title('RETRACTED: Ileal-lymphoid  hyperplasia.'), 'ileal lymphoid hyperplasia')

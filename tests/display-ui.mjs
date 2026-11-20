@@ -60,6 +60,11 @@ export default async function check(page,url){
  {const r=await handle.evaluate(h=>{const b=h.getBoundingClientRect();return {x:b.left,y:b.top+200};});await page.mouse.dblclick(r.x,r.y);}
  assert(await chatW()===420,'Double-click resets');
 
+ // The page itself never scrolls in the split reader, even when something asks to scroll an element into view.
+ await page.evaluate(()=>{document.getElementById('agent-message').scrollIntoView({block:'end'});document.documentElement.scrollTop=300;window.scrollTo(0,400);});
+ await page.waitForFunction(()=>window.scrollY===0);
+ assert(await page.evaluate(()=>document.getElementById('agent-topbar').getBoundingClientRect().top>=0),'Top bar stays in view');
+
  // Default display: one-line search summaries, reasoning summary, failed call in full.
  const s1=await text(stream.locator('[data-item=s1]'));
  assert(s1.startsWith('Searched “fallback '+XSS+'” in OpenAlex, Crossref: 3 papers'),'Search summary: '+s1);

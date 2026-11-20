@@ -499,3 +499,6 @@ body.resizing,body.resizing *{cursor:col-resize!important;user-select:none}
 .ev-quote summary{font-size:12px;color:var(--accent)}
 .ev-cell input{width:100%;margin:2px 0 4px}
 .ev-quote{border-top:0;padding-top:0;margin:4px 0 0}
+
+/* Split reader: the document never scrolls (focus and scrollIntoView could scroll it and shift the view). */
+html:has(#agent-view.split:not([hidden])){overflow:hidden;height:100%;overscroll-behavior:none}

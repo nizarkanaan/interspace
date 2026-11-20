@@ -82,11 +82,16 @@ def parse_id(text):
 
 # Text -----------------------------------------------------------------------
 
+# Formatting markup some sources put in titles and abstracts (Crossref: <sup>, <i>, <jats:p>, <mml:math>). Only
+# these known tags are removed; any other angle-bracket text is kept as literal text.
+_MARKUP = re.compile(r'</?(?:sup|sub|i|b|em|strong|scp|u|tt|jats:[a-z-]+|mml:[a-z-]+)(?:\s[^<>]*)?/?>', re.I)
+
+
 def clean_text(value, limit=TEXT_LIMIT):
     """One line of text: control characters stripped, whitespace collapsed, cut to `limit` with `…`."""
     if value is None:
         return None
-    text = _SPACE.sub(' ', _CONTROL.sub('', str(value))).strip()
+    text = _SPACE.sub(' ', _CONTROL.sub('', _MARKUP.sub('', str(value)))).strip()
     if not text:
         return None
     return text if len(text) <= limit else text[:limit - 1].rstrip() + '…'

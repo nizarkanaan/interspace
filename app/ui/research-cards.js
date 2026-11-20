@@ -34,7 +34,8 @@ function authorsText(list){const a=strings(list,200);if(!a.length)return '';retu
 // One paper: the title links only to an https URL; DOI and arXiv ID are plain text.
 function paper(p,parent,{abstract=false}={}){
  const li=el('li','paper',null,parent);if(!p||typeof p!=='object'){el('span','muted','Unreadable record',li);return li;}
- const head=el('div','paper-title',null,li);const name=str(p.title).trim()||'Untitled';
+ // Papers saved before records.py removed formatting markup can still carry <sup>, <i> or JATS tags in their title.
+ const head=el('div','paper-title',null,li);const name=str(p.title).replace(/<\/?(?:sup|sub|i|b|em|strong|scp|u|tt|jats:[a-z-]+|mml:[a-z-]+)(?:\s[^<>]*)?\/?>/gi,'').trim()||'Untitled';
  if(!R.link(p.url,name,head))el('strong','',name,head);
  if(p.retracted===true)el('span','paper-flag retracted','Retracted',head);
  const meta=citeLine(p.authors,p.year,p.venue);

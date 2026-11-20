@@ -305,6 +305,9 @@ window.interspaceAgent={
   $('agent-scope-review').onclick=()=>{if(!current)return;if(narrowQuery.matches||placed){tabs.set(current,'details');refresh();}const b=$('agent-scope').querySelector('.primary')||$('agent-scope').querySelector('button');if(b)b.focus();};
   narrowQuery.addEventListener('change',()=>refresh());
   splitHandle();
+  // In the split reader only the columns scroll. Focus and scrollIntoView can still scroll the page itself, which
+  // shifted the whole view up and left a blank band; any such scroll is undone at once.
+  addEventListener('scroll',()=>{if(placed&&(scrollX||scrollY))scrollTo(0,0);},{passive:true});
   $('agent-stop').onclick=()=>cancel(current);
   $('agent-topbar-stop').onclick=()=>cancel(current);
   $('agent-topbar-scope').onclick=()=>{if(!current)return;tabs.set(current,'details');refresh();$('agent-results').scrollTop=0;};$('agent-back').onclick=()=>host.navigate(current&&isResearch(current)?'research':'tasks');
