@@ -41,7 +41,9 @@ function statusText(s){
 }
 function needText(s){
  if(!s.credential_kind)return 'Nothing to enter';
- return (s.required?'Needs your ':'Optional: your ')+(KIND[s.credential_kind]||'key');
+ const kind=KIND[s.credential_kind]||'key';
+ if(s.configured)return 'Your '+kind+' is saved';
+ return (s.required?'Required: your ':'Optional: your ')+kind;
 }
 function privacyText(s){
  if(s.credential_kind==='email')return 'Your email goes to '+s.title+' with each request, as the contact address the service asks API users for. It is kept in this Mac’s Keychain, and never shown again or given to agents.'+(s.required?'':' Optional: without it, '+s.title+' still works with a smaller allowance.');

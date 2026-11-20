@@ -93,13 +93,15 @@ function activity(id){
  for(let i=list.length-1;i>=0;i--){const it=list[i];
   if(it.error)return 'Error: '+oneLine(it.error.message||it.error.code||'');
   if(it.ask)return (it.answer?'Answered: ':'Needs your answer: ')+oneLine(it.ask.title||'');
-  if(it.call)return (CATEGORY[it.call.category]||'Tool')+': '+oneLine(it.call.title||it.call.tool||'');
+  if(it.call)return (CATEGORY[it.call.category]||'Tool')+': '+oneLine(it.call.category==='research'&&window.interspaceResearchCards?.toolTitle(it.call.input?.tool)||it.call.title||it.call.tool||'');
   if(it.diff&&(it.diff.files||[]).length)return 'Changed '+(it.diff.files||[]).length+' file'+((it.diff.files||[]).length===1?'':'s');
   if(it.message&&it.message.role==='assistant'&&String(it.message.text).trim())return oneLine(it.message.text);
   if(it.plan){const step=it.plan.find(s=>s.status==='in_progress');if(step)return 'Plan: '+oneLine(step.text??'');}
  }
  return '';
 }
+// A child's latest citation report (the citation checker runs as a subagent), shown on its card in the parent.
+function citationOf(id){const m=tasks.get(id);if(!m)return null;const list=[...m.items.values()];for(let i=list.length-1;i>=0;i--)if(list[i].citation)return list[i];return null;}
 // A child's state: its own stream when loaded, else a terminal task row (after a restart the parent never hears
 // that a child was interrupted), else the parent's subagent events.
 function childStatus(id,fallback){
@@ -172,7 +174,7 @@ function toolCard(m,it,card){
 }
 function build(m,it,compact){
  if(it.row){const r=el('p','row-event '+it.row,it.text);r.dataset.item=it.key;return r;}
- if(it.message){const msg=el('div','message '+it.message.role+(it.message.pending?' pending':''));msg.dataset.item=it.key;el('small','',it.message.role==='user'?'You':'Agent',msg);markdown(it.message.text,msg);if(!it.message.final&&!it.message.pending)el('span','streaming footnote','Writing…',msg);if(it.message.pending&&!it.message.failed)el('span','footnote','Sending…',msg);if(it.message.failed)el('p','error-text','Not sent: '+it.message.failed,msg);return msg;}
+ if(it.message){const msg=el('div','message '+it.message.role+(it.message.pending?' pending':''));msg.dataset.item=it.key;el('small','',it.message.role==='user'?'You':'Agent',msg);(it.message.role==='assistant'&&it.message.final&&window.interspaceAgent?.isResearch?.(m.id)?window.interspaceResearchCards.markdown:markdown)(it.message.text,msg);if(!it.message.final&&!it.message.pending)el('span','streaming footnote','Writing…',msg);if(it.message.pending&&!it.message.failed)el('span','footnote','Sending…',msg);if(it.message.failed)el('p','error-text','Not sent: '+it.message.failed,msg);return msg;}
  const card=el('article','card');card.dataset.item=it.key;
  if(it.team){const row=rowStatus(m.id),late=!BUSY.has(m.status?.state)&&TERMINAL.has(row);
   window.interspaceTeam.teamCard(card,{taskId:m.id,team:it.team,request,compact:!!compact,open:()=>open(m.id),closed:!!it.team.closed||terminal(m.status)||late,
@@ -199,6 +201,7 @@ function subContext(m,it,compact){
  if(it.expanded&&!it.childBox){it.childBox=el('div','stream nested');it.childBox.id='child-'+key;it.childBox.setAttribute('role','log');it.childBox.setAttribute('aria-label','Subagent activity');}
  if(it.expanded)render(it.childBox,child);
  return {sub:it.sub,key,expanded:!!it.expanded,childBox:it.childBox,statusText,markdown,status:childStatus(child,it.sub.state),activity:activity(child),
+  citation:citationOf(child),citationCard:window.interspaceResearchCards?.citationCard,bumpChild:()=>{const cm=model(child);cm.rev++;changed(child);},
   toggle:()=>{it.expanded=!it.expanded;it.version++;if(it.expanded)sync(model(child));changed(m.id);},
   open:()=>open(child)};
 }
