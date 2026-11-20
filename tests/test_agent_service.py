@@ -552,7 +552,11 @@ class ResearchTaskServiceTests(unittest.TestCase):
             task = self.app.state['research']['tasks'][task_id]
             self.assertEqual((task['kind'], task['agent']['project_id']), ('research', None))
             self.assertEqual(task['scope']['projects'], [])
-            self.assertEqual(task['scope']['research'], {'sources': {}})  # No research module in this build.
+            # Usable means configured or not required (research/tasks.md); with no Keychain handshake nothing is
+            # configured, so only Unpaywall, which needs an email, starts off.
+            self.assertEqual(task['scope']['research'], {'sources': {
+                'semantic_scholar': 'allow', 'openalex': 'allow', 'arxiv': 'allow', 'crossref': 'allow',
+                'unpaywall': 'off'}})
             self.assertEqual(self.app.store.task(task_id)['id'], task_id)
         public = self.app.handle('state', {})
         self.assertEqual((public['project_id'], public['task_id']), (None, task_id))
@@ -608,11 +612,11 @@ class ResearchTaskServiceTests(unittest.TestCase):
             self.assertEqual(self.app.research_sources_usable(),
                              {'crossref': True, 'unpaywall': False, 'openalex': True, 'broken': False})
             created = self.app.handle('agent_create', {'project_id': None, 'kind': 'research', 'title': 'R'})
+            with self.assertRaisesRegex(ValueError, 'not in this build'):  # This research module has no dispatch.
+                self.app.research_dispatch(None, 'research_search', {})
         with self.app.lock:
             sources = self.app.store.task(created['task_id'])['scope']['research']['sources']
         self.assertEqual(sources, {'crossref': 'allow', 'unpaywall': 'off', 'openalex': 'allow', 'broken': 'off'})
-        with self.assertRaisesRegex(ValueError, 'not in this build'):
-            self.app.research_dispatch(None, 'research_search', {})
 
 
 if __name__ == '__main__':

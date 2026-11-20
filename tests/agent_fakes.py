@@ -50,14 +50,19 @@ class FakeScope:
             raise ValueError('Scope limits are invalid.')
         return document
 
-    def default(self, task, project_ids):
-        return {'v': 1, 'task_id': task['id'], 'version': 1,
+    def default(self, task, project_ids, *, research_sources=None):
+        """Like scope.default: `research_sources` ({source: usable}) adds the `research` key, None leaves it out."""
+        document = {'v': 1, 'task_id': task['id'], 'version': 1,
                 'projects': [{'project_id': p, 'access': 'write', 'read': ['**'], 'write': ['**'], 'deny': []}
                              for p in project_ids],
                 'commands': {'workspace': 'allow', 'allow': [], 'deny': []},
                 'network': {'default': 'ask', 'allow_hosts': [], 'deny_hosts': []},
                 'apps': [], 'web_search': 'ask',
                 'limits': {'token_budget': task.get('token_budget') or 250000, 'time_limit_s': 3600}}
+        if research_sources is not None:
+            document['research'] = {'sources': {name: 'allow' if usable else 'off'
+                                                for name, usable in research_sources.items()}}
+        return document
 
     def merge_patch(self, scope, patch):
         merged = copy.deepcopy(scope)
