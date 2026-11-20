@@ -8,7 +8,7 @@ const $=id=>document.getElementById(id);
 const el=(tag,cls,text,parent)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=String(text);if(parent)parent.append(e);return e;};
 const tokens=n=>Number(n||0).toLocaleString('en-US');
 
-// Research tasks (no project) may arrive in state.research.tasks and/or in state.tasks with kind 'research'.
+// Research tasks (no project) are listed in state.research.tasks; state.tasks holds the selected project's tasks.
 const allRows=()=>{const seen=new Set();return [...(state?.tasks||[]),...(Array.isArray(state?.research?.tasks)?state.research.tasks:[])].filter(t=>t&&typeof t.id==='string'&&!seen.has(t.id)&&seen.add(t.id));};
 const row=id=>allRows().find(t=>t&&t.id===id);
 const scheduled=id=>[...(state?.scheduler?.running||[]),...(state?.scheduler?.queued||[])].find(t=>t.task_id===id);
@@ -147,7 +147,7 @@ window.interspaceAgent={
   window.interspaceComposer.attach({input:$('agent-message'),menu:$('agent-menu'),form:$('agent-composer'),commands,mentions,onSend:send,onInput:text=>{if(current)drafts.set(current,text);}});
   $('agent-stop').onclick=()=>cancel(current);$('agent-back').onclick=()=>host.navigate(current&&isResearch(current)?'research':'tasks');
  },
- isAgent,isResearch,researchRows:()=>allRows().filter(t=>t&&t.kind==='research'&&!t.parent_task_id&&!parentOf(t.id)),title:()=>title(current),current:()=>current,parentOf,
+ isAgent,isResearch,researchRows:()=>(Array.isArray(state?.research?.tasks)?state.research.tasks:[]).filter(t=>t&&typeof t.id==='string'&&!t.parent_task_id&&!parentOf(t.id)),title:()=>title(current),current:()=>current,parentOf,
  setDraft(id,text){drafts.set(id,text);if(current===id)shownDraftFor=null;},
  open(id){current=id;S.sync(id);if(!scopes.has(id)||!scopeInfo(id).scope)loadScope(id);},
  render(nextState,nextView){state=nextState;view=nextView;refresh();}

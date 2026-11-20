@@ -188,14 +188,10 @@ function outputsPanel(container,taskId,data,{request,refresh}){
   }
  }
 }
-// PROVISIONAL(research contract question): task_outputs rows may carry `text`; otherwise task_output_read.
+// task_output_read {task_id, name} -> {name, kind, text, truncated}: UTF-8, capped at 1 MiB (research/tasks.md).
 function read(taskId,o,s,request,refresh){
  s.loading=true;s.readError='';
- request('task_outputs',{task_id:taskId},{manual:true}).then(r=>{
-  const row=(r?.outputs||[]).find(x=>x&&x.name===o.name);
-  if(row&&typeof row.text==='string')return row;
-  return request('task_output_read',{task_id:taskId,name:o.name},{manual:true});
- }).then(r=>{if(typeof r?.text!=='string')throw Error('This file could not be read.');s.text=r.text;s.truncated=!!r.truncated;})
+ request('task_output_read',{task_id:taskId,name:o.name},{manual:true}).then(r=>{if(typeof r?.text!=='string')throw Error('This file could not be read.');s.text=r.text;s.truncated=!!r.truncated;})
   .catch(e=>{s.readError=e.message||'This file could not be read.';}).finally(()=>{s.loading=false;refresh();});
 }
 

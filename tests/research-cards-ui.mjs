@@ -33,8 +33,8 @@ export default async function check(page,url){
   ev('r1','status',{state:'idle',detail:'',queue_position:null,reason:null})];
  await install(page,url,{researchRows:[{id:'r1',mode:'agent',kind:'research',project_id:null,title:'Synthetic related work',status:'idle',provider:'codex',model:null}],history:{r1:history},
   scopes:{r1:{v:1,task_id:'r1',version:1,projects:[],network:{default:'deny',allow_hosts:[],deny_hosts:[]},apps:[],web_search:'deny',limits:{token_budget:250000,time_limit_s:3600},research:{sources:{semantic_scholar:'allow',arxiv:'allow',unpaywall:'off'}}}},
-  outputs:{r1:[{name:'report.md',kind:'report',bytes:2048,text:'# Related work\n\nA paragraph with **bold**, *care*, `code` and '+XSS+'.\n\n- First point [a safe link](https://example.org/a)\n- Second point [an unsafe link](javascript:window.pwned=1)\n\n1. Ordered\n\n> A quote\n\n```\n<script>window.pwned=1</script>\n```'},{name:'references.bib',kind:'bibtex',bytes:512}]}});
- await page.evaluate(x=>{window.rFixture.blobs={'blob-c4':JSON.stringify({papers:[{title:'Synthetic full result',authors:[],year:2024,venue:null,citation_count:0,url:null,oa_url:null,sources:['arxiv']}],searched:['arxiv'],skipped:[]})};window.rFixture.readable={r1:{'references.bib':'@article{fixture2,\n  title={'+x+'}\n}'}};},XSS);
+  outputs:{r1:[{name:'report.md',kind:'report',bytes:2048},{name:'references.bib',kind:'bibtex',bytes:512}]}});
+ await page.evaluate(x=>{window.rFixture.blobs={'blob-c4':JSON.stringify({papers:[{title:'Synthetic full result',authors:[],year:2024,venue:null,citation_count:0,url:null,oa_url:null,sources:['arxiv']}],searched:['arxiv'],skipped:[]})};window.rFixture.readable={r1:{'report.md':'# Related work\n\nA paragraph with **bold**, *care*, `code` and '+x+'.\n\n- First point [a safe link](https://example.org/a)\n- Second point [an unsafe link](javascript:window.pwned=1)\n\n1. Ordered\n\n> A quote\n\n```\n<script>window.pwned=1</script>\n```','references.bib':'@article{fixture2,\n  title={'+x+'}\n}'}};},XSS);
  await page.locator('[data-view=research]').click();
  await page.locator('[data-open-task=r1]').click();
  const stream=page.locator('#agent-stream');
@@ -113,12 +113,10 @@ export default async function check(page,url){
  assert((await text(md)).includes(XSS)&&(await text(md)).includes('<script>window.pwned=1</script>')&&await md.locator('img,script').count()===0,'Markdown not text-safe');
  const mdLinks=await md.locator('a').evaluateAll(as=>as.map(a=>a.getAttribute('href')));
  assert(JSON.stringify(mdLinks)===JSON.stringify(['https://example.org/a'])&&(await text(md)).includes('an unsafe link (javascript:window.pwned=1)'),'Markdown links: '+JSON.stringify(mdLinks));
- assert(JSON.stringify(await requests(page,'task_outputs'))===JSON.stringify([{task_id:'r1'}]),'task_outputs params');
- // No text in task_outputs for the BibTeX: it is read with task_output_read.
- await out.getByRole('button',{name:'View references.bib',exact:true}).focus();await page.keyboard.press('Enter');
+   await out.getByRole('button',{name:'View references.bib',exact:true}).focus();await page.keyboard.press('Enter');
  await page.waitForFunction(()=>document.querySelector('#agent-outputs .output-text'));
  assert((await out.locator('.output-text').textContent()).includes('title={'+XSS+'}'),'BibTeX text');
- assert(JSON.stringify(await requests(page,'task_output_read'))===JSON.stringify([{task_id:'r1',name:'references.bib'}]),'task_output_read params');
+ assert(JSON.stringify(await requests(page,'task_output_read'))===JSON.stringify([{task_id:'r1',name:'report.md'},{task_id:'r1',name:'references.bib'}])&&(await requests(page,'task_outputs')).length===0,'task_output_read params');
  assert(await page.evaluate(()=>document.activeElement?.id)==='output-view-references_bib','Focus lost after View');
  await out.getByRole('button',{name:'Save references.bib',exact:true}).click();
  await page.waitForFunction(()=>document.querySelector('#agent-outputs [data-output="references.bib"]').textContent.includes('Saved.'));
@@ -137,5 +135,5 @@ export default async function check(page,url){
  const fits=await fit(page,'research-cards',null,true);
  assert(!(await page.evaluate(()=>window.pwned)),'Script ran');
  assert(!errors.length,'Page errors: '+errors.join(' | '));
- return {checks:'research tool cards (search with title/authors/year/venue/source badges/citations/retracted flag, searched and skipped, paper with abstract, BibTeX, open copy, denied call, cut result then full blob), https-only links, collapsible long lists by keyboard, citation report counts from rows with verified/mismatch fields/not found/retracted/unchecked reason/unknown, nothing else looks verified, per-source research call counts without money, no Review for research tasks, outputs panel with text-safe Markdown report and plain BibTeX, task_outputs then task_output_read, Save and cancelled save, live update keeps open view, literal text everywhere, light/dark 320-1280 fit',responsiveStates:fits.length};
+ return {checks:'research tool cards (search with title/authors/year/venue/source badges/citations/retracted flag, searched and skipped, paper with abstract, BibTeX, open copy, denied call, cut result then full blob), https-only links, collapsible long lists by keyboard, citation report counts from rows with verified/mismatch fields/not found/retracted/unchecked reason/unknown, nothing else looks verified, per-source research call counts without money, no Review for research tasks, outputs panel with text-safe Markdown report and plain BibTeX, task_output_read per file, Save and cancelled save, live update keeps open view, literal text everywhere, light/dark 320-1280 fit',responsiveStates:fits.length};
 }

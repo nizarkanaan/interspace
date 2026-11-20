@@ -32,7 +32,7 @@ export async function install(page,url,opts={}){
    {name:'codex',title:'Codex',models:[],default_model:null,capabilities:{write:true,web_search:true,approvals:true}}],
    status:[{provider:'claude',state:'signed_in',account:'Fixture',detail:''},{provider:'codex',state:'signed_in',account:'Fixture',detail:''}],routing:o.routing};
   let projectId=projects[0]?.id||null;
-  const state=()=>({version:4,projects,project_id:projectId,project:projects.find(p=>p.id===projectId)?.name||null,task_id:null,task:null,tasks:rows.filter(r=>projectId===null?r.project_id===null:r.project_id!==null),research:{tasks:research},active:null,error:'',scheduler:{max_running:4,running:[],queued:[]}});
+  const state=()=>({version:4,projects,project_id:projectId,project:projects.find(p=>p.id===projectId)?.name||null,task_id:null,task:null,tasks:rows.filter(r=>r.project_id===projectId),research:{tasks:research},active:null,error:'',scheduler:{max_running:4,running:[],queued:[]}});
   const f=window.rFixture={requests:[],hold:{},held:[],failNext:{},history:o.history||{},scopes:o.scopes||{},outputs:o.outputs||{},saved:o.saved??true,rows,research,sources,
    respond(r,result){window.interspaceReceive({id:r.id,result});},fail(r,error){window.interspaceReceive({id:r.id,error});},
    push(events){for(const event of events)window.interspaceReceive({type:'event',event});},
@@ -59,7 +59,7 @@ export async function install(page,url,opts={}){
    else if(r.method==='scope_approve')result={scope_approval:{v:1,scope_version:p.scope_version,scope_digest:p.scope_digest,approved_at:'2026-11-19T10:00:00.000Z',by:'user'}};
    else if(r.method==='task_blob')result={blob_id:p.blob_id,text:f.blobs?.[p.blob_id]??''};
    else if(r.method==='task_outputs')result={outputs:(f.outputs[p.task_id]||[]).map(x=>({...x}))};
-   else if(r.method==='task_output_read'){const x=(f.readable?.[p.task_id]||{})[p.name];result=x==null?{}:{text:x,truncated:false};}
+   else if(r.method==='task_output_read'){const o=(f.outputs[p.task_id]||[]).find(x=>x.name===p.name);const x=(f.readable?.[p.task_id]||{})[p.name];if(!o||x==null){queueMicrotask(()=>f.fail(r,'Unknown output.'));return;}result={name:o.name,kind:o.kind,text:x,truncated:false};}
    else if(r.method==='task_output_save')result={saved:f.saved};
    else if(r.method==='agent_answer'||r.method==='team_answer')result={accepted:true};
    queueMicrotask(()=>f.respond(r,result));

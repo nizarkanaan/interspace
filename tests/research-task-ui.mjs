@@ -4,7 +4,7 @@ import {install,requests,push,assert,text,fit,ev,resetSeq} from './research-fixt
 export default async function check(page,url){
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
  resetSeq();
- const rows=[{id:'p-task',mode:'agent',kind:'project',project_id:'p1',title:'Fix the parser',status:'idle',provider:'claude',model:null},{id:'r-dup',mode:'agent',kind:'research',project_id:null,title:'Duplicated research row',status:'completed',provider:'codex',model:null}];
+ const rows=[{id:'p-task',mode:'agent',kind:'project',project_id:'p1',title:'Fix the parser',status:'idle',provider:'claude',model:null}];
  const research=[{id:'r-dup',mode:'agent',kind:'research',project_id:null,title:'Duplicated research row',status:'completed',provider:'codex',model:null},{id:'r-old',mode:'agent',kind:'research',project_id:null,title:'Earlier <b>review</b>',status:'idle',provider:null,model:null}];
  await install(page,url,{rows,researchRows:research});
  const nav=page.locator('[data-view=research]');
@@ -126,5 +126,5 @@ export default async function check(page,url){
  assert(!(await page.locator('#propose-task').isDisabled()),'Review scope disabled without a project');
  assert(!(await page.evaluate(()=>window.pwned)),'Script ran');
  assert(!errors.length,'Page errors: '+errors.join(' | '));
- return {checks:'Research sidebar entry with count and de-duplicated rows, project desk without research rows, literal row text, New research question with research kind preselected, Literature review preset by keyboard and Verify my references, validation before scope_default, message preview, draft kept, scope_default {project_id:null,kind:research}, research scope editor without project/commands/network, source hints, exact agent_create with kind research and no project, no project switch, first message waiting in the composer, research chips, Back to Research, bibliography required and sent unchanged, project task unchanged with no kind and no research key, research key added by scope edit, research team read-only with citation checker and no Review, no-project install, light/dark 320-1280 fit',responsiveStates:fits.length+fitsNew.length};
+ return {checks:'Research sidebar entry from state.research.tasks with count, project desk without research rows, literal row text, New research question with research kind preselected, Literature review preset by keyboard and Verify my references, validation before scope_default, message preview, draft kept, scope_default {project_id:null,kind:research}, research scope editor without project/commands/network, source hints, exact agent_create with kind research and no project, no project switch, first message waiting in the composer, research chips, Back to Research, bibliography required and sent unchanged, project task unchanged with no kind and no research key, research key added by scope edit, research team read-only with citation checker and no Review, no-project install, light/dark 320-1280 fit',responsiveStates:fits.length+fitsNew.length};
 }
