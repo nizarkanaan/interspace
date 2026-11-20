@@ -1,0 +1,23 @@
+{
+ "_fixture": {
+  "source": "openalex",
+  "captured": null,
+  "synthetic": true,
+  "note": "SYNTHETIC: crafted from the documented /works list shape in spike-0b.md (keyless budget was spent during the spike); not a recorded response."
+ },
+ "request": {
+  "url": "https://api.openalex.org/works/doi:10.48550/arxiv.1706.03762?select=id,referenced_works",
+  "accept": null
+ },
+ "status": 200,
+ "headers": {
+  "content-type": "application/json"
+ },
+ "body": {
+  "id": "https://openalex.org/W2626778328",
+  "referenced_works": [
+   "https://openalex.org/W2964308564",
+   "https://openalex.org/W2130942839"
+  ]
+ }
+}
