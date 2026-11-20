@@ -18,7 +18,9 @@ import urllib.request
 VERSION = '0.1.0'  # CFBundleShortVersionString in scripts/build-macos-app.py
 USER_AGENT = 'Interspace/%s (research)' % VERSION
 MAX_RESPONSE_BYTES = 10 * 1024 * 1024
-TIMEOUT_S = 30
+TIMEOUT_S = 30              # per socket operation
+MAX_REQUEST_S = 60          # a whole reply, so one that trickles in cannot hold a source's connection slot
+READ_CHUNK = 64 * 1024
 MAX_RETRY_AFTER_S = 10        # honour a longer Retry-After only by failing with it
 NO_RETRY_AFTER_BACKOFF_S = (2.0, 4.0)   # Semantic Scholar sends 429 without Retry-After (spike-0b)
 
@@ -151,11 +153,22 @@ class _SameHostRedirect(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-def _read_capped(stream):
-    body = stream.read(MAX_RESPONSE_BYTES + 1) if stream is not None else b''
-    if len(body) > MAX_RESPONSE_BYTES:
-        raise BadResponse('The research source sent a reply larger than Interspace accepts.')
-    return body
+def _read_capped(stream, deadline=None, clock=time.monotonic):
+    """The body, read in pieces: at most MAX_RESPONSE_BYTES, and none after `deadline` (a `clock` time)."""
+    if stream is None:
+        return b''
+    read = getattr(stream, 'read1', None) or stream.read   # read1 returns what has arrived, so the deadline is checked
+    chunks, size = [], 0
+    while True:
+        chunk = read(min(READ_CHUNK, MAX_RESPONSE_BYTES + 1 - size))
+        if not chunk:
+            return b''.join(chunks)
+        chunks.append(chunk)
+        size += len(chunk)
+        if size > MAX_RESPONSE_BYTES:
+            raise BadResponse('The research source sent a reply larger than Interspace accepts.')
+        if deadline is not None and clock() > deadline:
+            raise Unavailable('The research source took too long to answer. Try again later.')
 
 
 class UrllibTransport:
@@ -165,13 +178,14 @@ class UrllibTransport:
         self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _SameHostRedirect())
 
     def send(self, method, url, headers, timeout_s):
+        deadline = time.monotonic() + MAX_REQUEST_S
         request = urllib.request.Request(url, headers=headers, method=method)
         try:
             with self._opener.open(request, timeout=timeout_s) as reply:
-                return reply.getcode(), dict(reply.headers.items()), _read_capped(reply)
+                return reply.getcode(), dict(reply.headers.items()), _read_capped(reply, deadline)
         except urllib.error.HTTPError as error:
             try:
-                return error.code, dict(error.headers.items()) if error.headers else {}, _read_capped(error)
+                return error.code, dict(error.headers.items()) if error.headers else {}, _read_capped(error, deadline)
             finally:
                 error.close()
 
@@ -268,6 +282,9 @@ class Http:
                 raise
             except (urllib.error.URLError, OSError, http.client.HTTPException, socket.timeout, ssl.SSLError):
                 raise Unavailable('Could not reach %s. Check the connection and try again.' % _title(source)) from None
+            except ValueError:
+                # http.client refuses a bad header or URL with a ValueError that quotes it, key included.
+                raise BadRequest('Interspace could not send that request to %s.' % _title(source)) from None
 
     def _check_status(self, response):
         status, title = response.status, _title(response.source)

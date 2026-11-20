@@ -96,6 +96,41 @@ class RedirectAndTransportTests(unittest.TestCase):
         self.assertNotIn('secret', str(caught.exception))
         self.assertIn('Crossref', str(caught.exception))
 
+    def test_a_request_the_http_layer_refuses_never_repeats_its_headers(self):
+        # http.client refuses a header value with a line break as ValueError("Invalid header value b'<key>…'").
+        leaked = "Invalid header value b'S2-KEY-fake-0123456789\\r\\n'"
+        transport = fakes.FakeTransport().add('api.semanticscholar.org', '/graph/v1/paper/ARXIV:1706.03762',
+                                              ValueError(leaked))
+        web, _ = client(transport)
+        with self.assertRaises(http.ResearchError) as caught:
+            web.get('semantic_scholar', S2, headers={'x-api-key': 'S2-KEY-fake-0123456789\r\n'})
+        self.assertNotIn('S2-KEY', str(caught.exception))
+        self.assertIsNone(caught.exception.__cause__)
+        self.assertTrue(caught.exception.__suppress_context__)
+
+    def test_a_reply_that_trickles_in_stops_at_the_request_deadline(self):
+        clock = fakes.FakeClock()
+
+        class Trickle:
+            reads = 0
+
+            def read1(self, n):
+                Trickle.reads += 1
+                clock.now += 1.0      # one byte a second: every read is within the socket timeout
+                return b'x'
+
+        with self.assertRaises(http.Unavailable):
+            http._read_capped(Trickle(), deadline=clock() + http.MAX_REQUEST_S, clock=clock)
+        self.assertLessEqual(Trickle.reads, http.MAX_REQUEST_S + 1)
+
+    def test_a_reply_is_read_in_pieces_until_the_end(self):
+        class Pieces:
+            parts = [b'ab', b'cd', b'']
+
+            def read1(self, n):
+                return Pieces.parts.pop(0)
+        self.assertEqual(http._read_capped(Pieces()), b'abcd')
+
 
 class StatusTests(unittest.TestCase):
     def test_statuses_map_to_codes_without_upstream_text(self):
