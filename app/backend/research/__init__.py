@@ -2,7 +2,7 @@
 
 `dispatch` authorizes every source call through the run context before making it. A source that is off in
 the scope, denied, unable to serve the call or failing is skipped and named in `skipped`; a tool fails as a
-whole only for bad arguments. Results are plain JSON, capped at 64 KB.
+whole only for bad arguments. Results are plain JSON, capped at 64 KB (a citation report is capped by the scheduler).
 """
 from concurrent.futures import ThreadPoolExecutor
 import contextvars
@@ -377,8 +377,9 @@ def _verify(registry, gate, arguments):
     references = _list(arguments, 'references', 1, 200)
     if any(not isinstance(reference, dict) for reference in references):
         raise ValueError('Each reference must be an object.')
-    report = citations.check(references, Lookup(registry, gate))
-    return _cap(report, 'references')
+    # Returned whole: the scheduler keeps the whole report for references.bib and gives the agent a compact,
+    # capped copy (scheduler._cap), so references past 64 KB are never lost from the bibliography.
+    return citations.check(references, Lookup(registry, gate))
 
 
 HANDLERS = {'research_search': _search, 'research_paper': _paper, 'research_citations': _citations,

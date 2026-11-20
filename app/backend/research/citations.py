@@ -243,7 +243,7 @@ def _named_in(surname_text, plain_text):
     return surname_text in joined
 
 
-def _differs(ref, match, score):
+def _differs(ref, match, score, exact):
     """(fields that differ, whether a field besides the title confirmed the match)."""
     fields, confirmed = [], False
     if ref['title'] and score is not None and score < VERIFIED_SIMILARITY:
@@ -256,8 +256,11 @@ def _differs(ref, match, score):
             confirmed = True
     authors = match.get('authors') if isinstance(match.get('authors'), list) else []
     found = surname(next((a for a in authors if isinstance(a, str) and a.strip()), None))
-    if found and (ref['first_author'] or ref.get('raw_names')):
-        if ref['first_author'] == found or (not ref['first_author'] and _named_in(found, ref['raw_names'])):
+    # A pasted line is searched for the first author only when a title search found the paper; an exact DOI or
+    # arXiv ID already identifies it, and a line may name no author at all.
+    raw_names = ref.get('raw_names') if not exact else None
+    if found and (ref['first_author'] or raw_names):
+        if ref['first_author'] == found or (not ref['first_author'] and _named_in(found, raw_names)):
             confirmed = True
         else:
             fields.append('authors')
@@ -292,7 +295,7 @@ def _check_one(index, given, lookup):
     entry.update(match=_match_view(match), source=source)
     if match.get('retracted') is True:
         return dict(entry, status='retracted')
-    entry['fields'], confirmed = _differs(ref, match, score)
+    entry['fields'], confirmed = _differs(ref, match, score, exact)
     if entry['fields']:
         return dict(entry, status='mismatch')
     if not exact and not confirmed:

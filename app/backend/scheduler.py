@@ -1414,24 +1414,33 @@ class Scheduler:
         return shown
 
     @staticmethod
-    def _cap(result):
-        """Cut a research result to 64 KB of JSON by shortening its main list (`truncated: true`)."""
+    def _cap(result, limit=MAX_RESEARCH_RESULT_BYTES):
+        """Cut a research result to 64 KB of JSON by shortening its main list (`truncated: true`). A citation
+        report is first made compact (every status kept, long text clipped), so as many references as possible fit."""
         def size(value):
             return len(json.dumps(value, ensure_ascii=False).encode('utf-8'))
-        if size(result) <= MAX_RESEARCH_RESULT_BYTES:
+        if size(result) <= limit:
             return result
+        if isinstance(result.get('references'), list) and isinstance(result.get('summary'), dict):
+            from research import citations
+            result = dict(citations.compact(result), truncated=True)
+            if size(result) <= limit:
+                return result
         key = next((k for k in RESEARCH_LISTS if isinstance(result.get(k), list)), None)
         if key is None:
             return {'ok': False, 'error': {'code': 'bad_response', 'message': 'The research result was too large.'}}
         result = dict(result, truncated=True)
         items = list(result[key])
-        while items and size(dict(result, **{key: items})) > MAX_RESEARCH_RESULT_BYTES:
+        while items and size(dict(result, **{key: items})) > limit:
             items = items[:max(0, min(len(items) - 1, len(items) * 3 // 4))]
         result[key] = items
         return result
 
-    def _research(self, run, name, arguments):
+    def _research(self, run, name, arguments, quiet=False):
         """A research tool call (from `RunContext.call_tool`), shown as a `tool_call`/`tool_result` pair.
+
+        `quiet`: Interspace's own call (the BibTeX for `references.bib`), not an agent's: authorized, audited and
+        counted the same way, but shown as no tool card.
 
         `research.dispatch` (stream 1B) runs it; each source it uses is authorized per call (`category: research`)
         through `_ResearchCall`, audited, and counted on the root task. The result goes to the agent as untrusted
@@ -1440,7 +1449,8 @@ class Scheduler:
         call_id = 'res_' + uuid.uuid4().hex
         with self.lock:
             version = self._task(run.task_id)['scope'].get('version')
-        self._emit(run, 'tool_call', {'call_id': call_id, 'category': 'research', 'tool': name, 'app': None,
+        emit = (lambda *a, **k: None) if quiet else self._emit
+        emit(run, 'tool_call', {'call_id': call_id, 'category': 'research', 'tool': name, 'app': None,
                                       'title': name.replace('_', ' ').capitalize(),
                                       'input': self._research_input(name, arguments),
                                       'decision': {'decision': 'allow', 'rule': 'research', 'scope_version': version}},
@@ -1448,12 +1458,14 @@ class Scheduler:
         started = time.monotonic()
         call = _ResearchCall(self, run, name, call_id)
         failed = False
+        whole = None
         try:
             if self.research_dispatch is None:
                 raise _NoResearch()
             payload = self.research_dispatch(call, name, copy.deepcopy(arguments))
             if not isinstance(payload, dict):
                 raise TypeError('research result')
+            whole = payload  # A citation report is kept whole for references.bib; the agent gets it capped.
             result = self._cap(dict(payload, ok=True))
         except _NoResearch:
             failed = True
@@ -1467,15 +1479,16 @@ class Scheduler:
         self._research_actions(run, call, result, failed)
         error = result.get('error') if not result.get('ok') else None
         text = json.dumps({k: v for k, v in result.items() if k != 'ok'}, ensure_ascii=False)
-        self._emit(run, 'tool_result', {'call_id': call_id, 'status': 'ok' if result.get('ok') else 'error',
+        emit(run, 'tool_result', {'call_id': call_id, 'status': 'ok' if result.get('ok') else 'error',
                                         'exit_code': None, 'duration_ms': int((time.monotonic() - started) * 1000),
                                         'output': {'text': text[:MAX_PATCH_CHARS], 'truncated': len(text) > MAX_PATCH_CHARS,
                                                    'blob_id': None}, 'error': error},
                    turn_id=run.turn_id, item_id=call_id)
         if result.get('ok') and name == 'verify_citations':
-            report = {k: v for k, v in result.items() if k not in ('ok', 'truncated')}
-            self._emit(run, 'citation_report', report, turn_id=run.turn_id, item_id='cite_' + call_id)
-            self._keep_report(run, report)
+            # The card says when it shows only part of the report (an event holds at most 64 KB).
+            card = self._cap({k: v for k, v in result.items() if k != 'ok'}, MAX_EVENT_BYTES - 4096)
+            emit(run, 'citation_report', card, turn_id=run.turn_id, item_id='cite_' + call_id)
+            self._keep_report(run, {k: v for k, v in whole.items() if k != 'truncated'})
         if result.get('ok') and name == 'research_bibtex':
             self._keep_bibtex(run, result)
         return result
@@ -1568,6 +1581,9 @@ class Scheduler:
                 if (event['kind'] == 'message' and event.get('turn_id') == run.turn_id and data.get('role') == 'assistant'
                         and data.get('final', True) and isinstance(data.get('text'), str)):
                     text = data['text']
+                    if data.get('truncated') and isinstance(data.get('blob_id'), str):
+                        # A long answer was cut to fit its event; the whole text is in the event's attachment.
+                        text = self.events.blob(run.task_id, data['blob_id'])['text']
             if page['complete'] or not page['events']:
                 return text
             after = page['events'][-1]['seq']
@@ -1613,7 +1629,7 @@ class Scheduler:
                 left_out.append('%% Left out, %s: %s' % (label, title))
         if wanted:
             # BibTeX the agents did not fetch yet comes through the same checked, audited research path.
-            self._research(run, 'research_bibtex', {'ids': list(dict.fromkeys(wanted))[:100]})
+            self._research(run, 'research_bibtex', {'ids': list(dict.fromkeys(wanted))[:100]}, quiet=True)
         fetched = self._bibtex.get(run.task_id, {})
         lines = ['% References checked by the Interspace citation checker on ' + str(report.get('checked_at')) + '.',
                  '%% Verified: %d. Mismatch: %d (marked below).' % (
