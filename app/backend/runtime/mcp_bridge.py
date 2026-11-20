@@ -118,7 +118,8 @@ RESEARCH_TOOLS = (
          'ids': {'type': 'array', 'items': _ID, 'minItems': 1, 'maxItems': 100}}}},
     {'v': 1, 'name': 'verify_citations', 'title': 'Check citations', 'effect': 'read',
      'description': 'The citation checker: reports each reference as verified, mismatch, not_found, retracted or '
-                    'unchecked against the scholarly sources. Run it before any answer that cites papers.',
+                    'unchecked against the scholarly sources. Run it before any answer that cites papers. Give each '
+                    'reference its title, authors, year and DOI or arXiv ID: a title alone is never verified.',
      'input_schema': {'type': 'object', 'required': ['references'], 'additionalProperties': False, 'properties': {
          'references': {'type': 'array', 'items': _REFERENCE, 'minItems': 1, 'maxItems': 200}}}},
 )

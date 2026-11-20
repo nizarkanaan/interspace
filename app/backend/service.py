@@ -681,6 +681,7 @@ class Application:
         document=copy.deepcopy(params['scope'])
         document.update(v=1,task_id=task['id'],version=current['version']+1)
         self.scope.validate(document,project_ids=list(self.state['projects']))
+        if tasks.is_research(task) and document.get('projects'):raise ValueError('A research task has no project files.')
         limit=budget.validate(document['limits']['token_budget'])
         digest=self.scope.digest(document)
         self.audit_scope(task,current,document,self.scope.digest(current),digest)

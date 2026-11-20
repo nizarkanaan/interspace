@@ -52,6 +52,10 @@ INITIAL = re.compile(r'(?<![\w])[A-Z]\b\.?')  # "Y." or "N" in an author list.
 RETRACTED_PREFIX = re.compile(r'^\s*retracted\s*:\s*', re.I)
 
 
+TITLE_ONLY = ('Only the title could be compared, and papers can share a title. Give the first author or the '
+              'year to verify it.')
+
+
 class Skipped(Exception):
     """A source could not check this reference; the message is a short reason code such as `denied`."""
 
@@ -160,8 +164,13 @@ def normalize_reference(reference):
         if year is None:
             found = YEAR.search(rest)
             year = int(found.group(1)) if found else None
+    # arXiv's DataCite DOI (10.48550/arXiv.<id>) names an arXiv paper: it is checked by its arXiv ID.
+    arxiv_id = arxiv_id or records.arxiv_from_doi(doi)
     first = next((a for a in authors or [] if a.strip()), None)
-    return {'title': title, 'first_author': surname(first), 'year': year, 'doi': doi, 'arxiv_id': arxiv_id}
+    # With no author list, the first author is looked for in the pasted line itself (Wave 3B).
+    names = _plain(raw) if raw and first is None else None
+    return {'title': title, 'first_author': surname(first), 'year': year, 'doi': doi, 'arxiv_id': arxiv_id,
+            'raw_names': names}
 
 
 # ---------------------------------------------------------------------------------------- checking
@@ -227,21 +236,48 @@ def _find(ref, lookup):
     return None, None, False, best[3] if best else None, answered, skipped
 
 
-def _differs(ref, match, score):
-    fields = []
+def _named_in(surname_text, plain_text):
+    """Whether a surname appears as a word (or two adjacent words, 'Le Cun') of the pasted line."""
+    words = re.findall(r"[\w'-]+", plain_text)
+    joined = set(words) | {a + b for a, b in zip(words, words[1:])}
+    return surname_text in joined
+
+
+def _differs(ref, match, score, exact):
+    """(fields that differ, whether a field besides the title confirmed the match)."""
+    fields, confirmed = [], False
     if ref['title'] and score is not None and score < VERIFIED_SIMILARITY:
         fields.append('title')
     year = match.get('year')
-    if ref['year'] is not None and type(year) is int and abs(year - ref['year']) > 1:
-        fields.append('year')
+    if ref['year'] is not None and type(year) is int:
+        if abs(year - ref['year']) > 1:
+            fields.append('year')
+        else:
+            confirmed = True
     authors = match.get('authors') if isinstance(match.get('authors'), list) else []
     found = surname(next((a for a in authors if isinstance(a, str) and a.strip()), None))
-    if ref['first_author'] and found and found != ref['first_author']:
-        fields.append('authors')
+    # A pasted line is searched for the first author only when a title search found the paper; an exact DOI or
+    # arXiv ID already identifies it, and a line may name no author at all.
+    raw_names = ref.get('raw_names') if not exact else None
+    if found and (ref['first_author'] or raw_names):
+        if ref['first_author'] == found or (not ref['first_author'] and _named_in(found, raw_names)):
+            confirmed = True
+        else:
+            fields.append('authors')
+    # Every identifier the reference gives must be the matched paper's: a DOI or arXiv ID that no source
+    # resolved is never verified by a title match that lacks it (Wave 3B).
     doi = normalize_doi(match.get('doi'))
-    if ref['doi'] and doi and doi != ref['doi']:
+    arxiv_id = match.get('arxiv_id') if isinstance(match.get('arxiv_id'), str) else None
+    arxiv_id = (normalize_arxiv(arxiv_id) or arxiv_id) if arxiv_id else records.arxiv_from_doi(doi)
+    doi_given = ref['doi'] if ref['doi'] and not records.arxiv_from_doi(ref['doi']) else None
+    doi_same = bool(doi_given) and doi == doi_given
+    arxiv_same = bool(ref['arxiv_id']) and arxiv_id == ref['arxiv_id']
+    any_same = doi_same or arxiv_same
+    if doi_given and not doi_same and (doi is not None or not any_same):
         fields.append('doi')
-    return fields
+    if ref['arxiv_id'] and not arxiv_same and (arxiv_id is not None or not any_same):
+        fields.append('arxiv_id')
+    return fields, confirmed or any_same
 
 
 def _check_one(index, given, lookup):
@@ -259,8 +295,13 @@ def _check_one(index, given, lookup):
     entry.update(match=_match_view(match), source=source)
     if match.get('retracted') is True:
         return dict(entry, status='retracted')
-    entry['fields'] = _differs(ref, match, score)
-    entry['status'] = 'mismatch' if entry['fields'] else 'verified'
+    entry['fields'], confirmed = _differs(ref, match, score, exact)
+    if entry['fields']:
+        return dict(entry, status='mismatch')
+    if not exact and not confirmed:
+        # A title alone cannot tell papers with the same title apart ('Deep learning'): not verified.
+        return dict(entry, status='unchecked', reason=TITLE_ONLY)
+    entry['status'] = 'verified'
     return entry
 
 
@@ -282,6 +323,50 @@ def check(references, lookup, *, now=None):
     summary = {status: sum(1 for r in results if r['status'] == status) for status in STATUSES}
     return {'v': V, 'checked_at': iso_time(time.time() if now is None else now), 'summary': summary,
             'references': results}
+
+
+# ------------------------------------------------------------------------------------------ compact
+
+COMPACT_TEXT = 120
+COMPACT_TITLE = 160
+COMPACT_AUTHORS = 3
+
+
+def _clip(value, limit):
+    if not isinstance(value, str):
+        return value
+    return value if len(value) <= limit else value[:limit - 1] + '…'
+
+
+def compact(report):
+    """A smaller copy of a report for an agent or a card when the whole one is too large: every status, field
+    and identifier is kept; long text is clipped and author lists shortened. The report itself is unchanged."""
+    small = {k: v for k, v in report.items() if k != 'references'}
+    small['references'] = []
+    for entry in report.get('references') or []:
+        if not isinstance(entry, dict):
+            continue
+        given = entry.get('input') if isinstance(entry.get('input'), dict) else {}
+        shown = {k: given[k] for k in ('year', 'doi', 'arxiv_id') if k in given}
+        if isinstance(given.get('title'), str):
+            shown['title'] = _clip(given['title'], COMPACT_TEXT)
+        elif isinstance(given.get('raw'), str):
+            shown['raw'] = _clip(given['raw'], COMPACT_TEXT)
+        if isinstance(given.get('authors'), list):
+            shown['authors'] = [_clip(a, COMPACT_TEXT) for a in given['authors'][:1]]
+        item = {k: v for k, v in entry.items() if k not in ('input', 'match')}
+        item['input'] = shown
+        match = entry.get('match')
+        if isinstance(match, dict):
+            item['match'] = {k: match.get(k) for k in ('title', 'authors', 'year', 'doi', 'arxiv_id', 'retracted',
+                                                       'sources') if k in match}
+            item['match']['title'] = _clip(match.get('title'), COMPACT_TITLE)
+            if isinstance(match.get('authors'), list):
+                item['match']['authors'] = [_clip(a, COMPACT_TEXT) for a in match['authors'][:COMPACT_AUTHORS]]
+        else:
+            item['match'] = None
+        small['references'].append(item)
+    return small
 
 
 # ------------------------------------------------------------------------------------ source lookup

@@ -590,6 +590,17 @@ class ResearchTaskServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'no project files'):
             self.app.handle('agent_create', {'project_id': None, 'kind': 'research', 'title': 'x', 'scope': document})
 
+    def test_a_scope_edit_cannot_give_a_research_task_project_files(self):
+        project_id = self.repo('repo2')
+        task_id = self.app.handle('agent_create', {'project_id': None, 'kind': 'research', 'title': 'x'})['task_id']
+        with self.app.lock:
+            document = json.loads(json.dumps(self.app.store.task(task_id)['scope']))
+        document['projects'] = self.scope.project_default(project_id)['projects']
+        with self.assertRaisesRegex(ValueError, 'no project files'):
+            self.app.handle('scope_update', {'task_id': task_id, 'base_version': 1, 'scope': document})
+        with self.app.lock:
+            self.assertEqual(self.app.store.task(task_id)['scope']['projects'], [])
+
     def test_damaged_research_state_is_replaced_on_load(self):
         with self.app.lock:
             self.app.state['research'] = 'damaged'

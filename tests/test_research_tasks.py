@@ -402,6 +402,43 @@ class OutputTests(ResearchCase):
         self.assertIn('title = {Deep learning}', bib)
         self.assertIn('doi = {10.1038/nature14539}', bib)
 
+    def test_the_schedulers_own_bibtex_fetch_is_no_agent_tool_card_but_is_audited(self):
+        self.make(answering(self.results, [('verify_citations', {'references': self.REFS[:2]})]))
+        self.store.add_research_task('r1', sources={'crossref': 'allow', 'arxiv': 'allow'})
+        self.run_task()
+        self.assertEqual(self.research.calls[-1][0], 'research_bibtex')  # Fetched at the end, for references.bib.
+        tools = [e['data'].get('tool') for e in self.events_of('r1', 'tool_call')]
+        self.assertEqual(tools, ['verify_citations'])
+        self.assertEqual(len(self.events_of('r1', 'tool_result')), 1)
+        bibtex = [r for r in self.audit.records if (r.get('request') or {}).get('tool') == 'research_bibtex']
+        self.assertEqual({r['kind'] for r in bibtex}, {'decision', 'action'})
+        self.assertIn(BIBTEX['10.1038/nature14539'], (self.outputs() / 'references.bib').read_text())
+
+    def test_a_report_too_large_for_the_agent_still_gives_every_reference_to_references_bib(self):
+        refs = [{'title': 'Deep learning', 'doi': '10.1038/nature14539', 'year': 2015, 'raw': 'r%d ' % i + 'x' * 3900}
+                for i in range(60)] + [{'title': 'Quantum llamas in practice', 'doi': '10.9999/none'}]
+        self.make(answering(self.results, [('verify_citations', {'references': refs})]))
+        self.store.add_research_task('r1', sources={'crossref': 'allow'})
+        self.run_task()
+        result = self.results[0]
+        self.assertTrue(result['truncated'])
+        self.assertLessEqual(len(json.dumps(result).encode('utf-8')), 64 * 1024)
+        self.assertEqual(result['summary']['verified'], 60)
+        card = self.events_of('r1', 'citation_report')[0]['data']
+        self.assertEqual(card['summary'], result['summary'])
+        self.assertTrue(card['truncated'])
+        self.assertIn('references', card)
+        bib = (self.outputs() / 'references.bib').read_text()
+        self.assertIn('% Verified: 60.', bib)
+        self.assertIn('% Left out, not found: Quantum llamas in practice', bib)
+
+    def test_a_long_final_answer_is_saved_whole(self):
+        text = '# Review\n\n' + ('A long paragraph of findings. ' * 4000)
+        self.make(answering(self.results, [], text=text))
+        self.store.add_research_task('r1')
+        self.run_task()
+        self.assertEqual((self.outputs() / 'report.md').read_text(), text)
+
     def test_project_tasks_and_children_write_no_outputs(self):
         self.make(answering(self.results, []))
         task = self.store.add_task('t1', 'p1')
