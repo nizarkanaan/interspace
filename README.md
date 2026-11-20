@@ -2,11 +2,13 @@
 
 A personal observatory for projects, research, knowledge, and specialist AI agents.
 
-**Status: native Mac development app. Claude Code and Codex run as agents under one Orchestrator; Gemini comes later.** Launch `dist/Interspace.app` after [building](app/README.md). Every task is a conversation with the Orchestrator, which can propose a team of subagents on mixed providers. You approve each team before it runs. Each writing subagent works in its own copy of the project and commits to its own `interspace/task-…` branch, which you review and merge. Tasks from the earlier Read-only review and Fix & test modes stay readable but no longer run. The design preview and earlier offline pilot remain separate.
+**Status: native Mac development app. Claude Code and Codex run as agents under one Orchestrator; Gemini comes later.** Launch `dist/Interspace.app` after [building](app/README.md). Every task is a conversation with the Orchestrator, which can propose a team of subagents on mixed providers. You approve each team before it runs. Each writing subagent works in its own copy of the project and commits to its own `interspace/task-…` branch, which you review and merge. It is also becoming a research environment that still codes: research questions need no project, agents search scholarly sources with keys you enter yourself, and a citation checker marks each reference verified or not before you rely on it. Tasks from the earlier Read-only review and Fix & test modes stay readable but no longer run. The design preview and earlier offline pilot remain separate.
 
 ## Mac app
 
 Double-click `dist/Interspace.app`. Add or select a Git project and sign in to your providers under **Settings → Providers**. Then choose **New task**: approve the task scope, describe the outcome, approve the team the Orchestrator proposes, follow the subagents as they work, and use **Review changes → Merge**. See [app setup and limits](app/README.md).
+
+**Research (being built).** Under **Settings → Research sources**, add your own free keys or contact email for Semantic Scholar, OpenAlex, Crossref and Unpaywall (arXiv needs none); they stay in your Mac's Keychain and never reach agents. **New task → Research question** needs no project and offers Literature review, Related work and Verify my references. The task shows the papers agents found, a citation report (verified, mismatch, not found, retracted or not checked), and a report with a BibTeX file you can save. Research calls are counted per source, never priced. See [Research](app/README.md#research).
 
 ## Design preview
 
@@ -31,6 +33,7 @@ Each person installs Interspace on their own machine and uses their own files, p
 - A decision inbox shows proposed actions before execution.
 - Local project history and selected-folder access are the default.
 - Claude Code and Codex are the first providers, each on your own sign-in; Gemini can be added later.
+- Scholarly sources (Semantic Scholar, OpenAlex, arXiv, Crossref, Unpaywall) use your own keys or email; more sources can be added later.
 - Subscription authentication must be verified against the provider's supported integration path. API access is a separate billing path; this prototype promises neither subscription coverage nor unlimited usage.
 
 ## Design
@@ -46,7 +49,7 @@ Each person installs Interspace on their own machine and uses their own files, p
 - [Engineering and debugging conventions](docs/engineering.md)
 - [Standalone prototype](design/index.html)
 
-The Mac app runs Orchestrator tasks with approved teams of Claude Code and Codex subagents, and reviews and merges their branches. Gemini, notarized distribution and additional-platform packaging remain future work.
+The Mac app runs Orchestrator tasks with approved teams of Claude Code and Codex subagents, and reviews and merges their branches. Research questions without a project, research sources and the citation checker are being built. Gemini, notarized distribution and additional-platform packaging remain future work.
 
 ## Maintaining the preview
 
