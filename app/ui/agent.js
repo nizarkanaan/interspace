@@ -82,15 +82,19 @@ function renderAgent(){
  head($('agent-head'),id);$('agent-stop').hidden=!stoppable(id);$('agent-back').textContent=isResearch(id)?'← Research':'← Tasks';
  scopeArea(id);
  outputsArea(id);
- const tab=layoutTabs(id),talk=tab==='conversation';
- $('agent-stream').hidden=!talk;$('agent-composer').hidden=!talk;$('agent-scope-editor').hidden=!talk;
+ const {tab,talk,split}=layoutTabs(id);
+ $('agent-stream').hidden=!talk;$('agent-composer').hidden=!talk;$('agent-scope-editor').hidden=split?tab!=='details':!talk;
  scopeNote(id,talk);
  // A newer scope than the one displayed (edited elsewhere) is reloaded before it can be approved.
- const ev=S.scopeEvent(id),info=scopeInfo(id);if(ev&&info.digest&&ev.scope_digest!==info.digest&&!info.loading&&!info.saving&&ev.scope_version>=(info.scope?.version||0))loadScope(id);
- const stream=$('agent-stream');const stick=innerHeight+scrollY>=document.documentElement.scrollHeight-80;
+ const ev=S.scopeEvent(id),info=scopeInfo(id);const seen=ev&&ev.scope_version+':'+ev.scope_digest;
+ // At most one reload per scope event: a reply that still differs (or an event without a digest) never loops.
+ if(ev&&info.digest&&ev.scope_digest!==info.digest&&!info.loading&&!info.saving&&ev.scope_version>=(info.scope?.version||0)&&info.reloadedFor!==seen){info.reloadedFor=seen;loadScope(id);}
+ // In the split reader the conversation column scrolls on its own; elsewhere the window does.
+ const stream=$('agent-stream'),chat=split?document.querySelector('#agent-view .agent-main'):null;
+ const stick=chat?chat.scrollTop+chat.clientHeight>=chat.scrollHeight-80:innerHeight+scrollY>=document.documentElement.scrollHeight-80;
  S.render(stream,id);
  if(!stream.children.length&&!stream.querySelector('.empty'))el('p','empty muted','No activity yet. Describe what the agent should do.',stream);
- if(stick&&talk&&document.activeElement!==$('agent-message'))scrollTo(0,document.documentElement.scrollHeight);
+ if(stick&&talk&&document.activeElement!==$('agent-message')){if(chat)chat.scrollTop=chat.scrollHeight;else scrollTo(0,document.documentElement.scrollHeight);}
  if(shownDraftFor!==id){shownDraftFor=id;$('agent-message').value=drafts.get(id)||'';}
  const reason=gate(id);$('agent-send').disabled=!!reason;
  $('agent-note').textContent=reason||'Enter sends · Shift+Enter adds a line · / for commands · @ to mention';
@@ -113,24 +117,51 @@ const tabs=new Map(),corpora=new Map();
 // narrow window the panel is the Details tab. Corpus is for root research tasks only.
 const narrowQuery=matchMedia('(max-width: 1099px)');
 function layoutTabs(id){
- const nav=$('agent-tabs'),narrow=narrowQuery.matches,corpus=isResearch(id)&&!parentOf(id);
+ const nav=$('agent-tabs'),narrow=narrowQuery.matches,root=isResearch(id)&&!parentOf(id),split=root&&!narrow;
+ place(split);
+ const report=root&&reportOutput(id)!=null;
  let tab=tabs.get(id)||'conversation';
- if(tab==='corpus'&&!corpus||tab==='details'&&!narrow)tab='conversation';
- const report=corpus&&reportOutput(id)!=null;
- if(tab==='report'&&!report)tab='conversation';
- const shown={conversation:true,report,corpus,details:narrow};
+ if(split){
+  // Split reader (2026-11-20-split-reader-design.md): the conversation is always beside the results.
+  const info=scopeInfo(id),waiting=!!info.scope&&!Scope.approved(info);
+  if(tab==='conversation'||tab==='report'&&!report)tab=waiting?'details':report?'report':'corpus';
+ }else{
+  if(tab==='corpus'&&!root||tab==='details'&&!narrow)tab='conversation';
+  if(tab==='report'&&!report)tab='conversation';
+ }
+ const shown={conversation:!split,report,corpus:root,details:split||narrow};
  for(const b of nav.querySelectorAll('[data-agent-tab]')){b.hidden=!shown[b.dataset.agentTab];b.setAttribute('aria-pressed',String(b.dataset.agentTab===tab));}
+ nav.querySelector('[data-agent-tab=details]').textContent=split?'Scope and outputs':'Details';
  nav.hidden=Object.values(shown).filter(Boolean).length<2;
- $('agent-corpus').hidden=tab!=='corpus';$('agent-report').hidden=tab!=='report';$('agent-details').hidden=narrow&&tab!=='details';
- return tab;
+ $('agent-corpus').hidden=tab!=='corpus';$('agent-report').hidden=tab!=='report';$('agent-details').hidden=(split||narrow)&&tab!=='details';
+ topbar(id,split);
+ return {tab,talk:split||tab==='conversation',split};
 }
-// While the scope waits for approval, the conversation says so, so a task never sits waiting unnoticed.
+// Moves the result sections between the side-panel layout and the split reader's results column.
+let placed=false;
+function place(split){
+ if(split===placed)return;placed=split;
+ const main=document.querySelector('#agent-view .agent-main'),results=$('agent-results'),layout=document.querySelector('#agent-view .agent-layout');
+ const parts=['agent-tabs','agent-scope-editor','agent-report','agent-corpus','agent-details'].map(x=>$(x));
+ $('agent-view').classList.toggle('split',split);results.hidden=!split;$('agent-topbar').hidden=!split;
+ if(split){$('agent-topbar').prepend($('agent-back'));results.append(...parts);}
+ else{main.prepend($('agent-back'));$('agent-back').after($('agent-tabs'));$('agent-scope-note').after($('agent-scope-editor'));$('agent-stream').before($('agent-report'),$('agent-corpus'));layout.append($('agent-details'));}
+}
+function topbar(id,split){
+ if(!split)return;
+ const st=status(id),b=S.budget(id),info=scopeInfo(id);
+ $('agent-topbar-status').textContent=S.statusText(st)+(b?' · '+S.budgetText(b):'');
+ const scope=$('agent-topbar-scope');scope.hidden=!info.scope;
+ scope.textContent=info.scope?(Scope.approved(info)?'Scope approved · v'+info.scope.version:'Scope needs approval'):'';
+ scope.className=info.scope&&!Scope.approved(info)?'scope-waiting':'';
+ $('agent-topbar-stop').hidden=!stoppable(id);
+}
 function scopeNote(id,talk){
  const info=scopeInfo(id),waiting=!!info.scope&&!Scope.approved(info)&&!info.editing;
  $('agent-scope-note').hidden=!talk||!waiting;
 }
 function openEditor(id){
- if(narrowQuery.matches)tabs.set(id,'conversation');
+ if(placed)tabs.set(id,'details');else if(narrowQuery.matches)tabs.set(id,'conversation');
  requestAnimationFrame(()=>{const e=$('agent-scope-editor');if(e&&!e.hidden)e.scrollIntoView({block:'start'});});
 }
 // Report tab (2026-11-20-report-reader-design.md): report.md at reading width, refetched when its output changes.
@@ -209,11 +240,14 @@ window.interspaceAgent={
   window.interspaceComposer.attach({input:$('agent-message'),menu:$('agent-menu'),form:$('agent-composer'),commands,mentions,onSend:send,onInput:text=>{if(current)drafts.set(current,text);}});
   for(const b of $('agent-tabs').querySelectorAll('[data-agent-tab]'))b.onclick=()=>{if(!current)return;const nav=$('agent-tabs'),stuck=nav.getBoundingClientRect().top<=1;tabs.set(current,b.dataset.agentTab);if(b.dataset.agentTab==='corpus'){const c=corpusInfo(current);if(c.data)loadCorpus(current);}refresh();
    // Conversation opens at its latest message; Corpus opens at its top when the tab row is pinned.
-   if(b.dataset.agentTab==='conversation')scrollTo(0,document.documentElement.scrollHeight);
+   if(placed)$('agent-results').scrollTop=0;
+   else if(b.dataset.agentTab==='conversation')scrollTo(0,document.documentElement.scrollHeight);
    else if(stuck){let p=nav.previousElementSibling;while(p&&p.hidden)p=p.previousElementSibling;scrollTo(0,p?p.getBoundingClientRect().bottom+scrollY:0);}};
-  $('agent-scope-review').onclick=()=>{if(!current)return;if(narrowQuery.matches){tabs.set(current,'details');refresh();}const b=$('agent-scope').querySelector('.primary')||$('agent-scope').querySelector('button');if(b)b.focus();};
+  $('agent-scope-review').onclick=()=>{if(!current)return;if(narrowQuery.matches||placed){tabs.set(current,'details');refresh();}const b=$('agent-scope').querySelector('.primary')||$('agent-scope').querySelector('button');if(b)b.focus();};
   narrowQuery.addEventListener('change',()=>refresh());
-  $('agent-stop').onclick=()=>cancel(current);$('agent-back').onclick=()=>host.navigate(current&&isResearch(current)?'research':'tasks');
+  $('agent-stop').onclick=()=>cancel(current);
+  $('agent-topbar-stop').onclick=()=>cancel(current);
+  $('agent-topbar-scope').onclick=()=>{if(!current)return;tabs.set(current,'details');refresh();$('agent-results').scrollTop=0;};$('agent-back').onclick=()=>host.navigate(current&&isResearch(current)?'research':'tasks');
  },
  isAgent,isResearch,researchRows:()=>(Array.isArray(state?.research?.tasks)?state.research.tasks:[]).filter(t=>t&&typeof t.id==='string'&&!t.parent_task_id&&!parentOf(t.id)),title:()=>title(current),current:()=>current,parentOf,
  setDraft(id,text){drafts.set(id,text);if(current===id)shownDraftFor=null;},

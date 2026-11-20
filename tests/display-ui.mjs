@@ -31,13 +31,16 @@ export default async function check(page,url){
  const stream=page.locator('#agent-stream');
  await page.waitForFunction(()=>document.querySelectorAll('#agent-stream .message').length===2);
 
- // Panel: status, scope and outputs sit beside the conversation, not above it; no Details tab when wide.
+ // Split reader (wide research task): the conversation on the left, results on the right. While the scope waits for
+ // approval the results open on Scope and outputs, which holds status, scope and outputs.
  const panel=page.locator('#agent-details');
- assert(await panel.isVisible(),'Panel visible when wide');
+ assert(await page.locator('#agent-view.split').count()===1&&await page.locator('#agent-topbar').isVisible(),'Split reader with a top bar');
+ assert(await panel.isVisible()&&(await text(page.locator('[data-agent-tab=details]')))==='Scope and outputs'&&(await page.locator('[data-agent-tab=details]').getAttribute('aria-pressed'))==='true','Scope and outputs open first');
  for(const id of ['agent-head','agent-scope'])assert(await panel.locator('#'+id).count()===1,id+' in the panel');
- assert(await page.locator('[data-agent-tab=details]').isHidden(),'No Details tab when wide');
- const side=await page.evaluate(()=>{const s=document.getElementById('agent-stream').getBoundingClientRect(),p=document.getElementById('agent-details').getBoundingClientRect();return p.left>=s.right;});
- assert(side,'Panel is to the right of the conversation');
+ assert(await page.locator('[data-agent-tab=conversation]').isHidden(),'No Conversation tab beside the conversation');
+ const side=await page.evaluate(()=>{const s=document.getElementById('agent-stream').getBoundingClientRect(),p=document.getElementById('agent-results').getBoundingClientRect();return p.left>=s.right;});
+ assert(side,'Results are to the right of the conversation');
+ assert((await text(page.locator('#agent-topbar-scope')))==='Scope needs approval'&&await page.evaluate(()=>document.documentElement.scrollHeight<=innerHeight+1),'Top bar scope, page does not scroll');
 
  // Default display: one-line search summaries, reasoning summary, failed call in full.
  const s1=await text(stream.locator('[data-item=s1]'));

@@ -55,7 +55,7 @@ export default async function check(page,url){
  assert(JSON.stringify(create.scope.research.sources)===JSON.stringify({semantic_scholar:'allow',openalex:'allow',arxiv:'allow',crossref:'ask',unpaywall:'off'})&&create.scope.projects.length===0,'Research scope sent: '+JSON.stringify(create.scope));
  assert((await requests(page,'switch_project')).length===0,'Research task switched project');
  assert((await page.locator('#agent-message').inputValue()).startsWith('Write a literature review on: synthetic <i>retrieval</i> methods'),'First message not waiting in the composer');
- assert((await text(page.locator('#breadcrumb')))==='Research'&&(await page.locator('#agent-back').textContent())==='← Research','Research breadcrumb/back');
+ assert(await page.locator('#breadcrumb').isHidden()&&(await page.locator('#agent-back').textContent())==='← Research'&&await page.locator('.project-nav').isHidden(),'Research back label, no breadcrumb or project picker');
  // Scope chips name the research sources and the missing project.
  const chips=await page.locator('#agent-scope .scope-chips').allTextContents();
  assert(chips[0].includes('Research: Semantic Scholar, OpenAlex, arXiv')&&chips[0].includes('Research, asks first: Crossref')&&chips[0].includes('No project: no files or commands')&&!chips[0].includes('Unpaywall'),'Chips: '+chips[0]);

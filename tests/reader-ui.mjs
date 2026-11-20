@@ -38,7 +38,7 @@ export default async function check(page,url){
  await page.locator('#output-read-report_md').focus();await page.keyboard.press('Enter');
  const reader=page.locator('#agent-report');
  await page.waitForFunction(()=>document.querySelectorAll('#agent-report .report-reference').length===5);
- assert(await page.locator('#agent-details').isVisible()&&await reader.isVisible()&&await page.locator('#agent-stream').isHidden(),'Reader in the main column');
+ assert(await reader.isVisible()&&await page.locator('#agent-stream').isVisible()&&await page.locator('#agent-details').isHidden()&&await page.locator('#agent-results #agent-report').count()===1,'Reader beside the conversation');
 
  // Verdicts in words, from the corpus.
  const verdict=async n=>text(reader.locator('#report-ref-'+n+' .report-verdict'));
@@ -66,7 +66,9 @@ export default async function check(page,url){
  assert(await reader.locator('.report-reference').count()===5&&(await text(reader.locator('.reader-summary'))).startsWith('5 references'),'A paragraph after the list is not a reference');
  assert(!(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth)),'No sideways scroll');
  await page.setViewportSize({width:390,height:900});
- assert(!(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth)),'No sideways scroll at 390');
+ await page.waitForFunction(()=>!document.querySelector('#agent-view.split'));
+ {const wide=await page.evaluate(()=>[...document.querySelectorAll('body *')].filter(e=>e.getBoundingClientRect().right>innerWidth+1&&e.offsetParent).slice(0,4).map(e=>e.tagName+'#'+e.id+'.'+e.className+':'+Math.round(e.getBoundingClientRect().right)));
+  assert(!(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth)),'No sideways scroll at 390: '+JSON.stringify(wide));}
  await page.setViewportSize({width:1280,height:1000});
  assert(!errors.length,'Page errors: '+errors.join('; '));
  assert(!(await page.evaluate(()=>window.pwned)),'Script ran');

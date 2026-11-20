@@ -120,7 +120,7 @@ export default async function check(page,url){
  // The report opens in the Report tab at reading width (2026-11-20-report-reader-design.md).
  await out.getByRole('button',{name:'Read report.md',exact:true}).click();
  await page.waitForFunction(()=>document.querySelector('#agent-report .report-md'));
- assert((await page.locator('[data-agent-tab=report]').getAttribute('aria-pressed'))==='true'&&await page.locator('#agent-stream').isHidden(),'Report tab open');
+ assert((await page.locator('[data-agent-tab=report]').getAttribute('aria-pressed'))==='true'&&await page.locator('#agent-results #agent-report').isVisible(),'Report tab open');
  const md=page.locator('#agent-report .report-md');
  assert(await md.locator('h3').textContent()==='Related work'&&await md.locator('strong').textContent()==='bold'&&await md.locator('em').textContent()==='care'&&await md.locator('li').count()===4,'Markdown structure');
  assert((await text(md)).includes(XSS)&&(await text(md)).includes('<script>window.pwned=1</script>')&&await md.locator('img,script').count()===0,'Markdown not text-safe');
@@ -129,6 +129,7 @@ export default async function check(page,url){
  // A link's real host is always visible, so link text that looks like another address cannot hide where it goes.
  assert((await text(md)).includes('a safe link (example.org)')&&(await text(md)).includes('https://doi.org/10.5555/x (evil.example)'),'Link host not shown: '+await text(md));
  assert(await md.locator('a').evaluateAll(as=>as.every(a=>!a.textContent.includes('evil.example')||a.getAttribute('href').includes('evil.example'))),'Host inside link text');
+   await page.locator('[data-agent-tab=details]').click(); // Outputs live under Scope and outputs in the split reader.
    await out.getByRole('button',{name:'View references.bib',exact:true}).focus();await page.keyboard.press('Enter');
  await page.waitForFunction(()=>document.querySelector('#agent-outputs .output-text'));
  assert((await out.locator('.output-text').textContent()).includes('title={'+XSS+'}'),'BibTeX text');
@@ -142,7 +143,6 @@ export default async function check(page,url){
  await page.waitForFunction(()=>document.querySelector('#agent-outputs [data-output="report.md"]').textContent.includes('Not saved.'));
  assert(JSON.stringify(await requests(page,'task_output_save'))===JSON.stringify([{task_id:'r1',name:'references.bib'},{task_id:'r1',name:'report.md'}]),'Save params');
  assert(await out.locator('.report-md').count()===0,'Report is not shown inside the panel');
- await page.locator('[data-agent-tab=conversation]').click();
 
  // Live events keep adding cards without losing the open BibTeX view.
  await push(page,[ev('r1','research_usage',{calls:{semantic_scholar:4,arxiv:1},cached:{semantic_scholar:1}})]);

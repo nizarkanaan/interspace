@@ -27,6 +27,7 @@ sys.path.insert(0, str(ROOT / 'tests'))
 import service  # noqa: E402  (puts pilot/ on the path)
 import codex_auth  # noqa: E402
 from research import citations  # noqa: E402
+import research_api  # noqa: E402  (bound to the real `research` before setUp swaps in the fake, as in a full run)
 from runtime import claude, codex  # noqa: E402
 from agent_fakes import wait_for  # noqa: E402
 import test_e2e_team as e2e  # noqa: E402  (a module, so its test class is not collected twice)

@@ -16,6 +16,8 @@ export default async function check(page,url){
  resetSeq();
  const history=[ev('r1','status',{state:'idle',detail:'',queue_position:null,reason:null}),ev('r1','message',{role:'assistant',text:'Done.',final:true},'m1')];
  await install(page,url,{researchRows:[{id:'r1',mode:'agent',kind:'research',project_id:null,title:'Synthetic corpus task',status:'idle',provider:'codex',model:null}],history:{r1:history},corpora:{r1:CORPUS}});
+ // Tabs are tested in a narrow window; wide windows show the split reader (display-ui, reader-ui).
+ await page.setViewportSize({width:1000,height:900});
  await page.locator('[data-view=research]').click();
  await page.locator('[data-open-task=r1]').click();
  const tabs=page.locator('#agent-tabs');

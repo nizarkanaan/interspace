@@ -77,7 +77,7 @@ export const text=async loc=>(await loc.textContent())||'';
 export async function fit(page,label,show,shots){
  const out=[];
  for(const colorScheme of ['light','dark']){await page.emulateMedia({colorScheme});for(const width of [320,390,760,1024,1280]){
-  await page.setViewportSize({width,height:900});if(show)await show();
+  await page.setViewportSize({width,height:900});await page.waitForFunction(()=>innerWidth>=1100||!document.querySelector('#agent-view.split'));if(show)await show();
   const f=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}));
   assert(f.scroll<=f.width,'Overflow '+label+' '+width+' '+colorScheme+': '+f.scroll);out.push(f);
   if(shots&&(width===390||width===1280))await page.screenshot({path:'workspace-data/'+label+'-'+colorScheme+'-'+width+'.png',fullPage:true});

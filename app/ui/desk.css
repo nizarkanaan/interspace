@@ -288,3 +288,48 @@ main:has(#agent-view:not([hidden])){max-width:1400px}
 .report-verdict{display:block;font:600 12px/1.5 var(--sans);color:var(--muted)}
 .is-verified .report-verdict{color:var(--accent)}.report-reference:is(.is-retracted,.is-not-verified) .report-verdict{color:var(--warn)}
 .report-back{display:inline-block;margin-left:10px;font:12.5px var(--sans);color:var(--accent)}
+
+/* Scrollbars: the window, the sidebar and the Task details panel can all scroll, and the default bars sat side by
+   side. One quiet style everywhere: a thin rounded thumb in the rule colour on no track. The sidebar's and the
+   panel's own bars appear only while the pointer is over them, so only the window's bar stands at the edge. */
+::-webkit-scrollbar{width:11px;height:11px}
+::-webkit-scrollbar-track,::-webkit-scrollbar-corner{background:transparent}
+::-webkit-scrollbar-thumb{background-color:var(--line);border:3px solid transparent;border-radius:6px;background-clip:padding-box}
+::-webkit-scrollbar-thumb:hover{background-color:var(--muted)}
+aside::-webkit-scrollbar-thumb,.agent-details::-webkit-scrollbar-thumb{background-color:transparent}
+aside:hover::-webkit-scrollbar-thumb,.agent-details:hover::-webkit-scrollbar-thumb,aside:focus-within::-webkit-scrollbar-thumb,.agent-details:focus-within::-webkit-scrollbar-thumb{background-color:var(--line)}
+.agent-details{scrollbar-gutter:stable;padding-right:4px}
+
+/* Split reader (2026-11-20-split-reader-design.md): research tasks in wide windows show the conversation and the
+   results side by side. The page stops scrolling; each column scrolls on its own, the conversation's bar at its
+   border and the results' bar at the window edge, so no two bars stand together. */
+body:has(#agent-view.split:not([hidden])){overflow:hidden}
+main:has(#agent-view.split:not([hidden])){max-width:none;height:100vh;box-sizing:border-box;display:flex;flex-direction:column;padding:18px 0 0}
+main:has(#agent-view.split:not([hidden])) .heading{padding:0 40px 0 32px;margin-bottom:4px}
+main:has(#agent-view.split:not([hidden])) h1{font-size:22px;line-height:1.25;letter-spacing:-.1px;margin:0}
+main:has(#agent-view.split:not([hidden])) #new-task{display:none}
+main:has(#agent-view.split:not([hidden])) #error,main:has(#agent-view.split:not([hidden])) #auth,main:has(#agent-view.split:not([hidden])) #active-owner{margin:0 40px 10px 32px}
+#agent-view.split{flex:1;min-height:0;display:flex;flex-direction:column}
+.agent-topbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding:4px 40px 12px 32px;border-bottom:1px solid var(--line)}
+.agent-topbar #agent-back{margin:0 6px 0 -10px}
+.agent-topbar-status{margin:0;flex:1 1 240px;font-size:13px;color:var(--muted);min-width:0}
+.agent-topbar button{font-size:14px;padding:7px 12px}
+#agent-topbar-scope{border-color:var(--accent);color:var(--accent)}
+#agent-topbar-scope.scope-waiting{border-color:var(--warn);color:var(--warn)}
+#agent-view.split .agent-layout{flex:1;min-height:0;display:grid;grid-template-columns:minmax(340px,420px) minmax(0,1fr);gap:0}
+#agent-view.split .agent-main{overflow:auto;overscroll-behavior:contain;background:var(--bg);border-right:1px solid var(--line);padding:16px 18px 0 32px;display:flex;flex-direction:column}
+#agent-view.split .stream{flex:1;margin-bottom:12px}
+#agent-view.split .stream .message.user{max-width:100%;background:var(--leaf)}
+#agent-view.split .stream .message.assistant .md{font-size:15.5px}
+#agent-view.split .agent-composer{background:var(--bg);padding-bottom:14px}
+#agent-view.split .agent-composer textarea{min-height:64px;background:var(--leaf)}
+#agent-view.split .composer-actions .footnote{max-width:100%}
+.agent-results{overflow:auto;overscroll-behavior:contain;min-width:0;padding:0 40px 32px 36px;display:flex;flex-direction:column}
+.agent-results>[hidden]{display:none!important}
+.agent-results #agent-tabs{margin:0 0 18px;padding-top:10px}
+.agent-results .agent-details{position:static;max-height:none;overflow:visible;border-left:0;padding:0;max-width:720px}
+.agent-results #agent-scope-editor:not(:empty){margin:0 0 22px}
+#agent-view.split .agent-main::-webkit-scrollbar-thumb{background-color:transparent}
+#agent-view.split .agent-main:hover::-webkit-scrollbar-thumb,#agent-view.split .agent-main:focus-within::-webkit-scrollbar-thumb{background-color:var(--line)}
+#agent-view.split .agent-layout{grid-template-rows:minmax(0,1fr)}
+#agent-view.split .agent-layout{align-items:stretch}
