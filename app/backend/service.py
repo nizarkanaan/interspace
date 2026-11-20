@@ -386,10 +386,11 @@ class Application:
         for identity,task in tasks.entries(project):
             try:
                 tasks.validate(task,identity)
-                row=dict(id=identity,title=task['title'],mode=task.get('mode','review'))
+                row=dict(id=identity,title=task['title'],mode=task.get('mode','review'),kind=tasks.kind(task),
+                         project_id=project.get('id'))
                 if row['mode']=='agent':
                     row.update(status=task['agent'].get('state') or 'draft',provider=tasks.provider(task),model=task.get('model'),
-                               role=task.get('role'),parent_task_id=task.get('parent_task_id'),kind=tasks.kind(task))
+                               role=task.get('role'),parent_task_id=task.get('parent_task_id'))
                 else:
                     row.update(status='read_only',read_only=True)
                 result.append(row)
@@ -400,21 +401,24 @@ class Application:
     def public(self):
         with self.lock:
             research=research_state(self.state)
-            # The Research entry (tasks without a project) is shown like a project with `project_id: null`.
-            project = research_view(research) if research['selected'] else self.state['projects'].get(self.state['selected_project_id'])
+            project=self.state['projects'].get(self.state['selected_project_id'])
+            # The Research entry (research/tasks.md): `research.tasks` always lists every task without a project;
+            # while it is selected, `task_id` and `task` are its selected task. `tasks` stays the project's.
+            shown=research_view(research) if research['selected'] else project
             task=None;task_error=''
-            if project:
-                try:task=tasks.selected(project)
+            if shown:
+                try:task=tasks.selected(shown)
                 except ValueError as error:task_error=str(error)
             data = copy.deepcopy({key:self.state[key] for key in ('version','active','connection')})
             data['provider_status'] = copy.deepcopy(self.state.get('provider_status') or {})
-            data.update(task_id=project.get('selected_task_id') if project and isinstance(project.get('selected_task_id'),str) else None,
+            data.update(task_id=shown.get('selected_task_id') if shown and isinstance(shown.get('selected_task_id'),str) else None,
                         task=self.task_view(task) if task else None,
                         tasks=self.task_summaries(project) if project else [],
                         project_id=project['id'] if project else None,project=project['name'] if project else None,
                         projects=self.summaries())
-            data['research']={'selected':research['selected'],'task_count':sum(
-                1 for t in research['tasks'].values() if isinstance(t,dict) and not t.get('parent_task_id'))}
+            rows=self.task_summaries(research_view(research))
+            data['research']={'selected':research['selected'],'selected_task_id':research.get('selected_task_id'),
+                              'tasks':rows,'task_count':sum(1 for r in rows if not r.get('parent_task_id'))}
             data['scheduler']=self.scheduler.snapshot()
             # Only app-level errors (sign-in) are shown here; an earlier task's error is part of its history.
             app_error=self.state.get('error_project_id') is None and self.state.get('error_task_id') is None

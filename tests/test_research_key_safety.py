@@ -180,9 +180,9 @@ class ResearchKeySafetyTests(e2e.EndToEndTeamTests):
         created = self.call('agent_create', {'project_id': None, 'kind': 'research', 'title': 'Related work'})
         task_id = created['task_id']
         state = self.call('state', {})
-        self.assertEqual((state['project_id'], state['project'], state['task_id']), (None, 'Research', task_id))
-        self.assertEqual(state['research'], {'selected': True, 'task_count': 1})
-        self.assertEqual(state['tasks'][0]['kind'], 'research')
+        self.assertEqual((state['task_id'], state['research']['selected'], state['research']['task_count']),
+                         (task_id, True, 1))
+        self.assertEqual(state['research']['tasks'][0]['kind'], 'research')
         self.assertEqual(state['task']['agent']['kind'], 'research')
         scope = self.call('scope_get', {'task_id': task_id})
         self.call('scope_approve', {'task_id': task_id, 'scope_version': scope['scope']['version'],
@@ -212,6 +212,7 @@ class ResearchKeySafetyTests(e2e.EndToEndTeamTests):
 
         # Outputs in app data, listed by task_outputs.
         outputs = self.call('task_outputs', {'task_id': task_id})['outputs']
+        self.assertIn('Deep learning [1]', self.call('task_output_read', {'task_id': task_id, 'name': 'report.md'})['text'])
         self.assertEqual([o['name'] for o in outputs], ['report.md', 'references.bib'])
         folder = data / 'tasks' / task_id / 'outputs'
         self.assertIn('Deep learning [1]', (folder / 'report.md').read_text())

@@ -53,6 +53,7 @@ class OutputsTests(unittest.TestCase):
     def test_methods_are_registered(self):
         self.assertIn('task_outputs', self.app.extensions)
         self.assertIn('task_output_save', self.app.extensions)
+        self.assertIn('task_output_read', self.app.extensions)
 
     def test_lists_known_outputs_only(self):
         self.assertEqual(self.app.handle('task_outputs', {'task_id': 'r1'}), {'outputs': []})
@@ -86,6 +87,23 @@ class OutputsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.app.handle('task_output_save', {'task_id': 'r1', 'name': 'report.md'})
         self.assertEqual(self.app.bridge.calls, [])
+
+    def test_read_returns_text_capped_at_one_mebibyte(self):
+        self.write('report.md', '# Report\n\nDeep learning.')
+        self.assertEqual(self.app.handle('task_output_read', {'task_id': 'r1', 'name': 'report.md'}),
+                         {'name': 'report.md', 'kind': 'report', 'text': '# Report\n\nDeep learning.', 'truncated': False})
+        self.write('references.bib', 'x' * (outputs_api.MAX_READ_BYTES + 10))
+        read = self.app.handle('task_output_read', {'task_id': 'r1', 'name': 'references.bib'})
+        self.assertEqual((read['kind'], len(read['text']), read['truncated']), ('bibtex', outputs_api.MAX_READ_BYTES, True))
+        for name in ('../state.json', 'notes.txt'):
+            with self.assertRaisesRegex(ValueError, 'Unknown output'):
+                self.app.handle('task_output_read', {'task_id': 'r1', 'name': name})
+        (self.folder / 'report.md').unlink()
+        outside = self.root / 'outside.md'
+        outside.write_text('private')
+        os.symlink(str(outside), str(self.folder / 'report.md'))
+        with self.assertRaises(ValueError):
+            self.app.handle('task_output_read', {'task_id': 'r1', 'name': 'report.md'})
 
     def test_save_without_the_app_window(self):
         self.write('report.md', 'x')

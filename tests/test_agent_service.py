@@ -555,15 +555,21 @@ class ResearchTaskServiceTests(unittest.TestCase):
             self.assertEqual(task['scope']['research'], {'sources': {}})  # No research module in this build.
             self.assertEqual(self.app.store.task(task_id)['id'], task_id)
         public = self.app.handle('state', {})
-        self.assertEqual((public['project_id'], public['project'], public['task_id']), (None, 'Research', task_id))
-        self.assertEqual(public['research'], {'selected': True, 'task_count': 1})
-        self.assertEqual([(r['id'], r['kind']) for r in public['tasks']], [(task_id, 'research')])
+        self.assertEqual((public['project_id'], public['task_id']), (None, task_id))
+        self.assertEqual(public['tasks'], [])  # `tasks` stays the selected project's (none here).
+        research = public['research']
+        self.assertEqual((research['selected'], research['selected_task_id'], research['task_count']), (True, task_id, 1))
+        self.assertEqual([(r['id'], r['kind'], r['project_id'], r['role']) for r in research['tasks']],
+                         [(task_id, 'research', None, 'orchestrator')])
         self.assertEqual(public['task']['agent']['project_id'], None)
         # Leaving and coming back to the Research entry, and choosing no task.
         project_id = self.repo('repo')
-        self.assertEqual(self.app.handle('switch_project', {'project_id': project_id})['research']['selected'], False)
+        switched = self.app.handle('switch_project', {'project_id': project_id})
+        self.assertEqual((switched['research']['selected'], switched['task_id']), (False, None))
+        self.assertEqual([r['id'] for r in switched['research']['tasks']], [task_id])  # Always listed.
+        self.assertTrue(all(r['kind'] == 'project' and r['project_id'] == project_id for r in switched['tasks']))
         back = self.app.handle('switch_project', {'project_id': None, 'research': True})
-        self.assertEqual((back['project_id'], back['task_id']), (None, task_id))
+        self.assertEqual((back['research']['selected'], back['task_id']), (True, task_id))
         self.assertIsNone(self.app.handle('select_task', {'project_id': None, 'task_id': None})['task_id'])
         self.assertEqual(self.app.handle('select_task', {'project_id': None, 'task_id': task_id})['task_id'], task_id)
         with self.assertRaises(ValueError):
