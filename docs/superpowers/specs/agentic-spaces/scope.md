@@ -64,6 +64,12 @@ Field rules (validated by `scope.validate(document)`, which raises `ValueError` 
 
 `scope.default(task, project_ids)` builds the starting scope the scope editor shows.
 
+- `research` (optional, research/tasks.md): `{"sources": {name: "allow" | "ask" | "off"}}`, at most 32 lowercase
+  source names. A scope without the key means research is off, so earlier scopes keep their digests.
+  `scope.default` and `project_default` take `research_sources` (`{name: usable}`) and set `allow` for every usable
+  source, `off` for the rest; `research_default(token_budget=None, research_sources=None)` builds the scope of a
+  task without a project: `projects: []`, `commands.workspace: deny`, `network.default: deny`, `web_search: deny`.
+
 ## Requests
 
 Every action the runtime, the MCP bridge or the scheduler wants to take is described as one request and passed to `scope.decide`. The field set per category is fixed. How the Codex runtime (2A) fills it from app-server approval messages (0B-1, decided):
@@ -83,7 +89,12 @@ Every action the runtime, the MCP bridge or the scheduler wants to take is descr
 {"category": "web_search", "query": "python fromisoformat whitespace"}
 {"category": "app", "app": "notion", "op": "update", "action": "notion.page.append", "ref": "notion:page:1f2e…"}
 {"category": "mcp", "server": "…", "tool": "…"}
+{"category": "research", "source": "crossref", "tool": "research_search"}
 ```
+
+- `research` (a read category; read-access runs may use it): `allow` → allow [`research.allow`]; `ask` → ask
+  [`research.ask`], reason `outside_scope`, with the `scope_patch` `{"research": {"sources": {name: "allow"}}}`;
+  `off` or missing → deny [`research.off`]. A research patch may only change a source from `ask` to `allow`.
 
 - `cwd` is resolved like a path. A command whose `cwd` resolves outside every workspace cannot match `commands.workspace` or `commands.allow`; it asks.
 - `path` and `paths` are as the runtime reports them: relative to the workspace or absolute. `decide` resolves them with `os.path.realpath` against the workspace root; anything that resolves outside the workspace is treated as outside it, never trimmed.
@@ -212,6 +223,8 @@ UI → backend methods (1F wires them to `scope.py`):
  "outcome": null, "idempotency_key": null, "detail": null}
 ```
 
+- Research requests are recorded as `{category, source, tool}` only (`REQUEST_FIELDS['research']`): never the query,
+  IDs or results. Each research source call gets a `decision` and an `action` record.
 - `actor`: `agent` | `user` | `system`.
 - `kind`:
   - `decision`: every `decide` result, including allows;

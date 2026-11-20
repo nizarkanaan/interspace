@@ -116,7 +116,7 @@ Both are optional to render. `status` is `pending` | `in_progress` | `completed`
 - `tool` is the runtime's tool name (`shell`, `apply_patch`, `read_file`, a connector tool name such as `notion_page_append`, …). `title` is one line for the card, at most 200 characters.
 - `input` is the call's arguments, bounded to 8 KB (longer values are cut and marked). For Codex commands `input` is `{command, cwd, sandbox, network}` (the unwrapped shell string, scope.md Requests), for network asks `{host}`, for file changes `{paths}`, for web searches `{query}`, and for other MCP servers `{arguments}`. The UI shows unknown fields as a key–value list.
 - `decision` is the **final** decision that let the call run or stopped it: `allow` or `deny`, never `ask`. The runtime calls `RunContext.authorize` first and emits `tool_call` after it returns. If the policy asked, the `ask` and `answer` events come before the `tool_call`, and `decision.rule` is `ask.allow_once`, `ask.add_to_scope` or `ask.deny`. A denied call gets a `tool_call` and a `tool_result` with `status: "denied"`.
-- **Orchestration tools are the exception:** `RunContext.orchestrate` emits their `tool_call`/`tool_result` itself (`category: 'orchestrate'`, rule `orchestrate`). The runtime emits nothing for them. (This replaced the connector path `RunContext.app_tool`, removed with connected apps.)
+- **Orchestration and research tools are the exception:** `RunContext.call_tool` (formerly `orchestrate`) emits their `tool_call`/`tool_result` itself (`category: 'orchestrate'`, rule `orchestrate`). The runtime emits nothing for them. (This replaced the connector path `RunContext.app_tool`, removed with connected apps.)
 - A run with `access: 'read'` gets `decision: {"decision": "deny", "rule": "access.read"}` for any file change or command that leaves the sandbox, without an `ask` (multi-provider/orchestration.md).
 - `tool_result.status`: `ok` | `error` (ran and failed) | `denied` (policy or user refused; it never ran) | `cancelled`. `exit_code` only for commands. `error` is `{"code", "message"}` or `null`.
 - Output shown in the card is at most 16 KB; the rest is in the blob.
@@ -210,6 +210,26 @@ UI → backend:
 ```
 
 Codes: `runtime_unavailable`, `runtime_exited`, `runtime_protocol` (an invalid or unexpected runtime message), `workspace_failed`, `lock_timeout`, `policy_failed` (the policy engine itself failed: fail closed), `audit_failed` (an audit write failed: the action does not run), `budget_exhausted`, `time_limit`, plus any connector error code from connectors.md. `recoverable: true` means the task stays usable (for example one tool failed); `false` precedes a terminal `status`.
+
+## Research additions (research/tasks.md, 2026-11-19)
+
+- **`tool_call`/`tool_result` with `category: 'research'`.** Emitted by `RunContext.call_tool` itself (like
+  `orchestrate`), never by the runtime. `tool` is the research tool name; `input` is
+  `{tool, query?, id?, ids?, references?: <count>, source?}` (never keys); `decision` is
+  `{"decision": "allow", "rule": "research"}`: each source the call uses is decided separately (`ask`/`answer`
+  events may come between the `tool_call` and the `tool_result`, and the audit log has one `decision` and one
+  `action` record per source). The result `output.text` is the tool JSON, cut at 48 KB (`truncated`). Failures
+  carry a fixed `error` (`invalid_request` with the argument problem, `unavailable` or `not_configured`); upstream
+  text never appears.
+- **`citation_report`** (calling task, `item_id: "cite_<call_id>"`): the checker's report (research/tools.md),
+  emitted after each successful `verify_citations`.
+- **`research_usage`** (root task): `{"calls": {source: n}, "cached": {source: n}}`, at most once per second while
+  calls happen; the last count is always sent. Children are counted on their root. The same counts are kept in the
+  root row as `agent.research_usage`.
+- **`outputs`** (root research task): `{"outputs": [{name, kind, bytes}]}` after its Orchestrator ends a turn with a
+  final answer (`report.md`, and `references.bib` when the turn has a citation report).
+- **`error` code `outputs_failed`** (recoverable): the report could not be saved in app data.
+- Events of a task without a project carry `project_id: null`.
 
 ## Example stream
 

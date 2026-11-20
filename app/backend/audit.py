@@ -42,6 +42,8 @@ REQUEST_FIELDS = {
     'network': ('host', 'port', 'via'),
     'web_search': (),
     'mcp': ('server', 'tool'),
+    # Research calls (research/tasks.md): which source and tool only; never the query, IDs or results.
+    'research': ('source', 'tool'),
 }
 DETAIL_FIELDS = {
     'answer': ('ask_id', 'request_digest'),

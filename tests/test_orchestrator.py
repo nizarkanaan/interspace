@@ -273,7 +273,31 @@ class DefaultsTests(unittest.TestCase):
             {'summary': 's', 'members': [{'role': r, 'brief': 'b'} for r in tasks.TEAM_ROLES]}, routing, table)
         self.assertEqual([(m['role'], m['provider'], m['access']) for m in members],
                          [('researcher', 'codex', 'read'), ('implementer', 'claude', 'write'),
-                          ('reviewer', 'codex', 'read'), ('tester', 'claude', 'write'), ('writer', 'claude', 'read')])
+                          ('reviewer', 'codex', 'read'), ('tester', 'claude', 'write'), ('writer', 'claude', 'read'),
+                          ('citation_checker', 'codex', 'read')])
+
+    def test_research_tasks_refuse_write_members(self):
+        table = orchestrator.registry()
+        routing = orchestrator.routing_defaults({}, table)
+        for member in ({'role': 'implementer', 'brief': 'b'}, {'role': 'reviewer', 'brief': 'b', 'access': 'write'},
+                       {'role': 'tester', 'brief': 'b', 'access': 'read'}):
+            with self.subTest(member=member), self.assertRaisesRegex(ValueError, 'no project to write to'):
+                orchestrator.normalize_team({'summary': 's', 'members': [member]}, routing, table, research_only=True)
+        _, members = orchestrator.normalize_team(
+            {'summary': 's', 'members': [{'role': 'researcher', 'brief': 'b'}, {'role': 'citation_checker', 'brief': 'c'}]},
+            routing, table, research_only=True)
+        self.assertEqual([m['access'] for m in members], ['read', 'read'])
+        with self.assertRaisesRegex(ValueError, 'no project to write to'):
+            orchestrator.edit_team(members, [{'member_id': 'm1', 'access': 'write'}], routing, table, research_only=True)
+
+    def test_saved_routing_without_the_new_role_still_works(self):
+        table = orchestrator.registry()
+        saved = json.loads(json.dumps(orchestrator.DEFAULT_ROUTING))
+        del saved['roles']['citation_checker']
+        saved['roles']['researcher'] = {'provider': 'claude', 'model': None}
+        routing = orchestrator.routing_defaults({'routing': saved}, table)
+        self.assertEqual(routing['roles']['researcher']['provider'], 'claude')
+        self.assertEqual(routing['roles']['citation_checker'], {'provider': 'codex', 'model': None})
 
     def test_user_routing_is_used_and_invalid_routing_falls_back(self):
         table = orchestrator.registry()
@@ -307,6 +331,15 @@ class DefaultsTests(unittest.TestCase):
                      'claude: approvals=yes, web_search=yes, write=yes',
                      'Suggest a different provider only with a one-line reason; the user approves the team.'):
             self.assertIn(text, prompt)
+        self.assertIn('citation_checker (read)', prompt)
+        self.assertNotIn('verify_citations', prompt)
+        research = orchestrator.system_prompt(orchestrator.DEFAULT_ROUTING, table['providers'], research=True,
+                                              project_less=True)
+        for text in ('research_search', 'research_citations', 'verify_citations -> final answer',
+                     'Never cite a paper you did not retrieve with a research tool; run `verify_citations` before any '
+                     'answer that cites papers, and say which references were not verified.',
+                     'This task has no project'):
+            self.assertIn(text, research)
 
     def test_read_children_lose_every_write_permission(self):
         parent_scope = FakeScope().default({'id': 'parent'}, ['p1'])

@@ -23,6 +23,7 @@ import uuid
 
 import budget
 import orchestrator
+import tasks as task_rows
 
 from timeutil import iso_time
 
@@ -50,6 +51,10 @@ RUNTIME_KINDS = ('message_delta', 'message', 'reasoning', 'plan_update', 'tool_c
 ANSWERS = ('allow_once', 'add_to_scope', 'deny', 'text')
 IDENTIFIER = re.compile(r'^[A-Za-z0-9_-]{1,128}$')
 BLOB_ID = re.compile(r'^[0-9a-f]{32}$')
+MAX_RESEARCH_RESULT_BYTES = 64 * 1024  # research/tools.md: a result is cut to 64 KB of JSON, flagged `truncated`.
+RESEARCH_USAGE_INTERVAL_S = 1.0  # research/tasks.md: `research_usage` at most once per second while calls happen.
+OUTPUT_NAMES = (('report.md', 'report'), ('references.bib', 'bibtex'))
+RESEARCH_LISTS = ('papers', 'entries', 'references')  # The list a too-large research result is shortened by.
 
 
 class LockTimeout(ValueError):
@@ -498,7 +503,12 @@ class RunContext:
         self.turn_id = run.turn_id
         self.project_ids = [p.get('project_id') for p in task['scope'].get('projects', [])]
         self.workspaces = {pid: info['path'] for pid, info in workspaces.items()}
-        self.primary_workspace = self.workspaces.get(run.project_id) or next(iter(self.workspaces.values()), None)
+        # A task without a project (research/tasks.md) has no workspace: its runtime starts in an empty, app-owned
+        # scratch folder, with no file tools (Claude) or a read-only sandbox (Codex).
+        self.research_only = task_rows.is_research(task)
+        self.scratch = run.scratch
+        self.primary_workspace = (self.workspaces.get(run.project_id) or next(iter(self.workspaces.values()), None)
+                                  or self.scratch)
         self.scope = copy.deepcopy(task['scope'])  # For prompts and display only; decisions read the live scope.
         # A model id from the signed-in account's model list (0B-7), or None for the provider default.
         self.model = task.get('model') if isinstance(task.get('model'), str) and task.get('model') else None
@@ -507,7 +517,8 @@ class RunContext:
         # 'read' or 'write': runtimes start read sessions without workspace writes. The Orchestrator reads only.
         self.access = run.access
         # Added system instructions for Orchestrator sessions (orchestration.md "Prompt"), else None.
-        self.instructions = scheduler.orchestrator.system_prompt() if run.orchestrates else None
+        self.instructions = scheduler.orchestrator.system_prompt(task) if run.orchestrates else None
+        self._offered = tuple(t['name'] for t in self.tools())
 
     def authorize(self, request, call_id):
         return self._scheduler._authorize(self._run, request, _runtime_id(call_id, 'call_id'))
@@ -521,19 +532,31 @@ class RunContext:
             _runtime_id(item_id, 'item_id')
         return self._scheduler._emit(self._run, kind, data, turn_id=turn_id or self.turn_id, item_id=item_id)
 
+    def call_tool(self, name, arguments):
+        """Run one Interspace tool from the MCP bridge: an orchestration tool (Orchestrator sessions) or a research
+        tool (sessions of a task whose scope enables a research source). Only tools this session was offered run."""
+        if not isinstance(name, str) or name not in self._offered:
+            raise ValueError('Unknown tool.')
+        if name in orchestrator.TOOLS:
+            return self._scheduler._orchestrate(self._run, name, arguments)
+        return self._scheduler._research(self._run, name, arguments)
+
     def orchestrate(self, name, arguments):
-        """Run one orchestration tool from the MCP bridge (Orchestrator sessions only). Returns the tool result."""
-        return self._scheduler._orchestrate(self._run, name, arguments)
+        """The earlier name of `call_tool`, kept for runtimes and tests written before research tools."""
+        return self.call_tool(name, arguments)
 
     def report_usage(self, usage):
         self._scheduler._report_usage(self._run, usage)
 
     def tools(self):
-        """Tool descriptors for the MCP bridge: the orchestration tools for Orchestrator sessions, none otherwise."""
-        if not self._run.orchestrates:
-            return []
+        """Tool descriptors for the MCP bridge, built per session: the orchestration tools for the root Orchestrator,
+        then the research tools whenever the scope enables a research source (research/tools.md "Who gets them").
+        Claude's file tools are added by the Claude runtime itself."""
         from runtime import mcp_bridge
-        return copy.deepcopy(list(mcp_bridge.ORCHESTRATION_TOOLS))
+        found = list(mcp_bridge.ORCHESTRATION_TOOLS) if self._run.orchestrates else []
+        if research_enabled(self.scope):
+            found += list(mcp_bridge.RESEARCH_TOOLS)
+        return copy.deepcopy(found)
 
     def observed(self, request, call_id):
         """Record an action the provider ran without asking; returns its final decision (`provider.sandbox`)."""
@@ -568,6 +591,53 @@ class _Run:
         self.orchestrates = False
         self.yielded = False  # Waiting on the user or on its children: holds no run slot.
         self.team_wait = None
+        self.scratch = None  # The app-owned run folder of a task without a project.
+        self.research_only = False
+        self.citation_report = None  # The latest `verify_citations` report of this turn (root Orchestrator runs).
+
+
+def research_enabled(scope):
+    """Whether a scope turns on at least one research source (a missing `research` key means off)."""
+    research = scope.get('research') if isinstance(scope, dict) else None
+    sources = research.get('sources') if isinstance(research, dict) else None
+    return isinstance(sources, dict) and any(v in ('allow', 'ask') for v in sources.values())
+
+
+class _ResearchCall:
+    """What `research.dispatch` gets for one tool call: per-source authorization, cache notes and the task.
+
+    Every source call is decided by the task scope (`category: research`), audited without its query, and counted.
+    """
+
+    def __init__(self, scheduler, run, tool, call_id):
+        self._scheduler = scheduler
+        self._run = run
+        self.tool = tool
+        self.call_id = call_id
+        self.task_id = run.task_id
+        self.cancel = run.cancel
+        with scheduler.lock:
+            self.scope = copy.deepcopy(scheduler._task(run.task_id)['scope'])
+        self.allowed = []
+        self.cached = []
+
+    def authorize(self, request, call_id=None):
+        source = request.get('source') if isinstance(request, dict) else None
+        if (not isinstance(request, dict) or request.get('category') != 'research' or request.get('tool') != self.tool
+                or not isinstance(source, str) or not source or len(source) > 64):
+            return {'decision': 'deny', 'rule': 'policy.invalid_request', 'reason': 'The research request is malformed.',
+                    'scope_version': None, 'scope_digest': None}
+        decision = self._scheduler._authorize(self._run, {'category': 'research', 'source': source, 'tool': self.tool},
+                                              self.call_id)
+        if decision.get('decision') == 'allow':
+            self.allowed.append(source)
+            self._scheduler._count_research(self._run, source, cached=False)
+        return decision
+
+    def note_cached(self, source):
+        if source in self.allowed:
+            self.cached.append(source)
+            self._scheduler._count_research(self._run, source, cached=True)
 
 
 READ_ACCESS_RULE = 'access.read'
@@ -594,7 +664,8 @@ def _final(decision, rule=None):
 class Scheduler:
     def __init__(self, *, max_running, runtime_factory, policy, audit, events, budget_gate, locks, clock,
                  tasks, workspaces=None, interrupt_grace_s=INTERRUPT_GRACE_S,
-                 monotonic=time.monotonic, tick_s=0.5, decide_options=None):
+                 monotonic=time.monotonic, tick_s=0.5, decide_options=None, research_dispatch=None, scratch_root=None,
+                 research_usage_interval_s=RESEARCH_USAGE_INTERVAL_S):
         self.max_running = validate_max_running(max_running)
         self.runtime_factory = runtime_factory
         self.policy = policy
@@ -610,6 +681,14 @@ class Scheduler:
         self.monotonic = monotonic
         # Extra keyword arguments for policy.decide (coordinator ruling): app_data, home, temp_roots.
         self.decide_options = dict(decide_options or {})
+        # research.dispatch(ctx, name, arguments) -> result (stream 1B, wired by the service); None: no sources.
+        self.research_dispatch = research_dispatch
+        # `<storage>/research-runs`: tasks without a project run in `<scratch_root>/<task_id>/` (research/tasks.md).
+        self.scratch_root = Path(scratch_root) if scratch_root is not None else None
+        self.research_usage_interval_s = research_usage_interval_s
+        self._usage_last = {}
+        self._usage_timers = {}
+        self._bibtex = {}  # Root task ID -> {identifier: BibTeX} from `research_bibtex` results this app run.
         self._cond = threading.Condition(self.lock)
         self._runs = {}
         self._queue = []
@@ -645,6 +724,9 @@ class Scheduler:
             run.role = task.get('role')
             run.orchestrates = run.role == 'orchestrator' and run.parent_task_id is None
             run.access = task.get('access') or ('read' if run.orchestrates else 'write')
+            run.research_only = task_rows.is_research(task)
+            if run.research_only:
+                run.access = 'read'  # A task without a project has nothing to write to (research/tasks.md).
             self._runs[task_id] = run
             if not self._queue and self._open_slots() > 0:
                 self._start(run)
@@ -982,6 +1064,8 @@ class Scheduler:
                                        'cancelled' if run.stop_reason else 'completed' if status == 'completed' else 'failed')
             self._emit_budget(run, entry)
         self._publish(run)
+        if status == 'completed' and not run.stop_reason:
+            self._write_outputs(run)
         ended = self._end_state(run)
         if ended:
             return ended
@@ -1007,6 +1091,16 @@ class Scheduler:
                 pass  # The session is already gone.
 
     def _prepare_workspaces(self, run):
+        if run.research_only:
+            # No clone, no branch and no project lock: an empty, app-owned folder that is not a git repository.
+            if self.scratch_root is None:
+                raise ValueError('There is no folder for tasks without a project.')
+            folder = self.scratch_root / run.task_id
+            if not IDENTIFIER.match(run.task_id) or folder.is_symlink():
+                raise ValueError('Invalid run folder.')
+            folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+            run.scratch = str(folder)
+            return
         with self.lock:
             task = self._task(run.task_id)
             saved = task['agent'].setdefault('workspaces', {})
@@ -1293,6 +1387,241 @@ class Scheduler:
                    turn_id=run.turn_id, item_id=call_id)
         return result
 
+    # -- research tools (research/tools.md, tasks.md) ------------------------------------------------------
+
+    @staticmethod
+    def _research_input(name, arguments):
+        """What the tool card shows: the tool and its query or IDs, never more (events.md research additions)."""
+        shown = {'tool': name}
+        if not isinstance(arguments, dict):
+            return shown
+        if isinstance(arguments.get('query'), str):
+            shown['query'] = arguments['query'][:500]
+        if isinstance(arguments.get('id'), str):
+            shown['id'] = arguments['id'][:200]
+        if isinstance(arguments.get('ids'), list):
+            shown['ids'] = [i[:200] for i in arguments['ids'][:100] if isinstance(i, str)]
+        if isinstance(arguments.get('references'), list):
+            shown['references'] = len(arguments['references'])
+        if isinstance(arguments.get('sources'), list):
+            shown['source'] = ', '.join(str(x)[:64] for x in arguments['sources'][:16])
+        return shown
+
+    @staticmethod
+    def _cap(result):
+        """Cut a research result to 64 KB of JSON by shortening its main list (`truncated: true`)."""
+        def size(value):
+            return len(json.dumps(value, ensure_ascii=False).encode('utf-8'))
+        if size(result) <= MAX_RESEARCH_RESULT_BYTES:
+            return result
+        key = next((k for k in RESEARCH_LISTS if isinstance(result.get(k), list)), None)
+        if key is None:
+            return {'ok': False, 'error': {'code': 'bad_response', 'message': 'The research result was too large.'}}
+        result = dict(result, truncated=True)
+        items = list(result[key])
+        while items and size(dict(result, **{key: items})) > MAX_RESEARCH_RESULT_BYTES:
+            items = items[:max(0, min(len(items) - 1, len(items) * 3 // 4))]
+        result[key] = items
+        return result
+
+    def _research(self, run, name, arguments):
+        """A research tool call (from `RunContext.call_tool`), shown as a `tool_call`/`tool_result` pair.
+
+        `research.dispatch` (stream 1B) runs it; each source it uses is authorized per call (`category: research`)
+        through `_ResearchCall`, audited, and counted on the root task. The result goes to the agent as untrusted
+        content; upstream error text never does.
+        """
+        call_id = 'res_' + uuid.uuid4().hex
+        with self.lock:
+            version = self._task(run.task_id)['scope'].get('version')
+        self._emit(run, 'tool_call', {'call_id': call_id, 'category': 'research', 'tool': name, 'app': None,
+                                      'title': name.replace('_', ' ').capitalize(),
+                                      'input': self._research_input(name, arguments),
+                                      'decision': {'decision': 'allow', 'rule': 'research', 'scope_version': version}},
+                   turn_id=run.turn_id, item_id=call_id)
+        started = time.monotonic()
+        call = _ResearchCall(self, run, name, call_id)
+        failed = False
+        try:
+            if self.research_dispatch is None:
+                raise _NoResearch()
+            payload = self.research_dispatch(call, name, copy.deepcopy(arguments))
+            if not isinstance(payload, dict):
+                raise TypeError('research result')
+            result = self._cap(dict(payload, ok=True))
+        except _NoResearch:
+            failed = True
+            result = {'ok': False, 'error': {'code': 'not_configured',
+                                             'message': 'Research sources are not in this build yet.'}}
+        except ValueError as error:
+            result = {'ok': False, 'error': {'code': 'invalid_request', 'message': str(error)[:300]}}
+        except Exception:
+            failed = True
+            result = {'ok': False, 'error': {'code': 'unavailable', 'message': 'The research tool failed.'}}
+        self._research_actions(run, call, result, failed)
+        error = result.get('error') if not result.get('ok') else None
+        text = json.dumps({k: v for k, v in result.items() if k != 'ok'}, ensure_ascii=False)
+        self._emit(run, 'tool_result', {'call_id': call_id, 'status': 'ok' if result.get('ok') else 'error',
+                                        'exit_code': None, 'duration_ms': int((time.monotonic() - started) * 1000),
+                                        'output': {'text': text[:MAX_PATCH_CHARS], 'truncated': len(text) > MAX_PATCH_CHARS,
+                                                   'blob_id': None}, 'error': error},
+                   turn_id=run.turn_id, item_id=call_id)
+        if result.get('ok') and name == 'verify_citations':
+            report = {k: v for k, v in result.items() if k not in ('ok', 'truncated')}
+            self._emit(run, 'citation_report', report, turn_id=run.turn_id, item_id='cite_' + call_id)
+            self._keep_report(run, report)
+        if result.get('ok') and name == 'research_bibtex':
+            self._keep_bibtex(run, result)
+        return result
+
+    def _research_actions(self, run, call, result, failed):
+        """One `action` record per source the call was allowed to use: failed when the source was skipped."""
+        skipped = set()
+        for item in result.get('skipped') or [] if result.get('ok') else []:
+            if isinstance(item, dict) and isinstance(item.get('source'), str):
+                skipped.add(item['source'])
+        for source in dict.fromkeys(call.allowed):
+            outcome = 'failed' if failed or source in skipped else 'succeeded'
+            try:
+                self._audit(run, 'action', call_id=call.call_id, outcome=outcome,
+                            request={'category': 'research', 'source': source, 'tool': call.tool})
+            except Exception:
+                self._error(run, 'audit_failed', 'A research call could not be recorded in the audit log.', True,
+                            call.call_id)
+
+    def _root_task(self, run):
+        with self.lock:
+            return self._root(self._task(run.task_id))
+
+    def _count_research(self, run, source, cached):
+        with self.lock:
+            root = self._root(self._task(run.task_id))
+            usage = root['agent'].setdefault('research_usage', {'calls': {}, 'cached': {}})
+            bucket = usage.setdefault('cached' if cached else 'calls', {})
+            bucket[source] = bucket.get(source, 0) + 1
+            self.store.changed(root['id'])
+            self._usage_changed(root['id'])
+
+    def _usage_changed(self, root_id):
+        """`research_usage` on the root task, at most once per interval; the last count is always sent. Under lock."""
+        now = self.monotonic()
+        last = self._usage_last.get(root_id)
+        if last is None or now - last >= self.research_usage_interval_s:
+            self._emit_usage(root_id)
+            return
+        if root_id not in self._usage_timers:
+            timer = threading.Timer(self.research_usage_interval_s - (now - last), self._timed_usage, args=(root_id,))
+            timer.daemon = True
+            self._usage_timers[root_id] = timer
+            timer.start()
+
+    def _timed_usage(self, root_id):
+        with self.lock:
+            self._usage_timers.pop(root_id, None)
+            self._emit_usage(root_id)
+
+    def _emit_usage(self, root_id):
+        self._usage_last[root_id] = self.monotonic()
+        try:
+            root = self._task(root_id)
+        except ValueError:
+            return
+        usage = root['agent'].get('research_usage') or {}
+        self.events.append(root_id, root['agent'].get('project_id'), 'research_usage',
+                           {'calls': dict(usage.get('calls') or {}), 'cached': dict(usage.get('cached') or {})})
+
+    def _keep_report(self, run, report):
+        """The latest citation report of the root Orchestrator's turn feeds its `references.bib`."""
+        with self.lock:
+            root = self._runs.get(run.parent_task_id) if run.parent_task_id else run
+            if root is not None:
+                root.citation_report = report
+
+    def _keep_bibtex(self, run, result):
+        root_id = self._root_task(run)['id']
+        with self.lock:
+            kept = self._bibtex.setdefault(root_id, {})
+            for entry in result.get('entries') or []:
+                if isinstance(entry, dict) and isinstance(entry.get('bibtex'), str) and entry['bibtex'].strip():
+                    key = _bib_key(entry.get('id'))
+                    if key:
+                        kept[key] = entry['bibtex'].strip()
+
+    # -- outputs (research/tasks.md "Outputs") ---------------------------------------------------------------
+
+    def _final_answer(self, run):
+        text, after = None, 0
+        while True:
+            page = self.events.read(run.task_id, after, 1000)
+            for event in page['events']:
+                data = event.get('data') or {}
+                if (event['kind'] == 'message' and event.get('turn_id') == run.turn_id and data.get('role') == 'assistant'
+                        and data.get('final', True) and isinstance(data.get('text'), str)):
+                    text = data['text']
+            if page['complete'] or not page['events']:
+                return text
+            after = page['events'][-1]['seq']
+
+    def _write_outputs(self, run):
+        """A research task's Orchestrator ended its turn with a final answer: save the report and, after a citation
+        check, the BibTeX of the references it verified. Inside app data only; saving elsewhere is the user's."""
+        if not (run.research_only and run.orchestrates):
+            return
+        try:
+            answer = self._final_answer(run)
+            if not answer or not answer.strip():
+                return
+            folder = self.events.root / run.task_id / 'outputs'
+            if folder.is_symlink():
+                raise ValueError('The outputs folder was changed.')
+            folder.mkdir(parents=True, exist_ok=True)
+            _write_file(folder / 'report.md', answer)
+            if run.citation_report is not None:
+                _write_file(folder / 'references.bib', self._bibliography(run, run.citation_report))
+            outputs = list_outputs(folder)
+        except Exception:
+            self._error(run, 'outputs_failed', 'Could not save the report in the app.', True)
+            return
+        self._emit(run, 'outputs', {'outputs': [{k: o[k] for k in ('name', 'kind', 'bytes')} for o in outputs]},
+                   turn_id=run.turn_id)
+
+    def _bibliography(self, run, report):
+        kept, left_out, wanted = [], [], []
+        for reference in report.get('references') or []:
+            if not isinstance(reference, dict):
+                continue
+            title = _reference_title(reference)
+            status = reference.get('status')
+            match = reference.get('match') if isinstance(reference.get('match'), dict) else None
+            if status in ('verified', 'mismatch') and match is not None:
+                identifier = _bib_id(match)
+                kept.append((reference, match, identifier))
+                if identifier and _bib_key(identifier) not in self._bibtex.get(run.task_id, {}):
+                    wanted.append(identifier)
+            else:
+                label = {'retracted': 'retracted', 'not_found': 'not found'}.get(status, 'not checked')
+                left_out.append('%% Left out, %s: %s' % (label, title))
+        if wanted:
+            # BibTeX the agents did not fetch yet comes through the same checked, audited research path.
+            self._research(run, 'research_bibtex', {'ids': list(dict.fromkeys(wanted))[:100]})
+        fetched = self._bibtex.get(run.task_id, {})
+        lines = ['% References checked by the Interspace citation checker on ' + str(report.get('checked_at')) + '.',
+                 '%% Verified: %d. Mismatch: %d (marked below).' % (
+                     sum(1 for r, _, _ in kept if r.get('status') == 'verified'),
+                     sum(1 for r, _, _ in kept if r.get('status') == 'mismatch'))]
+        lines += left_out
+        for reference, match, identifier in kept:
+            lines.append('')
+            if reference.get('status') == 'mismatch':
+                fields = ', '.join(f for f in reference.get('fields') or [] if isinstance(f, str))
+                lines.append('%% mismatch (%s): %s' % (fields, _reference_title(reference)))
+            entry = fetched.get(_bib_key(identifier)) if identifier else None
+            if entry is None:
+                lines.append('% Built by Interspace from the verified record; the sources gave no BibTeX for it.')
+                entry = _record_bibtex(match, reference.get('index'))
+            lines.append(entry)
+        return '\n'.join(lines) + '\n'
+
     def _observed(self, run, request, call_id):
         with self.lock:
             scope = self._task(run.task_id)['scope']
@@ -1311,3 +1640,67 @@ class Scheduler:
         except Exception:
             self._error(run, 'audit_failed', 'An action the agent ran could not be recorded in the audit log.', True, call_id)
         return decision
+
+
+class _NoResearch(Exception):
+    pass
+
+
+def _bib_id(match):
+    """The identifier `research_bibtex` takes for a matched record: arXiv for arXiv papers, else the DOI."""
+    arxiv_id, doi = match.get('arxiv_id'), match.get('doi')
+    if isinstance(arxiv_id, str) and arxiv_id and (not doi or str(doi).lower().startswith('10.48550/')):
+        return 'arXiv:' + arxiv_id
+    if isinstance(doi, str) and doi:
+        return doi
+    return None
+
+
+def _bib_key(identifier):
+    if not isinstance(identifier, str) or not identifier.strip():
+        return None
+    text = identifier.strip().lower()
+    text = re.sub(r'^(https?://(dx\.)?doi\.org/|doi:)', '', text)
+    return text
+
+
+def _reference_title(reference):
+    given = reference.get('input') if isinstance(reference.get('input'), dict) else {}
+    match = reference.get('match') if isinstance(reference.get('match'), dict) else {}
+    title = given.get('title') or given.get('raw') or match.get('title') or given.get('doi') or 'untitled reference'
+    return ' '.join(str(title).split())[:300]
+
+
+def _bib_text(value):
+    return re.sub(r'[{}\\]', '', ' '.join(str(value).split()))[:1000]
+
+
+def _record_bibtex(match, index):
+    """A minimal entry from the checker's verified record, when no source gave BibTeX."""
+    authors = [a for a in match.get('authors') or [] if isinstance(a, str)]
+    fields = [('title', match.get('title')), ('author', ' and '.join(authors[:50]) if authors else None),
+              ('year', match.get('year')), ('journal', match.get('venue')), ('doi', match.get('doi')),
+              ('eprint', match.get('arxiv_id'))]
+    body = ',\n'.join('  %s = {%s}' % (k, _bib_text(v)) for k, v in fields if v not in (None, ''))
+    return '@misc{interspace%s,\n%s\n}' % (index if type(index) is int else 0, body)
+
+
+def _write_file(path, text):
+    partial = path.with_name('.' + path.name + '.' + uuid.uuid4().hex)
+    partial.write_text(text, encoding='utf-8')
+    os.replace(str(partial), str(path))
+
+
+def list_outputs(folder):
+    """`[{name, kind, bytes, updated_at}]` for the known output files in a task's outputs folder."""
+    found = []
+    folder = Path(folder)
+    if folder.is_symlink() or not folder.is_dir():
+        return found
+    for name, kind in OUTPUT_NAMES:
+        path = folder / name
+        if path.is_symlink() or not path.is_file():
+            continue
+        info = path.stat()
+        found.append({'name': name, 'kind': kind, 'bytes': info.st_size, 'updated_at': iso_time(info.st_mtime)})
+    return found

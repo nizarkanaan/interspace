@@ -701,7 +701,9 @@ class RuntimeSupportTests(SchedulerCase):
             seen.append((ctx.tools(), ctx.access, ctx.role, ctx.instructions))
             with self.assertRaisesRegex(ValueError, 'Unknown tool'):
                 ctx.orchestrate('propose_team', {})
-            self.assertFalse(hasattr(ctx, 'call_tool'))
+            for name in ('propose_team', 'research_search'):
+                with self.assertRaisesRegex(ValueError, 'Unknown tool'):
+                    ctx.call_tool(name, {})
             seen.append('refused')
             return default_script(session, text, ctx)
         self.make(script=script)

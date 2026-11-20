@@ -35,6 +35,13 @@ TRISTATE = ('allow', 'ask', 'deny')
 SANDBOXES = ('workspace', 'escalated')
 ANSWER_DECISIONS = ('allow_once', 'add_to_scope', 'deny', 'text', 'cancelled')
 TOP_LEVEL_KEYS = ('v', 'task_id', 'version', 'projects', 'commands', 'network', 'apps', 'web_search', 'limits')
+# Optional keys: a scope without them keeps its digest (research/tasks.md "Scope").
+OPTIONAL_KEYS = ('research',)
+RESEARCH_SETTINGS = ('allow', 'ask', 'off')
+RESEARCH_SOURCE = re.compile(r'^[a-z][a-z0-9_]{0,63}$')
+MAX_RESEARCH_SOURCES = 32
+RESEARCH_TITLES = {'semantic_scholar': 'Semantic Scholar', 'openalex': 'OpenAlex', 'arxiv': 'arXiv',
+                   'crossref': 'Crossref', 'unpaywall': 'Unpaywall'}
 
 # Always-deny rule IDs (scope.md). Additions need the coordinator; removals need the user.
 DENY_CREDENTIALS = 'always_deny.credentials'
@@ -181,9 +188,27 @@ def _check_project(entry, project_ids):
         _fail('Write patterns need write access to the project.')
 
 
+def _check_research(value):
+    if not isinstance(value, dict) or set(value) != {'sources'} or not isinstance(value['sources'], dict):
+        _fail('Research must have exactly the field sources.')
+    sources = value['sources']
+    if len(sources) > MAX_RESEARCH_SOURCES:
+        _fail('Research lists at most %d sources.' % MAX_RESEARCH_SOURCES)
+    for name, setting in sources.items():
+        if not isinstance(name, str) or not RESEARCH_SOURCE.match(name):
+            _fail('Research source names are lowercase identifiers.')
+        if setting not in RESEARCH_SETTINGS:
+            _fail('Each research source must be allow, ask or off.')
+
+
 def validate(document, *, project_ids=None):
     """Validate a whole scope document; raises ValueError with one sentence. Returns the document."""
-    _check_keys(document, TOP_LEVEL_KEYS, 'The scope')
+    if isinstance(document, dict):
+        _check_keys({k: v for k, v in document.items() if k not in OPTIONAL_KEYS}, TOP_LEVEL_KEYS, 'The scope')
+    else:
+        _check_keys(document, TOP_LEVEL_KEYS, 'The scope')
+    if 'research' in document:
+        _check_research(document['research'])
     if document['v'] != VERSION or not _is_int(document['v']):
         _fail('The scope format version is not supported.')
     _check_id(document['task_id'], 'Task ID')
@@ -218,7 +243,29 @@ def validate(document, *, project_ids=None):
     return document
 
 
-def default(task, project_ids, *, access='write'):
+def research_block(research_sources):
+    """`{'sources': {name: allow|off}}`: allow for every usable source (configured, or not required).
+
+    `research_sources` maps each known source to whether it is usable; None means the research sources are not in
+    this build, and the scope gets no `research` key.
+    """
+    if research_sources is None:
+        return None
+    if not isinstance(research_sources, dict):
+        _fail('Research sources must be a mapping.')
+    block = {'sources': {name: 'allow' if usable else 'off' for name, usable in research_sources.items()}}
+    _check_research(block)
+    return block
+
+
+def _with_research(document, research_sources):
+    block = research_block(research_sources)
+    if block is not None:
+        document['research'] = block
+    return document
+
+
+def default(task, project_ids, *, access='write', research_sources=None):
     """The starting scope the scope editor shows for a new agent task."""
     if access not in ACCESS:
         _fail('Project access must be read or write.')
@@ -232,13 +279,13 @@ def default(task, project_ids, *, access='write'):
         'apps': [], 'web_search': 'ask',
         'limits': {'token_budget': task.get('token_budget'), 'time_limit_s': DEFAULT_TIME_LIMIT_S},
     }
-    return validate(document)
+    return validate(_with_research(document, research_sources))
 
 
 DRAFT_TASK_ID = 'draft'  # Placeholder until agent_create assigns the real task ID.
 
 
-def project_default(project_id, *, token_budget=None, project_ids=None):
+def project_default(project_id, *, token_budget=None, project_ids=None, research_sources=None):
     """`scope_default {project_id}`: the scope the new agent task form starts from.
 
     The project's workspace is readable and writable and workspace commands run without asking.
@@ -255,7 +302,22 @@ def project_default(project_id, *, token_budget=None, project_ids=None):
         'limits': {'token_budget': budget.DEFAULT_BUDGET if token_budget is None else token_budget,
                    'time_limit_s': DEFAULT_TIME_LIMIT_S},
     }
-    return validate(document, project_ids=project_ids)
+    return validate(_with_research(document, research_sources), project_ids=project_ids)
+
+
+def research_default(*, token_budget=None, research_sources=None):
+    """The scope of a task without a project (research/tasks.md): no project files, no commands, no command
+    network, no web search; research allowed for every usable source."""
+    document = {
+        'v': VERSION, 'task_id': DRAFT_TASK_ID, 'version': 1, 'projects': [],
+        'commands': {'workspace': 'deny', 'allow': [], 'deny': []},
+        'network': {'default': 'deny', 'allow_hosts': [], 'deny_hosts': []},
+        'apps': [], 'web_search': 'deny',
+        'limits': {'token_budget': budget.DEFAULT_BUDGET if token_budget is None else token_budget,
+                   'time_limit_s': DEFAULT_TIME_LIMIT_S},
+        'research': research_block(research_sources or {}),
+    }
+    return validate(document, project_ids=[])
 
 
 # ---------------------------------------------------------------- approval and edits
@@ -296,9 +358,17 @@ def merge_patch(document, patch):
     The version is unchanged; callers increment it. Raises ValueError for a patch outside the
     patchable fields or a result that is not a valid scope.
     """
-    if not isinstance(patch, dict) or not set(patch) <= {'projects', 'commands', 'network'}:
-        _fail('A scope patch may only widen projects, commands or network hosts.')
+    if not isinstance(patch, dict) or not set(patch) <= {'projects', 'commands', 'network', 'research'}:
+        _fail('A scope patch may only widen projects, commands, network hosts or research sources.')
     merged = copy.deepcopy(document)
+    research = patch.get('research', {})
+    if not isinstance(research, dict) or not set(research) <= {'sources'} or not isinstance(research.get('sources', {}), dict):
+        _fail('A research patch may only change sources.')
+    for name, setting in research.get('sources', {}).items():
+        current = merged.get('research', {}).get('sources', {}).get(name) if isinstance(merged.get('research'), dict) else None
+        if setting != 'allow' or current != 'ask':
+            _fail('A research patch may only change a source from ask to allow.')
+        merged['research']['sources'][name] = 'allow'
     for entry in patch.get('projects', []):
         if not isinstance(entry, dict) or not set(entry) <= set(PATCH_PROJECT_FIELDS) or 'project_id' not in entry:
             _fail('A project patch names a project and its widened fields.')
@@ -684,6 +754,8 @@ def _check_request(request):
         _need(_text(request.get('query'), 2000))
     elif category == 'mcp':
         _need(_text(request.get('server'), 128) and _text(request.get('tool'), 128))
+    elif category == 'research':
+        _need(_text(request.get('source'), 64) and _text(request.get('tool'), 64))
     else:
         raise _Invalid()
 
@@ -754,7 +826,8 @@ def decide(scope, approval, request, *, workspace_roots, now, home=None, app_dat
                     'The task scope changed or is not approved yet.')
     category = request['category']
     handler = {'file_read': _decide_read, 'file_write': _decide_write, 'command': _decide_command,
-               'network': _decide_network, 'web_search': _decide_web_search, 'mcp': _decide_mcp}[category]
+               'network': _decide_network, 'web_search': _decide_web_search, 'mcp': _decide_mcp,
+               'research': _decide_research}[category]
     return handler(document, request, paths)
 
 
@@ -1033,3 +1106,18 @@ def _decide_mcp(document, request, paths):
         return _deny(document, DENY_SHARING, 'Agents never change sharing, permissions or ownership.')
     return _ask(document, request, ASK_MCP, 'mcp_tool', 'Run MCP tool %s/%s?' % (_clip(server, 60), _clip(tool, 60)),
                 'Tools from other MCP servers always ask.')
+
+
+def _decide_research(document, request, paths):
+    """research/tasks.md: allow -> allow, ask -> ask (Add to scope makes it allow), off or missing -> deny."""
+    source = request['source']
+    research = document.get('research') if isinstance(document.get('research'), dict) else {}
+    setting = (research.get('sources') or {}).get(source, 'off')
+    if setting == 'allow':
+        return _allow(document, 'research.allow')
+    title = RESEARCH_TITLES.get(source, source)
+    if setting == 'ask':
+        return _ask(document, request, 'research.ask', 'outside_scope', 'Let agents use %s?' % _clip(title, 60),
+                    'The task scope asks before each call to this research source. The query is sent to %s.'
+                    % _clip(title, 60), {'research': {'sources': {source: 'allow'}}})
+    return _deny(document, 'research.off', 'The task scope does not use this research source.')
