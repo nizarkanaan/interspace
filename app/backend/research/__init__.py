@@ -5,6 +5,7 @@ the scope, denied, unable to serve the call or failing is skipped and named in `
 whole only for bad arguments. Results are plain JSON, capped at 64 KB.
 """
 from concurrent.futures import ThreadPoolExecutor
+import contextvars
 import json
 import threading
 
@@ -161,7 +162,8 @@ def _parallel(jobs):
     if len(jobs) <= 1:
         return {name: fn() for name, fn in jobs}
     with ThreadPoolExecutor(max_workers=min(MAX_WORKERS, len(jobs))) as pool:
-        futures = [(name, pool.submit(fn)) for name, fn in jobs]
+        # Each job runs in a copy of this context, so the call's meter (http.METER) counts its requests.
+        futures = [(name, pool.submit(contextvars.copy_context().run, fn)) for name, fn in jobs]
         return {name: future.result() for name, future in futures}
 
 
@@ -243,7 +245,8 @@ def _search(registry, gate, arguments):
     limit = _int(arguments, 'limit', 1, 50, 10)
     requested = arguments.get('sources')
     if requested is None:
-        names = [name for name in SOURCES if name in gate.on and 'search' in registry[name].capabilities]
+        # Every source that can search: one the scope turns off is named in `skipped` (reason `off`), never called.
+        names = [name for name in SOURCES if 'search' in registry[name].capabilities]
     else:
         if not isinstance(requested, list) or not requested or any(name not in SOURCES for name in requested):
             raise ValueError('sources must list research sources: %s.' % ', '.join(SOURCES))
@@ -403,9 +406,26 @@ def _cap(result, list_key):
     return result
 
 
+def _meter(ctx):
+    """`http.METER` for one call: requests sent go to `ctx.note_call(source)`, cache answers to `ctx.note_cached`."""
+    targets = {'calls': getattr(ctx, 'note_call', None), 'cached': getattr(ctx, 'note_cached', None)}
+
+    def meter(kind, source):
+        target = targets.get(kind)
+        if callable(target):
+            target(source)
+    return meter
+
+
 def dispatch(app, ctx, name, arguments):
-    """Run one research tool call. `ctx.authorize(request)` decides each source call before it is made."""
+    """Run one research tool call. `ctx.authorize(request)` decides each source call before it is made; each
+    request sent and each cache answer is reported to `ctx.note_call(source)` / `ctx.note_cached(source)`."""
     if name not in HANDLERS:
         raise ValueError('Unknown research tool.')
     registry = {source.name: source for source in sources(app)}
-    return HANDLERS[name](registry, _Gate(ctx, name), arguments)
+    from . import http
+    token = http.METER.set(_meter(ctx))
+    try:
+        return HANDLERS[name](registry, _Gate(ctx, name), arguments)
+    finally:
+        http.METER.reset(token)

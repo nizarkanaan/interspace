@@ -131,6 +131,38 @@ class SearchTests(DispatchCase):
         self.assertLessEqual(len(json.dumps(result).encode('utf-8')), research.RESULT_LIMIT)
         self.assertGreater(len(result['papers']), 5)
 
+    def test_off_sources_are_named_in_skipped_without_a_sources_argument(self):
+        self.add_search_routes()
+        scope = {'research': {'sources': {'semantic_scholar': 'allow', 'arxiv': 'allow', 'crossref': 'off'}}}
+        ctx = FakeContext(scope)
+        result = self.call('research_search', {'query': 'attention'}, ctx)
+        self.assertEqual(result['searched'], ['semantic_scholar', 'arxiv'])
+        self.assertEqual(result['skipped'], [{'source': 'openalex', 'reason': 'off'},
+                                             {'source': 'crossref', 'reason': 'off'}])
+        self.assertEqual({u.split('/')[2] for u in self.transport.urls()}, {S2_HOST, AX_HOST})
+        self.assertEqual([r['source'] for r in ctx.requests], ['semantic_scholar', 'arxiv'])
+
+    def test_requests_and_cache_answers_are_reported_to_the_call(self):
+        self.add_search_routes()
+
+        class Metered(FakeContext):
+            def __init__(self):
+                super().__init__()
+                self.notes = []
+
+            def note_call(self, source):
+                self.notes.append(('calls', source))
+
+            def note_cached(self, source):
+                self.notes.append(('cached', source))
+        first, second = Metered(), Metered()
+        self.call('research_search', {'query': 'attention'}, first)   # Sources run in parallel threads.
+        self.call('research_search', {'query': 'attention'}, second)  # The cache answers every source.
+        searchers = ['semantic_scholar', 'openalex', 'arxiv', 'crossref']
+        self.assertEqual(sorted(first.notes), sorted(('calls', s) for s in searchers))
+        self.assertEqual(sorted(second.notes), sorted(('cached', s) for s in searchers))
+        self.assertIsNone(http.METER.get())  # Nothing leaks past the call.
+
 
 class PaperTests(DispatchCase):
     def test_doi_merges_every_source_that_can_look_it_up(self):

@@ -12,6 +12,8 @@ import tempfile
 import threading
 import time
 
+from . import http
+
 TTL_S = 7 * 86400
 MAX_ENTRY_BYTES = 2 * 1024 * 1024
 MAX_TOTAL_BYTES = 200 * 1024 * 1024
@@ -55,7 +57,8 @@ class Cache:
             except OSError:
                 pass
             self.hits[source] = self.hits.get(source, 0) + 1
-            return True, entry.get('value')
+        http.note('cached', source)
+        return True, entry.get('value')
 
     def put(self, source, method, args, value):
         entry = {'v': 1, 'key': json.loads(_canonical(source, method, args)), 'at': self._clock(), 'value': value}

@@ -594,6 +594,7 @@ class _Run:
         self.scratch = None  # The app-owned run folder of a task without a project.
         self.research_only = False
         self.citation_report = None  # The latest `verify_citations` report of this turn (root Orchestrator runs).
+        self.citation_report_own = False  # Whether it is the Orchestrator's own, which a member's never replaces.
 
 
 def research_enabled(scope):
@@ -631,10 +632,15 @@ class _ResearchCall:
                                               self.call_id)
         if decision.get('decision') == 'allow':
             self.allowed.append(source)
-            self._scheduler._count_research(self._run, source, cached=False)
         return decision
 
+    def note_call(self, source):
+        """A request went to `source` (counted as `calls` on the root task; never money)."""
+        if source in self.allowed:
+            self._scheduler._count_research(self._run, source, cached=False)
+
     def note_cached(self, source):
+        """The response cache answered for `source` instead of a request (counted as `cached`)."""
         if source in self.allowed:
             self.cached.append(source)
             self._scheduler._count_research(self._run, source, cached=True)
@@ -1531,11 +1537,15 @@ class Scheduler:
                            {'calls': dict(usage.get('calls') or {}), 'cached': dict(usage.get('cached') or {})})
 
     def _keep_report(self, run, report):
-        """The latest citation report of the root Orchestrator's turn feeds its `references.bib`."""
+        """The latest citation report of the root Orchestrator's turn feeds its `references.bib`. The Orchestrator's
+        own check wins: a member's check (often of a few references) is used only while the Orchestrator has none."""
         with self.lock:
-            root = self._runs.get(run.parent_task_id) if run.parent_task_id else run
-            if root is not None:
-                root.citation_report = report
+            own = not run.parent_task_id
+            root = run if own else self._runs.get(run.parent_task_id)
+            if root is None or (root.citation_report_own and not own):
+                return
+            root.citation_report = report
+            root.citation_report_own = own
 
     def _keep_bibtex(self, run, result):
         root_id = self._root_task(run)['id']

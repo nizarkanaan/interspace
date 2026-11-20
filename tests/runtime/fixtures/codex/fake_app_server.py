@@ -17,6 +17,8 @@ Scenario keys:
   thread_start  fields merged into the `thread/start` result (to break the sandbox echo, for example)
   exit_on       a request method after which the process exits at once
   turns         a list, one entry per `turn/start`, each a list of steps:
+  by_input      [{"contains": "<text>", "turns": [...]}, ...]: the first entry whose text is in the first
+                `turn/start` input replaces `turns` (one scenario file for several sessions)
     {"notify": method, "params": {...}}      send a notification
     {"request": method, "params": {...}}     send a server request and wait for its reply
     {"wait_interrupt": true}                 wait until the client sends turn/interrupt
@@ -26,6 +28,10 @@ Scenario keys:
     {"sleep": seconds}
     {"touch": path}                          create that file
     {"wait_file": path}                      wait (up to 20 s, else exit 3) until that file exists
+    {"mcp_call": {"name", "arguments", "id"}} call an Interspace bridge tool as Codex does: item/started
+                                             mcpToolCall, the mcp_tool_call elicitation, then (if accepted) MCP
+                                             tools/call on the bridge socket from thread/start's config, then
+                                             item/completed. The reply is logged as {"mcp_reply": ...}.
 "$cwd" in any step is replaced by the server's working folder.
 """
 import json
@@ -43,6 +49,8 @@ replies = {}
 reply_cond = threading.Condition()
 interrupted = threading.Event()
 turn_count = [0]
+mcp_config = {}
+chosen = []
 
 
 def record(entry):
@@ -99,6 +107,8 @@ def play(steps, turn_id):
             time.sleep(step['sleep'])
         elif 'touch' in step:
             open(step['touch'], 'a').close()
+        elif 'mcp_call' in step:
+            mcp_call(step['mcp_call'], turn_id, next_id)
         elif 'wait_file' in step:
             deadline = time.monotonic() + 20
             while not os.path.exists(step['wait_file']):
@@ -106,6 +116,63 @@ def play(steps, turn_id):
                     record({'timeout': step['wait_file']})
                     os._exit(3)
                 time.sleep(0.02)
+
+
+def ask(method, params, next_id):
+    request_id = next_id[0]
+    next_id[0] += 1
+    send({'id': request_id, 'method': method, 'params': params})
+    with reply_cond:
+        if not reply_cond.wait_for(lambda: request_id in replies, 10):
+            record({'timeout': request_id})
+            os._exit(3)
+        return replies[request_id]
+
+
+def mcp_rpc(server, method, params):
+    """Speak MCP to the real Interspace bridge socket (as its relay would): token, initialize, one request."""
+    import socket
+    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    client.connect(server['env']['INTERSPACE_MCP_SOCKET'])
+    reader = client.makefile('rb')
+
+    def put(message):
+        client.sendall((json.dumps(message) + '\n').encode())
+    put({'token': server['env']['INTERSPACE_MCP_TOKEN']})
+    put({'jsonrpc': '2.0', 'id': 0, 'method': 'initialize', 'params': {'protocolVersion': '2025-06-18'}})
+    put({'jsonrpc': '2.0', 'method': 'notifications/initialized'})
+    put({'jsonrpc': '2.0', 'id': 1, 'method': method, 'params': params})
+    result = None
+    while True:
+        line = reader.readline()
+        if not line:
+            break
+        message = json.loads(line)
+        if message.get('id') == 1:
+            result = message.get('result')
+            break
+    client.close()
+    return result
+
+
+def mcp_call(call, turn_id, next_id):
+    server_name, server = next(iter(mcp_config.items()))
+    item = {'type': 'mcpToolCall', 'id': call['id'], 'server': server_name, 'tool': call['name'],
+            'arguments': call['arguments'], 'status': 'inProgress', 'result': None, 'error': None}
+    send({'method': 'item/started', 'params': {'threadId': THREAD, 'turnId': turn_id, 'item': item}})
+    reply = ask('mcpServer/elicitation/request', {
+        'threadId': THREAD, 'turnId': turn_id, 'serverName': server_name, 'mode': 'form', 'message': 'Allow?',
+        'requestedSchema': {'type': 'object', 'properties': {}},
+        '_meta': {'codex_approval_kind': 'mcp_tool_call', 'tool_name': call['name'],
+                  'tool_params': call['arguments']}}, next_id)
+    if (reply.get('result') or {}).get('action') != 'accept':
+        record({'mcp_declined': call['name']})
+        item.update(status='failed', error={'message': 'user cancelled MCP tool call'})
+    else:
+        result = mcp_rpc(server, 'tools/call', {'name': call['name'], 'arguments': call['arguments']})
+        record({'mcp_reply': result})
+        item.update(status='completed', result={'content': result.get('content', []), 'structuredContent': None})
+    send({'method': 'item/completed', 'params': {'threadId': THREAD, 'turnId': turn_id, 'item': item}})
 
 
 def account_path():
@@ -176,6 +243,7 @@ def handle(message):
         send({'id': request_id, 'result': {}})
         send({'method': 'account/updated', 'params': {'authMode': None, 'planType': None}})
     elif method == 'thread/start':
+        mcp_config.update(((params.get('config') or {}).get('mcp_servers') or {}))
         result = {'thread': {'id': THREAD, 'ephemeral': True, 'status': {'type': 'idle'}},
                   'model': params.get('model') or 'gpt-test', 'modelProvider': 'openai', 'cwd': params.get('cwd'),
                   'instructionSources': [], 'approvalPolicy': params.get('approvalPolicy'),
@@ -191,7 +259,11 @@ def handle(message):
         interrupted.clear()
         send({'id': request_id, 'result': {'turn': {'id': turn_id, 'status': 'inProgress', 'items': []}}})
         send({'method': 'turn/started', 'params': {'threadId': THREAD, 'turn': {'id': turn_id, 'status': 'inProgress'}}})
-        turns = scenario.get('turns', [])
+        if not chosen:
+            text = json.dumps(params.get('input'))
+            match = next((c for c in scenario.get('by_input', []) if c['contains'] in text), None)
+            chosen.append(match['turns'] if match else scenario.get('turns', []))
+        turns = chosen[0]
         steps = turns[index] if index < len(turns) else [{'complete': 'completed'}]
         threading.Thread(target=play, args=(steps, turn_id), daemon=True).start()
     elif method == 'turn/interrupt':

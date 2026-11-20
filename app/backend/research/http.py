@@ -5,6 +5,7 @@ generic User-Agent; one token bucket and one connection limit per source; bounde
 error bodies never leave this module: every error carries only its code and a fixed Interspace message.
 The HTTP client and error types are restored from the deleted `spaces/base.py` (fe65e32^).
 """
+import contextvars
 import http.client
 import socket
 import ssl
@@ -56,6 +57,19 @@ CONCURRENCY = {
     'crossref': 1,
     'unpaywall': 2,
 }
+
+
+# Metering -------------------------------------------------------------------
+
+# The tool call being served, if any: `meter(kind, source)` with kind 'calls' (a request was sent) or 'cached' (the
+# response cache answered instead). `research.dispatch` sets it, so each task counts its own calls.
+METER = contextvars.ContextVar('research_meter', default=None)
+
+
+def note(kind, source):
+    meter = METER.get()
+    if meter is not None:
+        meter(kind, source)
 
 
 # Errors ---------------------------------------------------------------------
@@ -247,6 +261,7 @@ class Http:
             bucket.acquire()
             with self._lock:
                 self.calls[source] = self.calls.get(source, 0) + 1
+            note('calls', source)
             try:
                 return self._transport.send('GET', url, headers, timeout_s)
             except ResearchError:

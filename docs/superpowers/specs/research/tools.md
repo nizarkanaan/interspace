@@ -74,7 +74,8 @@ class Source:
 
 - `research.sources(app)`: the `Source` instances, built from `app.http`, `research.credentials` and the cache.
 - `research.enabled(scope)`: the source names whose scope setting is not `off` (tasks.md).
-- `research.dispatch(app, ctx, name, arguments) -> dict` runs one tool call. Before each source call it runs `ctx.authorize({'category': 'research', 'source': name_of_source, 'tool': tool_name})`. A source that is denied or `off` is skipped, and its name goes into `skipped`.
+- `research.dispatch(app, ctx, name, arguments) -> dict` runs one tool call. Before each source call it runs `ctx.authorize({'category': 'research', 'source': name_of_source, 'tool': tool_name})`. A source that is denied or `off` is skipped, and its name goes into `skipped`. `research_search` without `sources` names every search-capable source that is `off` in `skipped` (reason `off`) and never calls it (Wave 2A clarification).
+- Metering (Wave 2A): each request a source client sends calls `ctx.note_call(source)` and each answer the response cache gives calls `ctx.note_cached(source)`, through a context variable (`research.http.METER`) that `dispatch` sets for the call and passes to its worker threads. The scheduler counts these on the root task (`research_usage`).
 
 ## Tools (served by the bridge, `effect: 'read'`)
 
