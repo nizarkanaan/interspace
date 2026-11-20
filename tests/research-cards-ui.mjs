@@ -34,8 +34,11 @@ export default async function check(page,url){
  await install(page,url,{researchRows:[{id:'r1',mode:'agent',kind:'research',project_id:null,title:'Synthetic related work',status:'idle',provider:'codex',model:null}],history:{r1:history},
   scopes:{r1:{v:1,task_id:'r1',version:1,projects:[],network:{default:'deny',allow_hosts:[],deny_hosts:[]},apps:[],web_search:'deny',limits:{token_budget:250000,time_limit_s:3600},research:{sources:{semantic_scholar:'allow',arxiv:'allow',unpaywall:'off'}}}},
   outputs:{r1:[{name:'report.md',kind:'report',bytes:2048},{name:'references.bib',kind:'bibtex',bytes:512}]}});
- await page.evaluate(x=>{window.rFixture.blobs={'blob-c4':JSON.stringify({papers:[{title:'Synthetic full result',authors:[],year:2024,venue:null,citation_count:0,url:null,oa_url:null,sources:['arxiv']}],searched:['arxiv'],skipped:[]})};window.rFixture.readable={r1:{'report.md':'# Related work\n\nA paragraph with **bold**, *care*, `code` and '+x+'.\n\n- First point [a safe link](https://example.org/a)\n- Second point [an unsafe link](javascript:window.pwned=1)\n\n1. Ordered\n\n> A quote\n\n```\n<script>window.pwned=1</script>\n```','references.bib':'@article{fixture2,\n  title={'+x+'}\n}'}};},XSS);
+ await page.evaluate(x=>{window.rFixture.blobs={'blob-c4':JSON.stringify({papers:[{title:'Synthetic full result',authors:[],year:2024,venue:null,citation_count:0,url:null,oa_url:null,sources:['arxiv']}],searched:['arxiv'],skipped:[]})};window.rFixture.readable={r1:{'report.md':'# Related work\n\nA paragraph with **bold**, *care*, `code` and '+x+'.\n\n- First point [a safe link](https://example.org/a)\n- Second point [an unsafe link](javascript:window.pwned=1)\n- Third point [https://doi.org/10.5555/x](https://evil.example/phish)\n\n1. Ordered\n\n> A quote\n\n```\n<script>window.pwned=1</script>\n```','references.bib':'@article{fixture2,\n  title={'+x+'}\n}'}};},XSS);
  await page.locator('[data-view=research]').click();
+ // Checking citations is the agents' instruction, not a guarantee: no screen promises that every citation was checked.
+ const claims=await page.evaluate(()=>[document.getElementById('heading-note').textContent,document.getElementById('research-empty').textContent,document.querySelector('input[name=new-kind][value=research]')?.closest('label')?.textContent||''].join(' | '));
+ assert(!/every citation|check every|every reference/i.test(claims)&&claims.includes('citation report'),'Overclaim: '+claims);
  await page.locator('[data-open-task=r1]').click();
  const stream=page.locator('#agent-stream');
  await page.waitForFunction(()=>document.querySelectorAll('#agent-stream .card.research').length===6);
@@ -81,23 +84,31 @@ export default async function check(page,url){
  const sum=await text(rep.locator('.citation-summary'));
  assert(sum.includes('7 verified')&&sum.includes('1 mismatch')&&sum.includes('1 not found')&&sum.includes('1 retracted')&&sum.includes('1 unchecked')&&sum.includes('1 unknown')&&!sum.includes('99'),'Summary: '+sum);
  assert((await text(rep)).includes('5 references are not verified'),'Not-verified count');
+ // Honest scope of "Verified": year and first author count only when the reference gives them.
+ const repText=await text(rep);
+ assert(repText.includes('Verified means a published record matched: title at least 90% similar, plus the year (within one) and the first author when the reference gives them.')&&!repText.includes('on title, year and first author'),'Verified claim: '+repText);
+ assert((await text(rep.locator('.card-head'))).includes('12 references')&&!(await text(rep.locator('.card-head'))).includes('checked'),'Head counts unchecked rows as checked');
+ assert((await text(rep.locator('.retracted-alert'))).includes('1 reference is retracted. Do not cite it.'),'Retracted alert');
+ // Problem rows come first, so a collapsed report never hides a retracted or unverified reference behind Show all.
  const row=n=>rep.locator('.reference').nth(n);
- assert((await text(row(0))).startsWith('Verified')&&(await text(row(0))).includes('Matched: Synthetic verified paper')&&(await text(row(0))).includes('checked with Crossref · title similarity 99%'),'Verified row');
+ const r0=await text(row(0));
+ assert(r0.startsWith('Reference 4')&&r0.includes('Retracted: do not cite'),'Retracted row first: '+r0);
  const r1=await text(row(1));
- assert(r1.includes('Not verified: differs from the published record in year, authors')&&r1.includes('A mismatched '+XSS+' paper')&&r1.includes('Closest record:'),'Mismatch row: '+r1);
+ assert(r1.startsWith('Reference 2')&&r1.includes('Not verified: differs from the published record in year, authors')&&r1.includes('A mismatched '+XSS+' paper')&&r1.includes('Closest record:'),'Mismatch row: '+r1);
  assert(await row(1).locator('a').count()===0,'Unsafe match link');
  assert((await text(row(2))).includes('Not verified: not found in the sources checked'),'Not found row');
- assert((await text(row(3))).includes('Retracted: do not cite'),'Retracted row');
+ assert((await text(row(3))).includes('Unknown result (confirmed): not verified'),'Unknown status row');
  assert((await text(row(4))).includes('Not checked: every source skipped'),'Unchecked row');
- assert((await text(row(5))).includes('Unknown result (confirmed): not verified'),'Unknown status row');
- for(let i=1;i<6;i++)assert(!(await text(row(i).locator('.reference-status'))).startsWith('Verified'),'Row '+i+' looks verified');
+ const v=await text(row(5));
+ assert(v.startsWith('Reference 1')&&v.includes('Verified')&&v.includes('Matched: Synthetic verified paper')&&v.includes('checked with Crossref · title similarity 99%'),'Verified row: '+v);
+ for(let i=0;i<5;i++)assert(!(await text(row(i).locator('.reference-status'))).startsWith('Verified'),'Row '+i+' looks verified');
  assert(await rep.locator('.reference').count()===10,'Report not collapsed to 10');
  await rep.getByRole('button',{name:'Show all 12 references',exact:true}).click();
  await page.waitForFunction(()=>document.querySelectorAll('#agent-stream .citation-report .reference').length===12);
 
- // Research calls per source, never money.
+ // Research requests per source (Wave 2A: requests sent, and answers from the cache), never money.
  const head=await text(page.locator('#agent-head'));
- assert(head.includes('Research calls: Semantic Scholar 3 calls, 1 cached · arXiv 1 call'),'Usage line: '+head);
+ assert(head.includes('Research requests: Semantic Scholar 3 sent, 1 answered from cache · arXiv 1 sent')&&!head.includes('calls'),'Usage line: '+head);
  assert(!/[$€£]|cost|price/i.test(head),'Money in header');
  // A research task has no project: no Review changes, and it says so.
  assert(head.includes('Research task: no project')&&await page.locator('#agent-view').getByRole('button',{name:/Review/}).count()===0,'Research header / Review');
@@ -109,13 +120,17 @@ export default async function check(page,url){
  await out.getByRole('button',{name:'View report.md',exact:true}).click();
  await page.waitForFunction(()=>document.querySelector('#agent-outputs .report-md'));
  const md=out.locator('.report-md');
- assert(await md.locator('h3').textContent()==='Related work'&&await md.locator('strong').textContent()==='bold'&&await md.locator('em').textContent()==='care'&&await md.locator('li').count()===3,'Markdown structure');
+ assert(await md.locator('h3').textContent()==='Related work'&&await md.locator('strong').textContent()==='bold'&&await md.locator('em').textContent()==='care'&&await md.locator('li').count()===4,'Markdown structure');
  assert((await text(md)).includes(XSS)&&(await text(md)).includes('<script>window.pwned=1</script>')&&await md.locator('img,script').count()===0,'Markdown not text-safe');
  const mdLinks=await md.locator('a').evaluateAll(as=>as.map(a=>a.getAttribute('href')));
- assert(JSON.stringify(mdLinks)===JSON.stringify(['https://example.org/a'])&&(await text(md)).includes('an unsafe link (javascript:window.pwned=1)'),'Markdown links: '+JSON.stringify(mdLinks));
+ assert(JSON.stringify(mdLinks)===JSON.stringify(['https://example.org/a','https://evil.example/phish'])&&(await text(md)).includes('an unsafe link (javascript:window.pwned=1)'),'Markdown links: '+JSON.stringify(mdLinks));
+ // A link's real host is always visible, so link text that looks like another address cannot hide where it goes.
+ assert((await text(md)).includes('a safe link (example.org)')&&(await text(md)).includes('https://doi.org/10.5555/x (evil.example)'),'Link host not shown: '+await text(md));
+ assert(await md.locator('a').evaluateAll(as=>as.every(a=>!a.textContent.includes('evil.example')||a.getAttribute('href').includes('evil.example'))),'Host inside link text');
    await out.getByRole('button',{name:'View references.bib',exact:true}).focus();await page.keyboard.press('Enter');
  await page.waitForFunction(()=>document.querySelector('#agent-outputs .output-text'));
  assert((await out.locator('.output-text').textContent()).includes('title={'+XSS+'}'),'BibTeX text');
+ assert((await text(out.locator('[data-output="references.bib"]'))).includes('Holds the references the citation checker verified; mismatched ones are marked in a comment, and not-found or retracted ones are left out.'),'BibTeX output note');
  assert(JSON.stringify(await requests(page,'task_output_read'))===JSON.stringify([{task_id:'r1',name:'report.md'},{task_id:'r1',name:'references.bib'}])&&(await requests(page,'task_outputs')).length===0,'task_output_read params');
  assert(await page.evaluate(()=>document.activeElement?.id)==='output-view-references_bib','Focus lost after View');
  await out.getByRole('button',{name:'Save references.bib',exact:true}).click();
@@ -129,11 +144,11 @@ export default async function check(page,url){
 
  // Live events keep adding cards without losing the open BibTeX view.
  await push(page,[ev('r1','research_usage',{calls:{semantic_scholar:4,arxiv:1},cached:{semantic_scholar:1}})]);
- await page.waitForFunction(()=>document.querySelector('#agent-head').textContent.includes('Semantic Scholar 4 calls'));
+ await page.waitForFunction(()=>document.querySelector('#agent-head').textContent.includes('Semantic Scholar 4 sent'));
  assert(await out.locator('.output-text').count()===1,'Open view lost on update');
 
  const fits=await fit(page,'research-cards',null,true);
  assert(!(await page.evaluate(()=>window.pwned)),'Script ran');
  assert(!errors.length,'Page errors: '+errors.join(' | '));
- return {checks:'research tool cards (search with title/authors/year/venue/source badges/citations/retracted flag, searched and skipped, paper with abstract, BibTeX, open copy, denied call, cut result then full blob), https-only links, collapsible long lists by keyboard, citation report counts from rows with verified/mismatch fields/not found/retracted/unchecked reason/unknown, nothing else looks verified, per-source research call counts without money, no Review for research tasks, outputs panel with text-safe Markdown report and plain BibTeX, task_output_read per file, Save and cancelled save, live update keeps open view, literal text everywhere, light/dark 320-1280 fit',responsiveStates:fits.length};
+ return {checks:'research tool cards (search with title/authors/year/venue/source badges/citations/retracted flag, searched and skipped, paper with abstract, BibTeX, open copy, denied call, cut result then full blob), https-only links, collapsible long lists by keyboard, citation report counts from rows with verified/mismatch fields/not found/retracted/unchecked reason/unknown, problem rows first with reference numbers, retracted callout, honest Verified meaning, nothing else looks verified, per-source requests sent and cache answers without money, link host shown after markdown links, BibTeX output note, no every-citation claim, no Review for research tasks, outputs panel with text-safe Markdown report and plain BibTeX, task_output_read per file, Save and cancelled save, live update keeps open view, literal text everywhere, light/dark 320-1280 fit',responsiveStates:fits.length};
 }

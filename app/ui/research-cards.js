@@ -20,6 +20,8 @@ const STATUS={
  unchecked:{label:'Not checked',cls:'unchecked'}
 };
 const ORDER=['verified','mismatch','not_found','retracted','unchecked'];
+// Rows are listed problems first, so a collapsed report never hides a retracted or unverified reference.
+const RANK={retracted:0,mismatch:1,not_found:2,unchecked:4,verified:5};
 const SUMMARY={verified:'verified',mismatch:'mismatch',not_found:'not found',retracted:'retracted',unchecked:'unchecked'};
 const FIELD={title:'title',year:'year',authors:'authors',doi:'DOI'};
 
@@ -96,6 +98,7 @@ function inputText(input){
 }
 function referenceRow(ref,list){
  const s=STATUS[ref?.status],li=el('li','reference '+(s?s.cls:'unknown'),null,list);
+ if(Number.isSafeInteger(ref?.index)&&ref.index>=0)el('p','footnote reference-number','Reference '+count(ref.index+1),li);
  const label=s?s.label:'Unknown result ('+str(ref?.status)+'): not verified';
  const head=el('p','reference-status',null,li);el('strong','',label,head);
  if(ref?.status==='mismatch'){const f=strings(ref.fields,8).map(x=>FIELD[x]||x);if(f.length)head.append(' in '+f.join(', '));}
@@ -116,25 +119,30 @@ function citationCard(card,report,{state,bump}){
  const refs=Array.isArray(report?.references)?report.references:[];
  const counts=Object.fromEntries(ORDER.map(k=>[k,0]));let other=0;for(const r of refs)if(r&&r.status in counts)counts[r.status]++;else other++;
  const head=el('div','card-head',null,card);el('span','badge','Citations',head);el('strong','','Citation report',head);
- el('span','state',plural(refs.length,'reference')+' checked',head);
+ el('span','state',plural(refs.length,'reference'),head);
  const sum=el('ul','citation-summary',null,card);sum.setAttribute('aria-label','Citation summary');
  for(const k of ORDER){const li=el('li',STATUS[k].cls,null,sum);el('strong','',count(counts[k]),li);li.append(' '+SUMMARY[k]);}
  if(other){const li=el('li','unknown',null,sum);el('strong','',count(other),li);li.append(' unknown');}
  const unverified=refs.length-counts.verified;
- el('p','footnote',unverified?plural(unverified,'reference')+(unverified===1?' is':' are')+' not verified. Only references marked Verified matched a published record on title, year and first author.':refs.length?'Every reference matched a published record on title, year and first author.':'No references were checked.',card);
- if(refs.length)collapsible(card,refs,ROWS_SHOWN,state,'refs',bump,{cls:'reference-list',noun:'references'},referenceRow);
+ if(counts.retracted)el('p','retracted-alert',plural(counts.retracted,'reference')+(counts.retracted===1?' is retracted. Do not cite it.':' are retracted. Do not cite them.'),card);
+ const meaning='Verified means a published record matched: title at least 90% similar, plus the year (within one) and the first author when the reference gives them.';
+ el('p','footnote',(unverified?plural(unverified,'reference')+(unverified===1?' is':' are')+' not verified. ':refs.length?'Every reference is verified. ':'No references were checked. ')+(refs.length?meaning:''),card);
+ const rank=r=>r&&r.status in RANK?RANK[r.status]:3;
+ const sorted=refs.map((r,i)=>[r,i]).sort((a,b)=>rank(a[0])-rank(b[0])||a[1]-b[1]).map(x=>x[0]);
+ if(refs.length)collapsible(card,sorted,ROWS_SHOWN,state,'refs',bump,{cls:'reference-list',noun:'references'},referenceRow);
  if(report?.checked_at)el('p','footnote','Checked at '+str(report.checked_at),card);
 }
 
 // Text-safe Markdown for report.md: headings, lists, quotes, fenced code, `code`, **bold**, *italic* and
-// [links](https://…). Every piece of text is a text node; a link that is not https stays plain text.
+// [links](https://…). Every piece of text is a text node; a link that is not https stays plain text, and an https
+// link's real host is shown after its text, so text that looks like another address cannot hide where it goes.
 function inline(text,parent){
  for(const part of text.split(/(`[^`\n]+`|\*\*[^*\n]+\*\*|\*[^*\n]+\*|\[[^\]\n]+\]\([^)\s]+\))/)){
   if(!part)continue;
   if(/^`[^`]+`$/.test(part))el('code','',part.slice(1,-1),parent);
   else if(/^\*\*[^*]+\*\*$/.test(part))el('strong','',part.slice(2,-2),parent);
   else if(/^\*[^*]+\*$/.test(part))el('em','',part.slice(1,-1),parent);
-  else if(/^\[[^\]]+\]\([^)]+\)$/.test(part)){const i=part.indexOf('](');const label=part.slice(1,i),href=part.slice(i+2,-1);if(!R.link(href,label,parent))parent.append(document.createTextNode(label+' ('+href+')'));}
+  else if(/^\[[^\]]+\]\([^)]+\)$/.test(part)){const i=part.indexOf('](');const label=part.slice(1,i),href=part.slice(i+2,-1);if(R.link(href,label,parent)){if(label!==href)el('span','link-host',' ('+new URL(href).hostname+')',parent);}else parent.append(document.createTextNode(label+' ('+href+')'));}
   else parent.append(document.createTextNode(part));
  }
 }
@@ -174,6 +182,7 @@ function outputsPanel(container,taskId,data,{request,refresh}){
   view.onclick=()=>{s.open=!s.open;if(s.open&&s.text==null&&!s.loading)read(taskId,o,s,request,refresh);refresh();};
   const save=el('button','',s.saving?'Saving…':'Save',acts);save.type='button';save.id='output-save-'+safe;save.disabled=!!s.saving;save.setAttribute('aria-label','Save '+o.name);
   save.onclick=()=>{s.saving=true;s.note='';s.error='';refresh();request('task_output_save',{task_id:taskId,name:o.name},{manual:true}).then(r=>{s.note=r?.saved?'Saved.':'Not saved.';}).catch(e=>{s.error=e.message||'The file was not saved.';}).finally(()=>{s.saving=false;refresh();});};
+  if(o.kind==='bibtex')el('p','footnote','Holds the references the citation checker verified; mismatched ones are marked in a comment, and not-found or retracted ones are left out.',li);
   if(s.note)el('p','footnote',s.note,li).setAttribute('role','status');
   if(s.error)el('p','error-text',s.error,li).setAttribute('role','alert');
   if(s.open){
@@ -195,12 +204,13 @@ function read(taskId,o,s,request,refresh){
   .catch(e=>{s.readError=e.message||'This file could not be read.';}).finally(()=>{s.loading=false;refresh();});
 }
 
-// Research calls per source: counts only, never money.
+// Research requests per source: `calls` are requests sent, `cached` answers the cache gave instead (tasks.md, Wave 2A).
+// Counts only, never money.
 function usageText(u){
  const calls=u&&typeof u.calls==='object'?u.calls:{},cached=u&&typeof u.cached==='object'?u.cached:{};
  const names=[...new Set([...Object.keys(calls),...Object.keys(cached)])].filter(n=>Number.isSafeInteger(calls[n])||Number.isSafeInteger(cached[n]));
  if(!names.length)return '';
- return 'Research calls: '+names.map(n=>{const c=Number.isSafeInteger(calls[n])?calls[n]:0,k=Number.isSafeInteger(cached[n])?cached[n]:0;return R.title(n)+' '+plural(c,'call')+(k?', '+count(k)+' cached':'');}).join(' · ');
+ return 'Research requests: '+names.map(n=>{const c=Number.isSafeInteger(calls[n])?calls[n]:0,k=Number.isSafeInteger(cached[n])?cached[n]:0;return R.title(n)+' '+count(c)+' sent'+(k?', '+count(k)+' answered from cache':'');}).join(' · ');
 }
 
 window.interspaceResearchCards={toolTitle:name=>TOOL[name]||'',toolCard,citationCard,outputsPanel,usageText,markdown,paperList};

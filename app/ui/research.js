@@ -109,7 +109,7 @@ function renderSettings(container){
  for(const input of inputs.values())input.remove();
  container.replaceChildren();
  el('h2','','Research sources',container);
- el('p','footnote','Agents search these scholarly services through Interspace: only Interspace calls them, and agents never see your keys or email. Keys and emails stay in this Mac’s Keychain. Research calls use no tokens; each task counts its calls per source.',container);
+ el('p','footnote','Agents search these scholarly services through Interspace: only Interspace calls them, and agents never see your keys or email. Keys and emails stay in this Mac’s Keychain. Research calls use no tokens; each task counts the requests it sends to each source, and the answers that came from the cache.',container);
  if(loadError)el('p','error-text',loadError,container).setAttribute('role','alert');
  if(!sources.length&&!loadError)el('p','muted',loading||!loaded?'Loading research sources…':'No research sources.',container);
  const list=el('ul','provider-list research-sources',null,container);

@@ -36,7 +36,7 @@ function render(){if(!state)return;
  if(view==='detail'&&!detail)view='tasks';
  document.querySelectorAll('[data-view]').forEach(b=>b.setAttribute('aria-pressed',String(view===b.dataset.view)));
  $('heading').textContent=detail?task.title:view==='agent'?window.interspaceAgent.title():({tasks:'Tasks',research:'Research',new:'New task',settings:'Settings',running:'Running tasks',review:'Review changes'}[view]||'Tasks');
- $('heading-note').textContent=view==='tasks'?'An outcome, an agent, a branch you merge.':view==='research'?'Questions answered from scholarly sources, with every citation checked.':'';
+ $('heading-note').textContent=view==='tasks'?'An outcome, an agent, a branch you merge.':view==='research'?'Questions answered from scholarly sources. Each citation report shows which references were checked and which were verified.':'';
  $('breadcrumb').textContent=view==='research'||view==='agent'&&window.interspaceAgent.isResearch(window.interspaceAgent.current())?'Research':state.project||'Your workspace';
  $('project-name').textContent=state.project||'Add a project to see its details.';
  // A research question needs no project, so New task is always available.

@@ -30,20 +30,22 @@ Inside the scope an agent acts without asking. Outside it, that task alone pause
 
 ## Research
 
-Interspace is a research environment that still codes. A **research question** needs no project: agents search scholarly sources, follow citations, check every reference they cite, and give you a report and a BibTeX file.
+Interspace is a research environment that still codes. A **research question** needs no project: agents search scholarly sources, follow citations, and give you a report. They are told to check what they cite with the citation checker before answering; that is an instruction to the agents, not something the app enforces, so the citation report shows exactly what was checked. When it ran, you also get a BibTeX file.
+
+**Status.** Everything here is tested with recorded source replies and fake agents only. No live call to a research source or a model has run inside the app yet.
 
 **Sources.** Semantic Scholar, OpenAlex, arXiv, Crossref and Unpaywall. **Settings → Research sources** lists each one with what it needs, its status, **Test**, **Remove** and a link to get a free key:
 - Semantic Scholar and OpenAlex: an optional API key, which raises your allowance.
 - Crossref: an optional email; Unpaywall: a required email. The email goes to that service with each request, as the contact address it asks API users for.
 - arXiv: nothing to enter.
 
-Keys and emails are your own. They are kept in this Mac's Keychain, are never shown again after you save them, and never reach agents, logs, events or git. Only Interspace's backend calls these services, over https. Research calls use no tokens; each task shows how many calls it made to each source, never money.
+Keys and emails are your own. They are kept in this Mac's Keychain, are never shown again after you save them, and never reach agents, logs, events or git. Only Interspace's backend calls these services, over https. Research calls use no tokens; each task shows, per source, the requests it sent and the answers that came from the cache instead, never money.
 
 **Research questions.** **New task → Research question** offers presets: **Literature review**, **Related work** and **Verify my references** (paste a bibliography). The scope has research sources only: no project, files, commands or network. Each source is **Allow**, **Ask** (each call waits for you) or **Off**; new scopes allow the sources you can use. Every team member only reads. Research tasks are listed under **Research** in the sidebar, next to your projects, and have no Review or Merge.
 
-**What you see.** Research tool calls show papers with title, authors, year, venue, sources and citation counts; links appear only for https addresses, and all text from the sources is shown as plain text. The **citation report** marks each reference **Verified** (title, year and first author matched a published record), **Not verified** (differs, with the fields, or not found), **Retracted**, or **Not checked** with the reason. Nothing is called verified unless the checker said so.
+**What you see.** Research tool calls show papers with title, authors, year, venue, sources and citation counts; links appear only for https addresses, and all text from the sources is shown as plain text. A search names the sources it skipped and why (not set up, rate limited, unavailable, off in the scope). The **citation report** marks each reference **Verified** (a published record's title is at least 90% similar, and the year within one and the first author match when the reference gives them), **Not verified** (differs, with the fields, or not found), **Retracted**, or **Not checked** with the reason. Retracted and unverified references are listed first, with their reference number, and a retracted one is called out above the list. Nothing is called verified unless the checker said so. In a report, every link shows its real host after its text, and only https links are links.
 
-**Outputs.** A finished research answer is saved as `report.md`, plus `references.bib` when the citation checker ran. **Outputs** on the task shows them; **Save** copies a file to a place you choose. Project tasks still use Review and Merge for code.
+**Outputs.** A finished research answer is saved as `report.md`, plus `references.bib` when the citation checker ran: it holds the verified references, mismatched ones marked in a comment, and leaves not-found and retracted ones out. **Outputs** on the task shows them; **Save** copies a file to a place you choose. Project tasks still use Review and Merge for code.
 
 When the citation checker runs as a subagent, its citation report also appears on that subagent's card in the task, so you do not need to open the subagent to see it. A subagent that has answered its brief shows **Finished**.
 
