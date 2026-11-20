@@ -79,11 +79,14 @@ class FakeSource:
         self.credentials = credentials
         self.http = http
         self.cache_dir = cache_dir
+        self.meter = None
 
     def _call(self, what):
         account = CREDENTIAL[self.name]
         secret = self.credentials.get(account) if account else None
         self.http.append({'host': self.name + '.example', 'path': what, 'auth': secret})  # The key goes out here only.
+        if self.meter is not None:
+            self.meter(self.name)  # Like research.http: each request sent is counted on the calling task.
         body = json.dumps({'source': self.name, 'what': what})
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         (self.cache_dir / (hashlib.sha256((self.name + what).encode()).hexdigest() + '.json')).write_text(body)
@@ -120,6 +123,8 @@ def fake_research_module(storage_of, http):
 
     def dispatch(app, ctx, name, arguments):
         by_name = {s.name: s for s in sources(app)}
+        for source in by_name.values():
+            source.meter = ctx.note_call
 
         def allowed(source):
             return ctx.authorize({'category': 'research', 'source': source, 'tool': name})['decision'] == 'allow'

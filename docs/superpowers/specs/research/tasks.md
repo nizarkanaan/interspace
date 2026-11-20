@@ -39,7 +39,7 @@ New optional top-level key:
 
 - When a research task's Orchestrator ends a turn with a final answer, the scheduler writes:
   - `tasks/<id>/outputs/report.md`: the answer text;
-  - `tasks/<id>/outputs/references.bib`, but only if a `verify_citations` report exists for that turn. It holds the `research_bibtex` entries for the references marked `verified` (and `mismatch` ones marked as such in a BibTeX comment). `not_found` and `retracted` references are left out and listed in a header comment.
+  - `tasks/<id>/outputs/references.bib`, but only if a `verify_citations` report exists for that turn. The Orchestrator's own latest report is used; a member's report is used only while the Orchestrator has none of its own in that turn, and never replaces it (Wave 2A clarification). It holds the `research_bibtex` entries for the references marked `verified` (and `mismatch` ones marked as such in a BibTeX comment). `not_found` and `retracted` references are left out and listed in a header comment.
 - **Methods**, all in the Swift allowlist:
   - `task_outputs {task_id}` returns `{outputs: [{name, kind: 'report'|'bibtex', bytes, updated_at}]}`.
   - `task_output_read {task_id, name}` returns `{name, kind, text, truncated}`: UTF-8 text capped at 1 MiB, with `truncated: true` past that.
@@ -60,7 +60,7 @@ New optional top-level key:
 | --- | --- | --- |
 | `tool_call` / `tool_result` with `category: 'research'` | the calling task | as today; `input` is `{tool, source?, query?, id?}`; the result output is the tool JSON, truncated per events.md |
 | `citation_report` | the calling task | the citation report (tools.md), emitted after each `verify_citations` |
-| `research_usage` | the root task | `{calls: {source: n}, cached: {source: n}}`, emitted at most once per second while calls happen |
+| `research_usage` | the root task | `{calls: {source: n}, cached: {source: n}}`, emitted at most once per second while calls happen. `calls` counts requests actually sent to a source for the task and its members; `cached` counts answers the response cache gave instead (Wave 2A clarification, the same meaning as the app-wide `research_usage {}`) |
 | `outputs` | the root task | `{outputs: [{name, kind, bytes}]}` when outputs change |
 
 ## Key safety (test required)

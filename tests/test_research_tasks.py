@@ -74,7 +74,9 @@ class FakeResearch:
                 continue
             searched.append(source)
             if source in self.cached:
-                ctx.note_cached(source)
+                ctx.note_cached(source)  # The cache answered: no request went out.
+            else:
+                ctx.note_call(source)
         if name == 'research_bibtex':
             return {'entries': [{'id': i, 'bibtex': BIBTEX.get(i.lower()), 'error': None} for i in arguments['ids']]}
         return {'papers': [LECUN], 'searched': searched, 'skipped': skipped}
@@ -222,9 +224,9 @@ class CallTests(ResearchCase):
         self.assertEqual(json.loads(shown['output']['text'])['searched'], ['crossref', 'arxiv'])
         wait_for(lambda: self.events_of('r1', 'research_usage'), message='research_usage')
         wait_for(lambda: self.events_of('r1', 'research_usage')[-1]['data'] ==
-                 {'calls': {'crossref': 1, 'arxiv': 1}, 'cached': {'arxiv': 1}}, message='final usage')
+                 {'calls': {'crossref': 1}, 'cached': {'arxiv': 1}}, message='final usage')
         self.assertEqual(self.store.task('r1')['agent']['research_usage'],
-                         {'calls': {'crossref': 1, 'arxiv': 1}, 'cached': {'arxiv': 1}})
+                         {'calls': {'crossref': 1}, 'cached': {'arxiv': 1}})
         self.assertEqual(self.research.calls, [('research_search', {'query': 'deep learning', 'limit': 5})])
 
     def test_denied_and_asked_sources(self):
@@ -285,6 +287,7 @@ class CallTests(ResearchCase):
 
         def dispatch(ctx, name, arguments):
             ctx.authorize({'category': 'research', 'source': 'crossref', 'tool': name})
+            ctx.note_call('crossref')
             return {'paper': None, 'sources': ['crossref']}
         self.sched.research_dispatch = dispatch
         self.run_task()
