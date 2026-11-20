@@ -10,7 +10,7 @@ export default async function check(page,url){
  const search={papers,searched:['semantic_scholar','openalex'],skipped:[{source:'unpaywall',reason:'not_configured'}]};
  const report={v:1,checked_at:'2026-11-19T10:05:00Z',summary:{verified:99,mismatch:0,not_found:0,retracted:0,unchecked:0},references:[
   {index:0,input:{title:'Synthetic verified paper',authors:['Ada Example'],year:2021},status:'verified',fields:[],match:paper(10,{title:'Synthetic verified paper'}),similarity:0.99,source:'crossref'},
-  {index:1,input:{raw:'Sample, B. (2019). A mismatched '+XSS+' paper.'},status:'mismatch',fields:['year','authors'],match:paper(11,{url:'javascript:window.pwned=1'}),similarity:0.93,source:'openalex'},
+  {index:1,input:{raw:'Sample, B. (2019). A mismatched '+XSS+' paper.'},status:'mismatch',fields:['year','authors','arxiv_id'],match:paper(11,{url:'javascript:window.pwned=1'}),similarity:0.93,source:'openalex'},
   {index:2,input:{title:'An invented paper that does not exist'},status:'not_found',fields:[],match:null,similarity:0.41,source:null},
   {index:3,input:{title:'A retracted synthetic paper',doi:'10.5555/retracted'},status:'retracted',fields:[],match:paper(12,{retracted:true}),similarity:1,source:'crossref'},
   {index:4,input:{title:'Unchecked synthetic paper'},status:'unchecked',reason:'every_source_skipped',fields:[],match:null,similarity:null,source:null},
@@ -94,7 +94,7 @@ export default async function check(page,url){
  const r0=await text(row(0));
  assert(r0.startsWith('Reference 4')&&r0.includes('Retracted: do not cite'),'Retracted row first: '+r0);
  const r1=await text(row(1));
- assert(r1.startsWith('Reference 2')&&r1.includes('Not verified: differs from the published record in year, authors')&&r1.includes('A mismatched '+XSS+' paper')&&r1.includes('Closest record:'),'Mismatch row: '+r1);
+ assert(r1.startsWith('Reference 2')&&r1.includes('Not verified: differs from the published record in year, authors, arXiv ID')&&r1.includes('A mismatched '+XSS+' paper')&&r1.includes('Closest record:'),'Mismatch row: '+r1);
  assert(await row(1).locator('a').count()===0,'Unsafe match link');
  assert((await text(row(2))).includes('Not verified: not found in the sources checked'),'Not found row');
  assert((await text(row(3))).includes('Unknown result (confirmed): not verified'),'Unknown status row');

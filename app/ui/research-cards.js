@@ -23,7 +23,7 @@ const ORDER=['verified','mismatch','not_found','retracted','unchecked'];
 // Rows are listed problems first, so a collapsed report never hides a retracted or unverified reference.
 const RANK={retracted:0,mismatch:1,not_found:2,unchecked:4,verified:5};
 const SUMMARY={verified:'verified',mismatch:'mismatch',not_found:'not found',retracted:'retracted',unchecked:'unchecked'};
-const FIELD={title:'title',year:'year',authors:'authors',doi:'DOI'};
+const FIELD={title:'title',year:'year',authors:'authors',doi:'DOI',arxiv_id:'arXiv ID'};
 
 // A list of untrusted strings, at most `max` long; anything else is dropped.
 const strings=(v,max=50)=>Array.isArray(v)?v.filter(x=>typeof x==='string'&&x.trim()).slice(0,max):[];

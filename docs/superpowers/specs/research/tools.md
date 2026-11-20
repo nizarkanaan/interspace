@@ -107,9 +107,9 @@ class Source:
 | --- | --- |
 | `retracted` | the matched record has `retracted: true` (this overrides every other status) |
 | `verified` | title similarity of at least 0.90, the year matches within ±1 when given, and the first author's surname matches (case and diacritics ignored) when given |
-| `mismatch` | a candidate with similarity of at least 0.75, or found by its exact DOI or arXiv ID, but some fields differ; `fields` lists them (`title`, `year`, `authors`, `doi`) |
+| `mismatch` | a candidate with similarity of at least 0.75, or found by its exact DOI or arXiv ID, but some fields differ; `fields` lists them (`title`, `year`, `authors`, `doi`, `arxiv_id`). A DOI or arXiv ID that no source resolves, while a title search finds the paper without it, is a mismatch on that field (Wave 3B) |
 | `not_found` | no candidate reaches 0.75 |
-| `unchecked` | every source that could check it was skipped (not configured, denied or failed); `reason` says which |
+| `unchecked` | every source that could check it was skipped (not configured, denied or failed), or only a title matched with no author or year to confirm it (Wave 3B); `reason` says which |
 
 4. **The report:**
 
