@@ -89,6 +89,28 @@ class ValidationTests(unittest.TestCase):
             self.assertNotIn('private-name', str(caught.exception))
 
 
+class StoredValueTests(unittest.TestCase):
+    """A Keychain item edited outside Interspace (Keychain Access) is checked again when it is read."""
+
+    def test_a_stored_key_that_is_no_longer_valid_is_refused_without_repeating_it(self):
+        channel = FakeChannel()
+        channel.items['semantic_scholar'] = 'S2-KEY-pasted\r\nX-Injected: 1'
+        channel.items['unpaywall_email'] = 'private-name@nowhere'
+        creds = store(channel)
+        for account, value in (('semantic_scholar', 'S2-KEY-pasted'), ('unpaywall_email', 'private-name')):
+            with self.subTest(account=account):
+                with self.assertRaises(ValueError) as caught:
+                    creds.get(account)
+                self.assertNotIn(value, str(caught.exception))
+                with self.assertRaises(ValueError):
+                    creds.configured(account)
+
+    def test_surrounding_whitespace_of_a_stored_value_is_dropped(self):
+        channel = FakeChannel()
+        channel.items['openalex'] = '  ' + KEY + '\n'
+        self.assertEqual(store(channel).get('openalex'), KEY)
+
+
 class StoreTests(unittest.TestCase):
     def test_set_get_delete_round_trip(self):
         channel = FakeChannel()

@@ -41,7 +41,7 @@ class Credentials:
 
     def get(self, account):
         """The stored secret, or None when it is not set."""
-        _account(account)
+        kind = _account(account)
         with self._lock:
             cached = self._cache.get(account)
         if cached is not None and self._clock() - cached[1] < CACHE_TTL_S:
@@ -50,6 +50,14 @@ class Credentials:
         secret = reply.get('secret') if reply is not None else None
         if reply is not None and not isinstance(secret, str):
             raise CredentialStoreUnavailable('The Keychain sent an answer Interspace does not understand. Try again.')
+        if secret is not None:
+            # The item may have been edited outside Interspace (Keychain Access). An invalid value is never sent:
+            # a line break in a header would make http.client quote the key in its error.
+            try:
+                secret = _validated(kind, secret)
+            except ValueError:
+                raise ValueError('The stored %s is not valid. Enter it again in Settings → Research sources.'
+                                 % ('email' if kind == 'email' else 'key')) from None
         with self._lock:
             self._cache[account] = (secret, self._clock())
         return secret
