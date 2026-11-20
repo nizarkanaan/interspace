@@ -455,6 +455,45 @@ class LaunchTests(ClaudeCase):
         self.assertEqual(outcome['status'], 'completed', outcome)
         self.assertEqual([t['name'] for t in self.bridges[0].tools], ['example_get'])
 
+    def test_research_session_without_a_project_has_no_builtin_or_file_tools(self):
+        # research/tasks.md: a task without a project starts in its empty scratch folder with Interspace's tools only.
+        data = self.root / 'data'
+        scratch = data / 'research-runs' / 'task1'
+        for path in (scratch, data / 'tasks', data / 'research-runs' / 'task2'):
+            path.mkdir(parents=True)
+        ctx = FakeContext(self.root)
+        ctx.workspaces = {}
+        ctx.scratch = ctx.primary_workspace = str(scratch)
+        ctx.research_only = True
+        ctx.access = 'write'  # Even a write context stays read-only without a project.
+        ctx.tool_list = [{'name': 'research_search', 'effect': 'read', 'input_schema': {}}]
+        app = mock.Mock(storage=str(data))
+        _, _, outcome = self.turn({'turns': [simple_turn()]}, ctx=ctx, app=app)
+        self.assertEqual(outcome['status'], 'completed', outcome)
+        launch = self.main_launches()[0]
+        args = launch['launch']
+        pairs = {args[i]: args[i + 1] for i in range(len(args) - 1)}
+        self.assertEqual(pairs['--tools'], '')
+        settings = json.loads(pairs['--settings'])
+        self.assertEqual(settings['permissions']['ask'], ['mcp__interspace'])
+        self.assertEqual([t['name'] for t in self.bridges[0].tools], ['research_search'])
+        self.assertEqual(launch['cwd'], str(scratch))
+        self.assertIn('This research task has no project', pairs['--system-prompt'])
+        denied = settings['sandbox']['filesystem']['denyRead']
+        self.assertNotIn(str(scratch), denied)
+        self.assertIn(str(data / 'tasks'), denied)
+        self.assertIn(str(data / 'research-runs' / 'task2'), denied)
+
+    def test_bridge_calls_go_through_call_tool(self):
+        ctx = FakeContext(self.root)
+        calls = []
+        ctx.call_tool = lambda name, arguments: calls.append((name, arguments)) or {'ok': True}
+        session = self.runtime({'turns': []}).open(ctx)
+        self.addCleanup(session.close)
+        target = claude._BridgeTarget(session, ctx)
+        self.assertEqual(target.call_tool('research_paper', {'id': 'x'}), {'ok': True})
+        self.assertEqual(calls, [('research_paper', {'id': 'x'})])
+
     def test_write_session_bridge_serves_the_file_tools(self):
         _, ctx, outcome = self.turn({'turns': [simple_turn()]})
         self.assertEqual(outcome['status'], 'completed', outcome)

@@ -38,6 +38,21 @@ def run_dir(app_data):
     return path
 
 
+def own_folders(ctx):
+    """The folders a session may read: its task workspaces, or the scratch run folder of a task without a project
+    (research/tasks.md). `deny_paths` keeps these readable."""
+    found = list(getattr(ctx, 'workspaces', {}).values())
+    scratch = getattr(ctx, 'scratch', None)
+    if isinstance(scratch, str) and scratch and scratch not in found:
+        found.append(scratch)
+    return found
+
+
+def research_only(ctx):
+    """Whether the session belongs to a task without a project: no files, no commands, research tools only."""
+    return getattr(ctx, 'research_only', False) is True
+
+
 def _within(path, root):
     try:
         return os.path.commonpath([path, root]) == root

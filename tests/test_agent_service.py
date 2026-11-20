@@ -512,5 +512,102 @@ class ProviderBudgetTests(unittest.TestCase):
         self.assertEqual(budget.ledger(state, 't', 100000)['used'], 1015)
 
 
+class ResearchTaskServiceTests(unittest.TestCase):
+    """research/tasks.md: `agent_create` with `project_id: null`, the Research collection and its selection."""
+
+    def setUp(self):
+        import scope
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name).resolve()
+        self.scope = scope
+        self.app = self.open()
+
+    def open(self):
+        app = service.Application(self.root / 'data', scope_api=self.scope, audit_api=FakeAudit(),
+                                  runtime_factory=lambda task_id: FakeRuntime(), interrupt_grace_s=0.2)
+        self.addCleanup(app.scheduler.shutdown, 5)
+        return app
+
+    def repo(self, name):
+        repo = self.root / name
+        repo.mkdir()
+        git = ['git', '-c', 'user.name=T', '-c', 'user.email=t@example.invalid']
+        subprocess.run(git + ['init', '-q', str(repo)], check=True)
+        (repo / 'README.md').write_text('# Repo\n')
+        subprocess.run(git + ['-C', str(repo), 'add', '.'], check=True)
+        subprocess.run(git + ['-C', str(repo), 'commit', '-q', '-m', 'base'], check=True)
+        return self.app.handle('add_project', {'path': str(repo)})['project_id']
+
+    def test_a_research_task_needs_the_research_kind(self):
+        with self.assertRaisesRegex(ValueError, 'Unknown project'):
+            self.app.handle('agent_create', {'project_id': None, 'title': 'x'})
+        with self.assertRaisesRegex(ValueError, 'Unknown task kind'):
+            self.app.handle('agent_create', {'project_id': None, 'kind': 'other', 'title': 'x'})
+
+    def test_research_tasks_live_in_the_research_collection_and_survive_a_restart(self):
+        created = self.app.handle('agent_create', {'project_id': None, 'kind': 'research', 'title': 'Related work'})
+        task_id = created['task_id']
+        with self.app.lock:
+            task = self.app.state['research']['tasks'][task_id]
+            self.assertEqual((task['kind'], task['agent']['project_id']), ('research', None))
+            self.assertEqual(task['scope']['projects'], [])
+            self.assertEqual(task['scope']['research'], {'sources': {}})  # No research module in this build.
+            self.assertEqual(self.app.store.task(task_id)['id'], task_id)
+        public = self.app.handle('state', {})
+        self.assertEqual((public['project_id'], public['project'], public['task_id']), (None, 'Research', task_id))
+        self.assertEqual(public['research'], {'selected': True, 'task_count': 1})
+        self.assertEqual([(r['id'], r['kind']) for r in public['tasks']], [(task_id, 'research')])
+        self.assertEqual(public['task']['agent']['project_id'], None)
+        # Leaving and coming back to the Research entry, and choosing no task.
+        project_id = self.repo('repo')
+        self.assertEqual(self.app.handle('switch_project', {'project_id': project_id})['research']['selected'], False)
+        back = self.app.handle('switch_project', {'project_id': None, 'research': True})
+        self.assertEqual((back['project_id'], back['task_id']), (None, task_id))
+        self.assertIsNone(self.app.handle('select_task', {'project_id': None, 'task_id': None})['task_id'])
+        self.assertEqual(self.app.handle('select_task', {'project_id': None, 'task_id': task_id})['task_id'], task_id)
+        with self.assertRaises(ValueError):
+            self.app.handle('select_task', {'project_id': None, 'task_id': 'nope'})
+        self.app.scheduler.shutdown(5)
+        again = self.open()
+        self.assertEqual(again.handle('state', {})['task_id'], task_id)
+        with again.lock:
+            self.assertEqual(again.store.task(task_id)['kind'], 'research')
+
+    def test_a_proposed_scope_with_project_files_is_refused(self):
+        project_id = self.repo('repo2')
+        document = self.scope.project_default(project_id)
+        with self.assertRaisesRegex(ValueError, 'no project files'):
+            self.app.handle('agent_create', {'project_id': None, 'kind': 'research', 'title': 'x', 'scope': document})
+
+    def test_damaged_research_state_is_replaced_on_load(self):
+        with self.app.lock:
+            self.app.state['research'] = 'damaged'
+            self.assertEqual(service.research_state(self.app.state),
+                             {'tasks': {}, 'selected_task_id': None, 'selected': False})
+
+    def test_usable_sources_come_from_the_research_module(self):
+        class Source:
+            def __init__(self, name, configured, required):
+                self.name, self.required, self.configured = name, required, configured
+
+            def status(self, test=False):
+                if self.name == 'broken':
+                    raise RuntimeError('no')
+                return {'configured': self.configured}
+        module = types.ModuleType('research')
+        module.sources = lambda app: [Source('crossref', False, False), Source('unpaywall', False, True),
+                                      Source('openalex', True, False), Source('broken', False, True)]
+        with mock.patch.dict(sys.modules, {'research': module}):
+            self.assertEqual(self.app.research_sources_usable(),
+                             {'crossref': True, 'unpaywall': False, 'openalex': True, 'broken': False})
+            created = self.app.handle('agent_create', {'project_id': None, 'kind': 'research', 'title': 'R'})
+        with self.app.lock:
+            sources = self.app.store.task(created['task_id'])['scope']['research']['sources']
+        self.assertEqual(sources, {'crossref': 'allow', 'unpaywall': 'off', 'openalex': 'allow', 'broken': 'off'})
+        with self.assertRaisesRegex(ValueError, 'not in this build'):
+            self.app.research_dispatch(None, 'research_search', {})
+
+
 if __name__ == '__main__':
     unittest.main()

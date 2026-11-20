@@ -78,8 +78,10 @@ class ScopeAdapter:
     def digest(self, scope):
         return self._need().digest(scope)
 
-    def default(self, task, project_ids):
-        return self._need().default(task, project_ids)
+    def default(self, task, project_ids, research_sources=None):
+        if research_sources is None:
+            return self._need().default(task, project_ids)
+        return self._need().default(task, project_ids, research_sources=research_sources)
 
     def decide(self, scope, approval, request, *, workspace_roots, now, **options):
         return self._need().decide(scope, approval, request, workspace_roots=workspace_roots, now=now, **options)
@@ -120,21 +122,32 @@ class AgentStore:
     def state(self):
         return self.app.state
 
-    def agent_tasks(self):
+    def _collections(self):
         for project in self.app.state['projects'].values():
             saved = project.get('tasks') if isinstance(project, dict) else None
-            for task in (saved.values() if isinstance(saved, dict) else ()):  # Damaged saved data is skipped.
+            if isinstance(saved, dict):  # Damaged saved data is skipped.
+                yield saved
+        yield research_tasks(self.app.state)
+
+    def agent_tasks(self):
+        for saved in self._collections():
+            for task in list(saved.values()):
                 if isinstance(task, dict) and task.get('mode') == 'agent':
                     yield task
 
     def task(self, task_id):
         if isinstance(task_id, str):
-            for project in self.app.state['projects'].values():
-                saved = project.get('tasks')
-                task = saved.get(task_id) if isinstance(saved, dict) else None
+            for saved in self._collections():
+                task = saved.get(task_id)
                 if task is not None:
                     return tasks.validate(task, task_id)
         raise ValueError('Unknown task.')
+
+    def collection(self, task):
+        """The dict holding `task`'s row: its project's tasks, or the Research collection (research/tasks.md)."""
+        if tasks.is_research(task):
+            return research_tasks(self.app.state)
+        return self.app.state['projects'][task['agent']['project_id']].setdefault('tasks', {})
 
     def project(self, project_id):
         return self.app.state['projects'].get(project_id)
@@ -142,6 +155,22 @@ class AgentStore:
     def changed(self, task_id=None):
         self.app.persist()
         self.app.publish_soon()
+
+
+def research_state(state):
+    """`state['research']`: the synthetic collection of tasks without a project, shown as the Research entry."""
+    research = state.get('research')
+    if (not isinstance(research, dict) or not isinstance(research.get('tasks'), dict)
+            or not isinstance(research.get('selected', False), bool)):
+        research = {'tasks': {}, 'selected_task_id': None, 'selected': False}
+        state['research'] = research
+    research.setdefault('selected_task_id', None)
+    research.setdefault('selected', False)
+    return research
+
+
+def research_tasks(state):
+    return research_state(state)['tasks']
 
 
 def reply_for(line, app):
@@ -233,6 +262,7 @@ class Application:
         self.cancel = threading.Event()
         self.worker = None
         self.state = projects.load(self.storage)
+        research_state(self.state)
         # Sign-in results reported since this start (providers.md "Sign-in completion"); never trusted across restarts.
         self.state['provider_status'] = {}
         budget.recover(self.state)  # A reservation held at shutdown is charged its estimate, never released.
@@ -262,7 +292,37 @@ class Application:
             max_running=max_running, runtime_factory=runtime_factory or self.default_runtime_factory(), policy=self.scope,
             audit=self.audit, events=self.events, budget_gate=scheduler.BudgetGate(self.store), locks=self.locks,
             clock=time.time, tasks=self.store, workspaces=scheduler.Workspaces(self.storage/'workspaces'),
-            interrupt_grace_s=interrupt_grace_s, decide_options={'app_data':str(self.storage)})
+            interrupt_grace_s=interrupt_grace_s, decide_options={'app_data':str(self.storage)},
+            research_dispatch=self.research_dispatch, scratch_root=self.storage/'research-runs')
+
+    def research_dispatch(self, ctx, name, arguments):
+        """One research tool call through stream 1B's `research.dispatch(app, ctx, name, arguments)`."""
+        dispatch = getattr(optional_module('research'), 'dispatch', None)
+        if not callable(dispatch):
+            raise ValueError('Research sources are not in this build yet.')
+        return dispatch(self, ctx, name, arguments)
+
+    def research_sources_usable(self):
+        """{source: usable} for new scopes (research/tasks.md): usable means configured or not required. None when
+        the research sources are not in this build. Never reads or returns a secret, and makes no network call."""
+        module = optional_module('research')
+        sources = getattr(module, 'sources', None)
+        if not callable(sources):
+            return None
+        usable = {}
+        try:
+            for source in sources(self):
+                name = getattr(source, 'name', None)
+                if not isinstance(name, str):
+                    continue
+                try:
+                    status = source.status()
+                    usable[name] = bool(status.get('configured')) or not getattr(source, 'required', True)
+                except Exception:
+                    usable[name] = not getattr(source, 'required', True)
+        except Exception:
+            return None
+        return usable
 
     def default_runtime_factory(self):
         """`runtime.make_factory(app)` -> `runtime_factory(task_id)`; `no_runtime` while it is absent or broken.
@@ -329,7 +389,7 @@ class Application:
                 row=dict(id=identity,title=task['title'],mode=task.get('mode','review'))
                 if row['mode']=='agent':
                     row.update(status=task['agent'].get('state') or 'draft',provider=tasks.provider(task),model=task.get('model'),
-                               role=task.get('role'),parent_task_id=task.get('parent_task_id'))
+                               role=task.get('role'),parent_task_id=task.get('parent_task_id'),kind=tasks.kind(task))
                 else:
                     row.update(status='read_only',read_only=True)
                 result.append(row)
@@ -339,7 +399,9 @@ class Application:
 
     def public(self):
         with self.lock:
-            project = self.state['projects'].get(self.state['selected_project_id'])
+            research=research_state(self.state)
+            # The Research entry (tasks without a project) is shown like a project with `project_id: null`.
+            project = research_view(research) if research['selected'] else self.state['projects'].get(self.state['selected_project_id'])
             task=None;task_error=''
             if project:
                 try:task=tasks.selected(project)
@@ -351,6 +413,8 @@ class Application:
                         tasks=self.task_summaries(project) if project else [],
                         project_id=project['id'] if project else None,project=project['name'] if project else None,
                         projects=self.summaries())
+            data['research']={'selected':research['selected'],'task_count':sum(
+                1 for t in research['tasks'].values() if isinstance(t,dict) and not t.get('parent_task_id'))}
             data['scheduler']=self.scheduler.snapshot()
             # Only app-level errors (sign-in) are shown here; an earlier task's error is part of its history.
             app_error=self.state.get('error_project_id') is None and self.state.get('error_task_id') is None
@@ -376,7 +440,7 @@ class Application:
         return {'state':agent.get('state'),'detail':agent.get('detail',''),'reason':agent.get('reason'),
                 'provider':tasks.provider(task),'model':task.get('model'),
                 'scope_version':scope.get('version'),'scope_approved':approved,'project_id':agent['project_id'],
-                'last_seq':self.events.last_seq(task['id'])}
+                'kind':tasks.kind(task),'last_seq':self.events.last_seq(task['id'])}
 
     def token_summary(self, task):
         totals=budget.ledger(self.state,task['id'],task.get('token_budget'))
@@ -408,12 +472,27 @@ class Application:
                 return {'started':True}
             if method == 'switch_project':
                 identity = params.get('project_id')
+                if identity is None and params.get('research') is True:
+                    research_state(self.state)['selected'] = True  # The Research entry.
+                    self.publish()
+                    return self.public()
                 if not isinstance(identity,str) or identity not in self.state['projects']:
                     raise ValueError('Unknown project.')
                 self.state['selected_project_id'] = identity
+                research_state(self.state)['selected'] = False
                 self.publish()
                 return self.public()
             if method=='select_task':
+                research=research_state(self.state)
+                if research['selected'] and params.get('project_id') is None:
+                    identity=params.get('task_id')
+                    if 'task_id' not in params:raise ValueError('Choose a task.')
+                    if identity is not None:
+                        if not isinstance(identity,str):raise ValueError('Unknown task.')
+                        tasks.validate(research['tasks'].get(identity),identity)
+                    research['selected_task_id']=identity
+                    self.publish()
+                    return self.public()
                 project=projects.selected(self.state,params)
                 identity=params.get('task_id')
                 if 'task_id' not in params:raise ValueError('Choose a task.')
@@ -425,6 +504,7 @@ class Application:
                 return self.public()
             if method in ('add_project','select_project'):
                 projects.register(self.state,params.get('path'),self.storage)
+                research_state(self.state)['selected']=False  # The added or chosen project is shown.
                 self.publish()
                 return self.public()
             projects.update(projects.selected(self.state,params),params)
@@ -511,35 +591,67 @@ class Application:
                             'change':change,'by':'user','summary':summary})
 
     def scope_default(self, params):
-        """The starting scope for the new agent task form; creates nothing (README coordinator ruling)."""
+        """The starting scope for the new agent task form; creates nothing (README coordinator ruling).
+
+        `{project_id: null, kind: 'research'}` gives the scope of a task without a project (research/tasks.md).
+        """
+        usable=self.research_sources_usable()
         with self.lock:
             project_id=params.get('project_id')
+            if project_id is None and params.get('kind')=='research':
+                builder=getattr(self.scope.module,'research_default',None) if self.scope.module is not None else None
+                if builder is None:raise ValueError('Agent tasks need the scope engine, which is not in this build yet.')
+                return {'scope':builder(research_sources=usable or {})}
             project=self.state['projects'].get(project_id) if isinstance(project_id,str) else None
             if project is None:raise ValueError('Unknown project.')
             try:limit=budget.validate(project.get('token_budget'))
             except ValueError:limit=None  # A damaged saved project budget falls back to the default.
             builder=getattr(self.scope.module,'project_default',None) if self.scope.module is not None else None
             if builder is None:raise ValueError('Agent tasks need the scope engine, which is not in this build yet.')
-            return {'scope':builder(project_id,token_budget=limit,project_ids=list(self.state['projects']))}
+            options={} if usable is None else {'research_sources':usable}
+            return {'scope':builder(project_id,token_budget=limit,project_ids=list(self.state['projects']),**options)}
 
     def agent_create(self, params):
+        """A new Orchestrator task in a project, or with `project_id: null` and `kind: 'research'` a task without a
+        project (research/tasks.md), stored in the Research collection."""
+        usable=self.research_sources_usable() if params.get('scope') is None else None
         with self.lock:
             project_id=params.get('project_id')
-            project=self.state['projects'].get(project_id) if isinstance(project_id,str) else None
-            if project is None:raise ValueError('Unknown project.')
-            if not isinstance(project.get('tasks',{}),dict):raise ValueError('Saved tasks are unavailable; preserve app data before recovery.')
+            research=project_id is None and params.get('kind')=='research'
+            if research:
+                project=None;collection=research_tasks(self.state)
+            else:
+                if params.get('kind') not in (None,'project'):raise ValueError('Unknown task kind.')
+                project=self.state['projects'].get(project_id) if isinstance(project_id,str) else None
+                if project is None:raise ValueError('Unknown project.')
+                if not isinstance(project.get('tasks',{}),dict):raise ValueError('Saved tasks are unavailable; preserve app data before recovery.')
+                collection=project.setdefault('tasks',{})
             runtime,model=self.orchestrator_choice(params)
-            task=tasks.create(params.get('title','New agent task'),project_id=project_id,provider=runtime,model=model)
+            task=tasks.create(params.get('title','New agent task'),project_id=project_id,provider=runtime,model=model,
+                              kind='research' if research else 'project')
             proposed=params.get('scope')
-            document=self.scope.default(task,[project_id]) if proposed is None else copy.deepcopy(proposed)
+            if proposed is not None:
+                document=copy.deepcopy(proposed)
+            elif research:
+                builder=getattr(self.scope.module,'research_default',None) if self.scope.module is not None else None
+                if builder is None:raise ValueError('Agent tasks need the scope engine, which is not in this build yet.')
+                document=builder(token_budget=task['token_budget'],research_sources=usable or {})
+            else:
+                document=self.scope.default(task,[project_id],usable)
             if not isinstance(document,dict):raise ValueError('Scope must be an object.')
             document.update(v=1,task_id=task['id'],version=1)
             self.scope.validate(document,project_ids=list(self.state['projects']))
+            if research and document.get('projects'):raise ValueError('A research task has no project files.')
             task.update(scope=document,token_budget=budget.validate(document['limits']['token_budget']))
             digest=self.scope.digest(document)
             self.audit_scope(task,None,document,None,digest)
-            project.setdefault('tasks',{})[task['id']]=task
-            project['selected_task_id']=task['id']
+            collection[task['id']]=task
+            if research:
+                state=research_state(self.state)
+                state.update(selected_task_id=task['id'],selected=True)
+            else:
+                project['selected_task_id']=task['id']
+                research_state(self.state)['selected']=False
             self.scope_event(task,'edited','Scope drafted; approve it to start.')
             self.publish()
             return {'task_id':task['id'],'scope_digest':digest}
@@ -585,6 +697,11 @@ class Application:
         self.scheduler.scope_changed(task['id'])
         self.publish()
         return {'scope_approval':copy.deepcopy(task['scope_approval'])}
+
+
+def research_view(research):
+    """The Research collection in the shape `public()` reads from a project."""
+    return {'id':None,'name':'Research','tasks':research['tasks'],'selected_task_id':research.get('selected_task_id')}
 
 
 def main():

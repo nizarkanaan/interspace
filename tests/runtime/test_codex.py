@@ -89,11 +89,7 @@ class FakeContext:
     def emit(self, kind, data, *, turn_id=None, item_id=None):
         self.events.append((kind, data, item_id))
 
-    def call_tool(self, name, arguments, call_id):
-        self.tool_calls.append((name, arguments, call_id))
-        return {'ok': True, 'result': {}}
-
-    def orchestrate(self, name, arguments):  # The bridge's entry point since Wave 1B.
+    def call_tool(self, name, arguments):  # The bridge's entry point (research Wave 1C).
         self.tool_calls.append((name, arguments, None))
         return {'ok': True, 'result': {}}
 
@@ -211,6 +207,24 @@ class LaunchTests(CodexCase):
         self.assertEqual(start['permissions'], 'interspace-read')
         self.assertIn('read-only', start['developerInstructions'])
         self.assertNotIn('can write only this workspace', start['developerInstructions'])
+
+    def test_research_task_without_a_project_runs_read_only_in_its_scratch_folder(self):
+        scratch = self.root / 'scratch-run'
+        scratch.mkdir()
+        ctx = self.ctx()
+        ctx.workspaces = {}
+        ctx.primary_workspace = ctx.scratch = str(scratch)
+        ctx.research_only = True
+        ctx.access = 'write'
+        self.open({}, ctx)
+        argv = self.logged()[0]['argv']
+        overrides = dict(argv[i + 1].split('=', 1) for i in range(1, len(argv), 2) if argv[i] == '-c')
+        self.assertEqual(overrides['default_permissions'], '"interspace-read"')
+        self.assertIn('"extends"=":read-only"', overrides['permissions.interspace-read'])
+        start = self.sent('thread/start')[0]['params']
+        self.assertEqual((start['permissions'], start['cwd']), ('interspace-read', str(scratch)))
+        self.assertIn('This task has no project', start['developerInstructions'])
+        self.assertNotIn(json.dumps(str(scratch)), overrides['permissions.interspace-read'])
 
     def test_write_access_is_the_default_profile(self):
         ctx = self.ctx()
