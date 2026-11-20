@@ -1,0 +1,126 @@
+{
+ "_fixture": {
+  "source": "openalex",
+  "captured": null,
+  "synthetic": true,
+  "note": "SYNTHETIC: crafted from the documented /works list shape in spike-0b.md (keyless budget was spent during the spike); not a recorded response."
+ },
+ "request": {
+  "url": "https://api.openalex.org/works?search=attention+is+all+you+need&filter=publication_year:2017-2017&per_page=2&select=id,doi,display_name,title,publication_year,ids,authorships,primary_location,best_oa_location,open_access,cited_by_count,is_retracted,abstract_inverted_index,type",
+  "accept": null
+ },
+ "status": 200,
+ "headers": {
+  "content-type": "application/json"
+ },
+ "body": {
+  "meta": {
+   "count": 290,
+   "db_response_time_ms": 12,
+   "page": 1,
+   "per_page": 2,
+   "groups_count": null
+  },
+  "results": [
+   {
+    "id": "https://openalex.org/W2626778328",
+    "doi": "https://doi.org/10.48550/arxiv.1706.03762",
+    "display_name": "Attention Is All You Need",
+    "title": "Attention Is All You Need",
+    "publication_year": 2017,
+    "ids": {
+     "openalex": "https://openalex.org/W2626778328"
+    },
+    "authorships": [
+     {
+      "author_position": "first",
+      "author": {
+       "id": "https://openalex.org/A1",
+       "display_name": "Ashish Vaswani"
+      }
+     },
+     {
+      "author_position": "middle",
+      "author": {
+       "id": "https://openalex.org/A2",
+       "display_name": "Noam Shazeer"
+      }
+     },
+     {
+      "author_position": "middle",
+      "author": {
+       "id": "https://openalex.org/A3",
+       "display_name": "Niki Parmar"
+      }
+     }
+    ],
+    "primary_location": {
+     "source": {
+      "display_name": "arXiv (Cornell University)"
+     }
+    },
+    "best_oa_location": {
+     "pdf_url": "https://arxiv.org/pdf/1706.03762",
+     "landing_page_url": null
+    },
+    "open_access": {
+     "is_oa": true,
+     "oa_status": "green",
+     "oa_url": "https://arxiv.org/pdf/1706.03762"
+    },
+    "cited_by_count": 151778,
+    "is_retracted": false,
+    "abstract_inverted_index": {
+     "The": [
+      0
+     ],
+     "dominant": [
+      1
+     ],
+     "sequence": [
+      2
+     ],
+     "models": [
+      3
+     ]
+    },
+    "type": "article"
+   },
+   {
+    "id": "https://openalex.org/W2963403868",
+    "doi": null,
+    "display_name": "Attention is All you Need",
+    "title": "Attention is All you Need",
+    "publication_year": 2017,
+    "ids": {
+     "openalex": "https://openalex.org/W2963403868"
+    },
+    "authorships": [
+     {
+      "author_position": "first",
+      "author": {
+       "id": "https://openalex.org/A1",
+       "display_name": "Ashish Vaswani"
+      }
+     }
+    ],
+    "primary_location": {
+     "source": {
+      "display_name": "Neural Information Processing Systems"
+     }
+    },
+    "best_oa_location": null,
+    "open_access": {
+     "is_oa": false,
+     "oa_status": "closed",
+     "oa_url": null
+    },
+    "cited_by_count": 4210,
+    "is_retracted": false,
+    "abstract_inverted_index": null,
+    "type": "article"
+   }
+  ],
+  "group_by": []
+ }
+}
