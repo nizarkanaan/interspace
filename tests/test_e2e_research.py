@@ -345,7 +345,7 @@ class ResearchEndToEnd(unittest.TestCase):
         self.research_scenarios()
         default = self.call('scope_default', {'project_id': None, 'kind': 'research'})['scope']
         self.assertEqual(default['projects'], [])
-        self.assertEqual(default['research']['sources'], {name: 'allow' for name in research.SOURCES})
+        self.assertEqual(default['research']['sources'], dict({name: 'allow' for name in research.SOURCES}, fulltext='ask'))
         task_id = self.call('agent_create', {'project_id': None, 'kind': 'research', 'title': 'Related work'})['task_id']
         self.approve_scope(task_id)
         self.call('agent_message', {'task_id': task_id, 'text': 'Related work on transformer attention.'})
@@ -583,7 +583,7 @@ class ResearchEndToEnd(unittest.TestCase):
         project_id = self.call('add_project', {'path': str(repo)})['project_id']
         task_id = self.call('agent_create', {'project_id': project_id, 'title': 'Print 2'})['task_id']
         scope = self.call('scope_get', {'task_id': task_id})['scope']
-        self.assertEqual(scope['research']['sources'], {name: 'allow' for name in research.SOURCES})
+        self.assertEqual(scope['research']['sources'], dict({name: 'allow' for name in research.SOURCES}, fulltext='ask'))
         self.approve_scope(task_id)
         self.call('agent_message', {'task_id': task_id, 'text': 'Make main.py print 2; cite the method.'})
         wait_for(lambda: self.events(task_id, 'team_proposed'), timeout=30, message='team proposed')

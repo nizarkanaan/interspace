@@ -14,7 +14,8 @@ KEYCHAIN_OPS = ('read', 'write', 'delete')
 KEYCHAIN_TIMEOUT_S = 10
 SAVE_PANEL_TIMEOUT_S = 600  # The user is choosing a place to save.
 MAX_NAME = 255
-REPLY_TYPES = {'keychain_reply': 'kc-', 'save_panel_reply': 'sp-'}
+REPLY_TYPES = {'keychain_reply': 'kc-', 'save_panel_reply': 'sp-', 'pdf_text_reply': 'pt-'}
+PDF_TEXT_TIMEOUT_S = 60
 
 
 class Bridge:
@@ -24,6 +25,7 @@ class Bridge:
         self._pending = {}  # id -> [threading.Event, reply or None]
         self._keychain = False
         self._save_panel = False
+        self._pdf_text = False
 
     @property
     def ready(self):
@@ -39,6 +41,7 @@ class Bridge:
             with self._lock:
                 self._keychain = message.get('keychain') == 1
                 self._save_panel = message.get('save_panel') == 1
+                self._pdf_text = message.get('pdf_text') == 1
             return
         prefix = REPLY_TYPES.get(kind)
         identity = message.get('id')
@@ -76,10 +79,19 @@ class Bridge:
                    'path': path}
         return self._exchange(message, timeout_s)
 
+    def pdf_text(self, path, timeout_s=PDF_TEXT_TIMEOUT_S):
+        """Asks Swift's PDFKit for the text of the PDF at `path` (inside app data; Swift checks). The reply, or None
+        when the app window has no PDF reader (2026-11-20-claim-fulltext-design.md)."""
+        if not isinstance(path, str) or not path.startswith('/'):
+            raise ValueError('Unsupported PDF request.')
+        if not self._pdf_text:
+            return None
+        return self._exchange({'type': 'pdf_text', 'id': 'pt-' + uuid.uuid4().hex, 'path': path}, timeout_s)
+
     def close(self):
         """Shutdown: forget the handshake and release every waiting request with no reply."""
         with self._lock:
-            self._keychain = self._save_panel = False
+            self._keychain = self._save_panel = self._pdf_text = False
             pending, self._pending = self._pending, {}
         for slot in pending.values():
             slot[0].set()

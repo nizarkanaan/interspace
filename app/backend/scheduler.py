@@ -26,6 +26,8 @@ import orchestrator
 import tasks as task_rows
 from research import corpus as research_corpus
 from research import claims as research_claims
+from research import fulltext as research_fulltext
+from research import evidence as research_evidence
 
 from timeutil import iso_time
 
@@ -55,7 +57,7 @@ IDENTIFIER = re.compile(r'^[A-Za-z0-9_-]{1,128}$')
 BLOB_ID = re.compile(r'^[0-9a-f]{32}$')
 MAX_RESEARCH_RESULT_BYTES = 64 * 1024  # research/tools.md: a result is cut to 64 KB of JSON, flagged `truncated`.
 RESEARCH_USAGE_INTERVAL_S = 1.0  # research/tasks.md: `research_usage` at most once per second while calls happen.
-OUTPUT_NAMES = (('report.md', 'report'), ('references.bib', 'bibtex'))
+OUTPUT_NAMES = (('report.md', 'report'), ('references.bib', 'bibtex'), ('evidence.csv', 'table'))
 MAX_SAVED_REPORT = 400000  # save_report: characters of Markdown.
 RESEARCH_LISTS = ('papers', 'entries', 'references')  # The list a too-large research result is shortened by.
 
@@ -566,6 +568,7 @@ class RunContext:
             if self.research_only:
                 found.append(mcp_bridge.CORPUS_TOOL)
                 found += list(mcp_bridge.CLAIM_TOOLS)
+                found += list(mcp_bridge.TABLE_TOOLS)
                 if self._run.orchestrates:
                     found.append(mcp_bridge.SAVE_REPORT_TOOL)
         return copy.deepcopy(found)
@@ -684,7 +687,7 @@ class Scheduler:
     def __init__(self, *, max_running, runtime_factory, policy, audit, events, budget_gate, locks, clock,
                  tasks, workspaces=None, interrupt_grace_s=INTERRUPT_GRACE_S,
                  monotonic=time.monotonic, tick_s=0.5, decide_options=None, research_dispatch=None, scratch_root=None,
-                 research_usage_interval_s=RESEARCH_USAGE_INTERVAL_S):
+                 research_usage_interval_s=RESEARCH_USAGE_INTERVAL_S, fulltext=None):
         self.max_running = validate_max_running(max_running)
         self.runtime_factory = runtime_factory
         self.policy = policy
@@ -705,6 +708,8 @@ class Scheduler:
         # `<storage>/research-runs`: tasks without a project run in `<scratch_root>/<task_id>/` (research/tasks.md).
         self.scratch_root = Path(scratch_root) if scratch_root is not None else None
         self.research_usage_interval_s = research_usage_interval_s
+        # fulltext(call, paper, folder) -> (text, error): a paper's open-access text for the claim check, or None.
+        self.fulltext = fulltext
         self._usage_last = {}
         self._usage_timers = {}
         self._bibtex = {}  # Root task ID -> {identifier: BibTeX} from `research_bibtex` results this app run.
@@ -1490,8 +1495,10 @@ class Scheduler:
         try:
             if name == 'research_corpus':
                 payload = self._corpus_read(run, arguments)  # Interspace's own list: no source, no request.
+            elif name in ('table_pending', 'record_table_cells'):
+                payload = self._table_tool(run, name, arguments, call)  # The task's own evidence table.
             elif name in ('claims_pending', 'record_claim_support'):
-                payload = self._claims_tool(run, name, arguments)  # The task's own claims file: no source, no request.
+                payload = self._claims_tool(run, name, arguments, call)  # The task's own claims file.
             elif name == 'save_report':
                 payload = self._save_report(run, arguments)  # Into app data only: no source, no request.
             elif self.research_dispatch is None:
@@ -1744,7 +1751,36 @@ class Scheduler:
         path.parent.mkdir(parents=True, exist_ok=True)
         _write_file(path, json.dumps(value, ensure_ascii=False, separators=(',', ':')))
 
-    def _claims_tool(self, run, name, arguments):
+    def _claims_with_fulltext(self, run, root, ids, todo, call):
+        """Fetch full text for the batch's papers outside the lock (it may wait on an ask), then hand out the batch
+        with each claim's best passages (2026-11-20-claim-fulltext-design.md)."""
+        texts = {}
+        folder = Path(self.events.root) / root['id'] / 'fulltext'
+        for claim in todo:
+            key = research_fulltext.cache_key(claim['paper'])
+            if key in texts:
+                continue
+            if self.fulltext is None or call is None:
+                texts[key] = (None, 'Full text is not available in this build.')
+                continue
+            try:
+                texts[key] = self.fulltext(call, claim['paper'], folder)
+            except Exception:
+                texts[key] = (None, 'The full text could not be read.')
+        with self.lock:
+            value = self._claims_load(root['id'])
+            if value is None:
+                raise ValueError('No claim check has started. The user starts one with Check claims.')
+            at = iso_time(self.clock())
+            for claim in value['claims']:
+                if claim['id'] in ids and claim.get('status') == 'pending' and not claim.get('fulltext_tried'):
+                    text, error = texts.get(research_fulltext.cache_key(claim.get('paper') or {}), (None, None))
+                    research_claims.attach(claim, text, error, at)
+            self._claims_save(root['id'], value)
+            out = research_claims.pending(value, ids=ids)
+        return out
+
+    def _claims_tool(self, run, name, arguments, call=None):
         arguments = arguments if isinstance(arguments, dict) else {}
         with self.lock:
             task = self._task(run.task_id)
@@ -1757,7 +1793,14 @@ class Scheduler:
                     raise ValueError('claims_pending takes only limit.')
                 if value is None:
                     raise ValueError('No claim check has started. The user starts one with Check claims.')
-                return research_claims.pending(value, arguments.get('limit', research_claims.MAX_BATCH))
+                ids = research_claims.next_ids(value, arguments.get('limit', research_claims.MAX_BATCH))
+                todo = [copy.deepcopy(c) for c in value['claims']
+                        if c['id'] in ids and not c.get('fulltext_tried')
+                        and ((c.get('paper') or {}).get('arxiv_id') or (c.get('paper') or {}).get('oa_url'))]
+        if name == 'claims_pending':
+            return self._claims_with_fulltext(run, root, ids, todo, call)
+        with self.lock:
+            value = self._claims_load(root['id'])
             if set(arguments) != {'results'}:
                 raise ValueError('record_claim_support takes only results.')
             by = (run.provider or 'agent') + ' ' + (self._member(task) or 'agent')
@@ -1768,6 +1811,129 @@ class Scheduler:
         if out['recorded']:
             self.events.append(root['id'], root['agent'].get('project_id'), 'claims', out['counts'])
         return out
+
+    # -- evidence table (docs/superpowers/specs/2026-11-20-evidence-table-design.md) ---------------------------
+
+    def _table_path(self, root_id):
+        return Path(self.events.root) / root_id / 'evidence.json'
+
+    def _table_load(self, root_id):
+        path = self._table_path(root_id)
+        try:
+            value = None if path.is_symlink() else json.loads(path.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            return None
+        return value if isinstance(value, dict) and value.get('v') == research_evidence.V else None
+
+    def _table_save(self, root_id, value):
+        path = self._table_path(root_id)
+        if path.is_symlink():
+            raise ValueError('The evidence table file was changed.')
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _write_file(path, json.dumps(value, ensure_ascii=False, separators=(',', ':')))
+
+    def _research_root(self, task_id):
+        task = self.store.task(task_id)
+        if not task_rows.is_research(task) or task.get('parent_task_id'):
+            raise ValueError('Only research tasks have an evidence table.')
+        return task
+
+    def table_start(self, task_id, columns, rows):
+        """`table_start`: a new evidence table over the cited or the checked papers, replacing any earlier one."""
+        cols = research_evidence.columns(columns)
+        with self.lock:
+            task = self._research_root(task_id)
+            if (task.get('agent') or {}).get('state') in ('queued', 'starting', 'running', 'waiting_lock', 'cancelling'):
+                raise ValueError('Wait for the task to finish before filling the evidence table.')
+            try:
+                report = self._report_text(task_id)
+            except ValueError:
+                report = None
+            papers = research_evidence.rows_from(rows, report, self._corpus_load(task))
+            value = research_evidence.start(cols, papers, iso_time(self.clock()))
+            self._table_save(task_id, value)
+            counts = research_evidence.counts(value)
+        self.events.append(task_id, None, 'evidence', counts)
+        return research_evidence.public(value)
+
+    def table(self, task_id):
+        with self.lock:
+            self._research_root(task_id)
+            return research_evidence.public(self._table_load(task_id))
+
+    def table_resolve(self, task_id, row, column, value):
+        with self.lock:
+            self._research_root(task_id)
+            table = self._table_load(task_id)
+            if table is None:
+                raise ValueError('There is no evidence table yet.')
+            research_evidence.resolve(table, row, column, value, iso_time(self.clock()))
+            self._table_save(task_id, table)
+            counts = research_evidence.counts(table)
+        self.events.append(task_id, None, 'evidence', counts)
+        return research_evidence.public(table)
+
+    def table_export(self, task_id):
+        """Write outputs/evidence.csv from the table's final values."""
+        with self.lock:
+            self._research_root(task_id)
+            table = self._table_load(task_id)
+            if table is None:
+                raise ValueError('There is no evidence table yet.')
+            folder = Path(self.events.root) / task_id / 'outputs'
+            if folder.is_symlink():
+                raise ValueError('The outputs folder was changed.')
+            folder.mkdir(parents=True, exist_ok=True)
+            _write_file(folder / 'evidence.csv', research_evidence.to_csv(table))
+            outputs = list_outputs(folder)
+        self.events.append(task_id, None, 'outputs',
+                           {'outputs': [{k: o[k] for k in ('name', 'kind', 'bytes')} for o in outputs]})
+        return {'name': 'evidence.csv'}
+
+    def _table_tool(self, run, name, arguments, call=None):
+        arguments = arguments if isinstance(arguments, dict) else {}
+        provider = getattr(run, 'provider', None) or 'agent'
+        with self.lock:
+            task = self._task(run.task_id)
+            root = self._root(task)
+            if not task_rows.is_research(root):
+                raise ValueError('Only research tasks have an evidence table.')
+            table = self._table_load(root['id'])
+            if table is None:
+                raise ValueError('There is no evidence table yet. The user starts one in the Evidence tab.')
+            if name == 'table_pending':
+                if set(arguments) - {'limit'}:
+                    raise ValueError('table_pending takes only limit.')
+                ids = research_evidence.pending_rows(table, provider, arguments.get('limit', research_evidence.MAX_BATCH))
+                todo = [copy.deepcopy(r) for r in table['rows'] if r['id'] in ids and not r.get('fulltext_tried')]
+            else:
+                if set(arguments) != {'results'}:
+                    raise ValueError('record_table_cells takes only results.')
+                out = research_evidence.record(table, provider, arguments['results'], iso_time(self.clock()))
+                if out['recorded']:
+                    self._table_save(root['id'], table)
+        if name == 'record_table_cells':
+            if out['recorded']:
+                self.events.append(root['id'], root['agent'].get('project_id'), 'evidence', out['counts'])
+            return out
+        texts = {}
+        folder = Path(self.events.root) / root['id'] / 'fulltext'
+        for row in todo:
+            paper = row['paper']
+            if not (paper.get('arxiv_id') or paper.get('oa_url')) or self.fulltext is None or call is None:
+                texts[row['id']] = None
+                continue
+            try:
+                texts[row['id']] = self.fulltext(call, paper, folder)[0]
+            except Exception:
+                texts[row['id']] = None
+        with self.lock:
+            table = self._table_load(root['id'])
+            for row in table['rows']:
+                if row['id'] in ids and not row.get('fulltext_tried'):
+                    research_evidence.attach(row, texts.get(row['id']), table['columns'])
+            self._table_save(root['id'], table)
+            return research_evidence.pending(table, provider, ids)
 
     def corpus(self, task_id):
         """`task_corpus`: the research task's corpus, rebuilt from its saved events the first time."""

@@ -158,7 +158,8 @@ class ToolListTests(ResearchCase):
         self.run_task()
         names, access, workspaces, primary, scratch, research_only = seen['parent']
         self.assertEqual(names, ['propose_team', 'team_status', 'wait_for', 'message_member']
-                         + list(mcp_bridge.RESEARCH_TOOL_NAMES) + ['research_corpus', 'claims_pending', 'record_claim_support', 'save_report'])
+                         + list(mcp_bridge.RESEARCH_TOOL_NAMES) + ['research_corpus', 'claims_pending', 'record_claim_support',
+                                                                   'table_pending', 'record_table_cells', 'save_report'])
         self.assertEqual((access, workspaces, research_only), ('read', {}, True))
         self.assertEqual(primary, str(self.root / 'research-runs' / 'r1'))
         self.assertEqual(scratch, primary)
@@ -619,12 +620,60 @@ class ClaimCheckTests(ResearchCase):
         before = len(self.results)
         self.run_task(text='Check the claims in the saved report.')
         pending, recorded = self.results[before], self.results[before + 1]
-        self.assertEqual(pending['claims'][0]['source']['abstract'], 'Deep learning has dramatically improved speech recognition.')
+        self.assertEqual(pending['claims'][0]['source']['text'], 'Deep learning has dramatically improved speech recognition.')
         self.assertEqual((recorded['recorded'], recorded['counts']['supported']), (1, 1))
         [claim] = self.sched.claims('r1')['claims']
         self.assertEqual((claim['verdict'], claim['by']), ('supported', 'claude Orchestrator'))
         self.assertNotIn('source', claim)
         self.assertEqual(self.events_of('r1', 'claims')[-1]['data']['supported'], 1)
+
+    def test_full_text_is_fetched_after_permission_and_judged_from_its_passages(self):
+        body = ('Methods. We trained deep networks on large speech corpora.\n\nResults. Word error rates fell by '
+                'a third once deep networks replaced older acoustic models.')
+        seen = []
+
+        def fulltext(call, paper, folder):
+            seen.append(call.authorize({'category': 'research', 'source': 'fulltext', 'tool': call.tool})['decision'])
+            return body, None
+        self.make(answering(self.results, [('research_search', {'query': 'deep learning'}), saving(self.REPORT)]))
+        self.sched.fulltext = fulltext
+        self.store.add_research_task('r1', sources={'crossref': 'allow', 'arxiv': 'allow', 'fulltext': 'allow'})
+        self.run_task()
+        path = self.root / 'tasks' / 'r1' / 'corpus.json'
+        corpus = json.loads(path.read_text())
+        corpus['papers'][0]['paper'].update(abstract=None, oa_url='https://example.org/lecun.pdf')
+        path.write_text(json.dumps(corpus))
+        started = self.sched.claims_start('r1')
+        self.assertEqual(started['counts']['pending'], 1)  # No abstract, but an open-access copy: still pending.
+        self.parent_runtime.script = answering(self.results, [
+            ('claims_pending', {}),
+            ('record_claim_support', {'results': [{'id': '1:1', 'verdict': 'supported', 'reason': 'Results section.',
+                                                   'quote': 'Word error rates fell by a third'}]})])
+        before = len(self.results)
+        self.run_task(text='Check the claims in the saved report.')
+        pending, recorded = self.results[before], self.results[before + 1]
+        self.assertEqual(seen, ['allow'])
+        self.assertEqual(pending['claims'][0]['source']['kind'], 'full text')
+        self.assertIn('Word error rates fell by a third', pending['claims'][0]['source']['text'])
+        self.assertEqual(recorded['recorded'], 1)
+        self.assertEqual(self.sched.claims('r1')['claims'][0]['source_kind'], 'full text')
+
+    def test_without_full_text_permission_a_claim_with_no_abstract_is_cannot_tell(self):
+        self.make(answering(self.results, [('research_search', {'query': 'deep learning'}), saving(self.REPORT)]))
+        self.sched.fulltext = lambda call, paper, folder: (None, "Open-access full text is not allowed by this task's scope.")
+        self.store.add_research_task('r1')
+        self.run_task()
+        path = self.root / 'tasks' / 'r1' / 'corpus.json'
+        corpus = json.loads(path.read_text())
+        corpus['papers'][0]['paper'].update(abstract=None, oa_url='https://example.org/lecun.pdf')
+        path.write_text(json.dumps(corpus))
+        self.sched.claims_start('r1')
+        self.parent_runtime.script = answering(self.results, [('claims_pending', {})])
+        self.run_task(text='Check the claims in the saved report.')
+        self.assertEqual(self.results[-1]['claims'], [])
+        [claim] = self.sched.claims('r1')['claims']
+        self.assertEqual((claim['verdict'], claim['reason']),
+                         ('cannot_tell', "Open-access full text is not allowed by this task's scope."))
 
     def test_no_report_or_no_citations_and_project_tasks_are_refused(self):
         self.make(answering(self.results, [saving(GOOD_REPORT.replace(' [1]', ''))]))
@@ -640,6 +689,56 @@ class ClaimCheckTests(ResearchCase):
         task = self.store.add_task('t1', 'p1')
         with self.assertRaisesRegex(ValueError, 'Only research tasks'):
             self.sched.claims_start('t1')
+
+
+
+class EvidenceTableTests(ResearchCase):
+    """The two-agent evidence table (docs/superpowers/specs/2026-11-20-evidence-table-design.md)."""
+    COLUMNS = [{'name': 'Study design', 'instruction': 'The kind of study.'}]
+
+    def test_two_providers_fill_independently_and_the_csv_is_an_output(self):
+        self.make(answering(self.results, [('research_search', {'query': 'deep learning'}), saving(GOOD_REPORT)]))
+        self.store.add_research_task('r1')
+        self.run_task()
+        path = self.root / 'tasks' / 'r1' / 'corpus.json'
+        corpus = json.loads(path.read_text())
+        corpus['papers'][0]['paper']['abstract'] = 'A review article surveying deep learning methods.'
+        path.write_text(json.dumps(corpus))
+        started = self.sched.table_start('r1', self.COLUMNS, 'cited')
+        self.assertEqual([r['paper']['title'] for r in started['table']['rows']], ['Deep learning'])
+        self.assertEqual(self.events_of('r1', 'evidence')[-1]['data']['waiting'], 1)
+        for provider, value in (('claude', 'Review'), ('codex', 'Survey article')):
+            self.parent_runtime.name = provider
+            self.parent_runtime.script = answering(self.results, [
+                ('table_pending', {}),
+                ('record_table_cells', {'results': [{'row': 'r1', 'column': 'study-design', 'value': value,
+                                                     'quote': 'A review article'}]}),
+                ('table_pending', {})])
+            before = len(self.results)
+            self.run_task(text='Fill the evidence table.')
+            first, recorded, after = self.results[before:before + 3]
+            self.assertEqual(first['rows'][0]['source']['text'], 'A review article surveying deep learning methods.')
+            self.assertEqual(recorded['recorded'], 1)
+            self.assertEqual(after['rows'], [])  # Nothing left for this provider.
+        cell = self.sched.table('r1')['table']['rows'][0]['cells']['study-design']
+        self.assertEqual((sorted(cell['values']), cell['status']), (['claude', 'codex'], 'disagree'))
+        self.sched.table_resolve('r1', 'r1', 'study-design', 'Review')
+        self.assertEqual(self.sched.table_export('r1'), {'name': 'evidence.csv'})
+        self.assertIn('Deep learning (2015),Review,resolved', (self.root / 'tasks' / 'r1' / 'outputs' / 'evidence.csv').read_text())
+        self.assertIn('evidence.csv', [o['name'] for o in self.events_of('r1', 'outputs')[-1]['data']['outputs']])
+
+    def test_refusals(self):
+        self.make(answering(self.results, [('table_pending', {})]))
+        self.store.add_research_task('r1')
+        with self.assertRaisesRegex(ValueError, 'Save a report first'):
+            self.sched.table_start('r1', self.COLUMNS, 'cited')
+        with self.assertRaisesRegex(ValueError, 'Choose 1 to 10 columns'):
+            self.sched.table_start('r1', [], 'cited')
+        self.run_task()
+        self.assertIn('There is no evidence table yet', self.results[-1]['error']['message'])
+        self.store.add_task('t1', 'p1')
+        with self.assertRaisesRegex(ValueError, 'Only research tasks'):
+            self.sched.table('t1')
 
 
 if __name__ == '__main__':

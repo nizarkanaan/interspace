@@ -128,7 +128,7 @@ function claimList(container,box,claims){
   const li=el('li','claim-item is-'+c.verdict,null,ol);
   el('span','claim-verdict',WORD[c.verdict],li);
   el('p','claim-sentence',c.sentence,li);
-  el('p','footnote','Source ['+c.n+']: '+(c.reference||''),li);
+  el('p','footnote','Source ['+c.n+']: '+(c.reference||'')+(c.source_kind==='full text'?' · Judged from the full text':c.source_kind==='abstract'?' · Judged from the abstract':''),li);
   if(c.reason)el('p','claim-reason',c.reason,li);
   if(c.quote)el('blockquote','claim-quote',c.quote,li);
   const go=el('a','report-back','Show in text',li);go.href='#';go.onclick=e=>{e.preventDefault();const a=box.querySelector('[data-claim="'+c.id+'"]');if(a){a.scrollIntoView({block:'center'});a.focus();}};

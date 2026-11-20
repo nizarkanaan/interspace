@@ -33,7 +33,7 @@ APP_METHODS = ('state', 'connection', 'cancel', 'sign_in', 'switch_project', 'se
 EXTENSIONS = ('providers_api', 'orchestrator', 'worktree_merge', 'research_api', 'outputs_api', 'display', 'tasks_api')
 # Messages only the Swift shell sends to the backend (research/credentials.md). They never come from the WebView:
 # Swift drops these types from the UI. They go to the optional `bridge` module, never to the request handlers.
-BRIDGE_TYPES = ('bridge_hello', 'keychain_reply', 'save_panel_reply')
+BRIDGE_TYPES = ('bridge_hello', 'keychain_reply', 'save_panel_reply', 'pdf_text_reply')
 STATE_PUBLISH_INTERVAL_S = 0.25  # At most 4 coarse state updates per second (scheduler.md).
 
 
@@ -295,7 +295,7 @@ class Application:
             audit=self.audit, events=self.events, budget_gate=scheduler.BudgetGate(self.store), locks=self.locks,
             clock=time.time, tasks=self.store, workspaces=scheduler.Workspaces(self.storage/'workspaces'),
             interrupt_grace_s=interrupt_grace_s, decide_options={'app_data':str(self.storage)},
-            research_dispatch=self.research_dispatch, scratch_root=self.storage/'research-runs')
+            research_dispatch=self.research_dispatch, scratch_root=self.storage/'research-runs', fulltext=self.fulltext_text)
 
     def research_dispatch(self, ctx, name, arguments):
         """One research tool call through stream 1B's `research.dispatch(app, ctx, name, arguments)`."""
@@ -303,6 +303,17 @@ class Application:
         if not callable(dispatch):
             raise ValueError('Research sources are not in this build yet.')
         return dispatch(self, ctx, name, arguments)
+
+    def fulltext_text(self, call, paper, folder):
+        """A paper's open-access text for the claim check (2026-11-20-claim-fulltext-design.md): (text, error)."""
+        module = optional_module('research')
+        if module is None:
+            return None, 'Full text is not available in this build.'
+        sources = getattr(module, 'sources', None)
+        if callable(sources):
+            sources(self)  # Builds `self.http`, the research client, once.
+        from research import fulltext
+        return fulltext.text_for(self, call, paper, folder)
 
     def research_sources_usable(self):
         """{source: usable} for new scopes (research/tasks.md): usable means configured or not required. None when

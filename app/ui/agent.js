@@ -105,6 +105,7 @@ function renderAgent(){
  $('agent-note').textContent=reason||'Enter sends · Shift+Enter adds a line · / for commands · @ to mention';
  if(tab==='corpus')corpusArea(id);
  if(tab==='report')reportArea(id);
+ if(tab==='evidence')evidenceArea(id);
 }
 // A task's outputs (report and BibTeX), from its latest `outputs` event.
 function outputsArea(id){
@@ -131,26 +132,55 @@ function layoutTabs(id){
   const info=scopeInfo(id),waiting=!!info.scope&&!Scope.approved(info);
   if(tab==='conversation'||tab==='report'&&!report)tab=waiting?'details':report?'report':'corpus';
  }else{
-  if(tab==='corpus'&&!root||tab==='details'&&!narrow)tab='conversation';
+  if((tab==='corpus'||tab==='evidence')&&!root||tab==='details'&&!narrow)tab='conversation';
   if(tab==='report'&&!report)tab='conversation';
  }
- const shown={conversation:!split,report,corpus:root,details:split||narrow};
+ const shown={conversation:!split,report,corpus:root,evidence:root,details:split||narrow};
  for(const b of nav.querySelectorAll('[data-agent-tab]')){b.hidden=!shown[b.dataset.agentTab];b.setAttribute('aria-pressed',String(b.dataset.agentTab===tab));}
  nav.querySelector('[data-agent-tab=details]').textContent=split?'Scope and outputs':'Details';
  nav.hidden=Object.values(shown).filter(Boolean).length<2;
- $('agent-corpus').hidden=tab!=='corpus';$('agent-report').hidden=tab!=='report';$('agent-details').hidden=(split||narrow)&&tab!=='details';
+ $('agent-corpus').hidden=tab!=='corpus';$('agent-evidence').hidden=tab!=='evidence';$('agent-report').hidden=tab!=='report';$('agent-details').hidden=(split||narrow)&&tab!=='details';
  topbar(id,split);
  return {tab,talk:split||tab==='conversation',split};
 }
 // Moves the result sections between the side-panel layout and the split reader's results column.
 let placed=false;
+// Resizable split (2026-11-20): drag the divider, use the arrow keys on it, or double-click to reset. The width is a
+// per-viewer convenience kept in localStorage, which can be unavailable; the default then applies.
+const SPLIT_DEFAULT=420,SPLIT_MIN=300,RESULTS_MIN=420,SPLIT_STEP=24;
+function splitLimits(){const w=document.querySelector('#agent-view .agent-layout')?.getBoundingClientRect().width||innerWidth;return [SPLIT_MIN,Math.max(SPLIT_MIN,w-RESULTS_MIN)];}
+function splitWidth(next){
+ let px=next;if(px==null){try{px=Number(localStorage.getItem('interspace.splitWidth'))||SPLIT_DEFAULT;}catch{px=SPLIT_DEFAULT;}}
+ const [lo,hi]=splitLimits();px=Math.round(Math.min(hi,Math.max(lo,px)));
+ $('agent-view').style.setProperty('--chat-width',px+'px');
+ const h=$('split-handle');h.setAttribute('aria-valuemin',String(lo));h.setAttribute('aria-valuemax',String(hi));h.setAttribute('aria-valuenow',String(px));h.setAttribute('aria-valuetext',px+' pixels wide');
+ if(next!=null){try{localStorage.setItem('interspace.splitWidth',String(px));}catch{}}
+ return px;
+}
+function splitHandle(){
+ const h=$('split-handle'),now=()=>Number(h.getAttribute('aria-valuenow'))||SPLIT_DEFAULT;
+ h.addEventListener('pointerdown',e=>{
+  if(e.button!==0)return;e.preventDefault();h.setPointerCapture(e.pointerId);document.body.classList.add('resizing');
+  const left=document.querySelector('#agent-view .agent-layout').getBoundingClientRect().left;
+  const move=ev=>splitWidth(ev.clientX-left);
+  const up=()=>{h.removeEventListener('pointermove',move);h.removeEventListener('pointerup',up);h.removeEventListener('pointercancel',up);document.body.classList.remove('resizing');};
+  h.addEventListener('pointermove',move);h.addEventListener('pointerup',up);h.addEventListener('pointercancel',up);
+ });
+ h.addEventListener('dblclick',()=>{try{localStorage.removeItem('interspace.splitWidth');}catch{}splitWidth(SPLIT_DEFAULT);try{localStorage.removeItem('interspace.splitWidth');}catch{}});
+ h.addEventListener('keydown',e=>{
+  const [lo,hi]=splitLimits(),map={ArrowLeft:now()-SPLIT_STEP,ArrowRight:now()+SPLIT_STEP,Home:lo,End:hi};
+  if(e.key in map){e.preventDefault();splitWidth(map[e.key]);}
+  else if(e.key==='Enter'){e.preventDefault();splitWidth(SPLIT_DEFAULT);try{localStorage.removeItem('interspace.splitWidth');}catch{}}
+ });
+ addEventListener('resize',()=>{if(placed)splitWidth(now());});
+}
 function place(split){
  if(split===placed)return;placed=split;
  const main=document.querySelector('#agent-view .agent-main'),results=$('agent-results'),layout=document.querySelector('#agent-view .agent-layout');
- const parts=['agent-tabs','agent-scope-editor','agent-report','agent-corpus','agent-details'].map(x=>$(x));
- $('agent-view').classList.toggle('split',split);results.hidden=!split;$('agent-topbar').hidden=!split;
+ const parts=['agent-tabs','agent-scope-editor','agent-report','agent-corpus','agent-evidence','agent-details'].map(x=>$(x));
+ $('agent-view').classList.toggle('split',split);results.hidden=!split;$('agent-topbar').hidden=!split;$('split-handle').hidden=!split;if(split)splitWidth(null);
  if(split){$('agent-topbar').prepend($('agent-back'));results.append(...parts);}
- else{main.prepend($('agent-back'));$('agent-back').after($('agent-tabs'));$('agent-scope-note').after($('agent-scope-editor'));$('agent-stream').before($('agent-report'),$('agent-corpus'));layout.append($('agent-details'));}
+ else{main.prepend($('agent-back'));$('agent-back').after($('agent-tabs'));$('agent-scope-note').after($('agent-scope-editor'));$('agent-stream').before($('agent-report'),$('agent-corpus'),$('agent-evidence'));layout.append($('agent-details'));}
 }
 function topbar(id,split){
  if(!split)return;
@@ -193,6 +223,22 @@ function reportArea(id){
     .catch(e=>{r.checkError=e.message||'The claim check could not start.';}).finally(()=>{r.checking=false;r.rev++;refresh();});},
   onSave:()=>{r.saving=true;r.note='';r.saveError='';r.rev++;refresh();host.request('task_output_save',{task_id:id,name:'report.md'},{manual:true}).then(x=>{r.note=x?.saved?'Saved.':'Not saved.';}).catch(e=>{r.saveError=e.message||'The report was not saved.';}).finally(()=>{r.saving=false;r.rev++;refresh();});}});
  if(keep){const again=document.getElementById(keep);if(again)again.focus();}
+}
+// Evidence tab (2026-11-20-evidence-table-design.md): loaded when opened and again after each `evidence` event.
+const tables=new Map();
+function evidenceArea(id){
+ if(!tables.has(id))tables.set(id,{data:null,loading:false,error:'',note:'',seen:null,busy:false,rev:0,ui:{}});
+ const t=tables.get(id),ev=JSON.stringify(S.evidence(id));
+ const load=()=>{t.loading=true;host.request('task_table',{task_id:id},{manual:true}).then(x=>{t.data=x;t.error='';}).catch(e=>{t.error=e.message;}).finally(()=>{t.loading=false;t.rev++;refresh();});};
+ if(t.seen!==ev&&!t.loading){t.seen=ev;load();}
+ const busy=['queued','starting','running','waiting_lock','cancelling'].includes(status(id)?.state);
+ const box=$('agent-evidence'),k=id+':'+t.rev+':'+busy;if(box.dataset.key===k)return;box.dataset.key=k;
+ window.interspaceEvidence.render(box,t.data,t.ui,{busy:t.busy,canFill:!busy,error:t.error,note:t.note,
+  onFill:(columns,rows)=>{t.busy=true;t.error='';t.rev++;refresh();
+   host.request('table_start',{task_id:id,columns,rows},{manual:true}).then(x=>{t.data=x;t.ui.editing=false;const why=gate(id);if(why)throw Error(why);post(id,'Fill the evidence table.');t.note='Asked the Orchestrator to fill the table with Claude and Codex. Approve the team in the conversation.';})
+    .catch(e=>{t.error=e.message||'The table could not start.';}).finally(()=>{t.busy=false;t.rev++;refresh();});},
+  onResolve:(row,column,value)=>{host.request('table_resolve',{task_id:id,row,column,value},{manual:true}).then(x=>{t.data=x;}).catch(e=>{t.error=e.message;}).finally(()=>{t.rev++;refresh();});},
+  onExport:()=>{t.note='';host.request('table_export',{task_id:id},{manual:true}).then(()=>host.request('task_output_save',{task_id:id,name:'evidence.csv'},{manual:true})).then(r=>{t.note=r?.saved?'Saved evidence.csv.':'Not saved.';}).catch(e=>{t.error=e.message;}).finally(()=>{t.rev++;refresh();});}});
 }
 function corpusInfo(id){if(!corpora.has(id))corpora.set(id,{data:null,loading:false,error:'',seen:null,timer:null,ui:{q:'',filter:'all',sort:'found',all:false},rev:0});return corpora.get(id);}
 function loadCorpus(id){
@@ -258,6 +304,7 @@ window.interspaceAgent={
    else if(stuck){let p=nav.previousElementSibling;while(p&&p.hidden)p=p.previousElementSibling;scrollTo(0,p?p.getBoundingClientRect().bottom+scrollY:0);}};
   $('agent-scope-review').onclick=()=>{if(!current)return;if(narrowQuery.matches||placed){tabs.set(current,'details');refresh();}const b=$('agent-scope').querySelector('.primary')||$('agent-scope').querySelector('button');if(b)b.focus();};
   narrowQuery.addEventListener('change',()=>refresh());
+  splitHandle();
   $('agent-stop').onclick=()=>cancel(current);
   $('agent-topbar-stop').onclick=()=>cancel(current);
   $('agent-topbar-scope').onclick=()=>{if(!current)return;tabs.set(current,'details');refresh();$('agent-results').scrollTop=0;};$('agent-back').onclick=()=>host.navigate(current&&isResearch(current)?'research':'tasks');

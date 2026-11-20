@@ -54,7 +54,7 @@ def task_output_read(app, params):
 
 def suggested_name(title, name):
     stem = re.sub(r'[^a-z0-9]+', '-', (title or '').lower()).strip('-')[:60].strip('-') or 'research'
-    return stem + ('.bib' if name.endswith('.bib') else '.md')
+    return stem + ('.bib' if name.endswith('.bib') else '.csv' if name.endswith('.csv') else '.md')
 
 
 def task_output_save(app, params):
@@ -83,4 +83,22 @@ def task_claims(app, params):
     return app.scheduler.claims(params.get('task_id'))
 
 
-METHODS = {'claims_start': claims_start, 'task_claims': task_claims, 'task_corpus': task_corpus, 'task_outputs': task_outputs, 'task_output_read': task_output_read, 'task_output_save': task_output_save}
+def table_start(app, params):
+    """`{task_id, columns, rows}` -> a new evidence table (2026-11-20-evidence-table-design.md)."""
+    return app.scheduler.table_start(params.get('task_id'), params.get('columns'), params.get('rows', 'cited'))
+
+
+def task_table(app, params):
+    return app.scheduler.table(params.get('task_id'))
+
+
+def table_resolve(app, params):
+    return app.scheduler.table_resolve(params.get('task_id'), params.get('row'), params.get('column'), params.get('value'))
+
+
+def table_export(app, params):
+    return app.scheduler.table_export(params.get('task_id'))
+
+
+METHODS = {'table_start': table_start, 'task_table': task_table, 'table_resolve': table_resolve,
+           'table_export': table_export, 'claims_start': claims_start, 'task_claims': task_claims, 'task_corpus': task_corpus, 'task_outputs': task_outputs, 'task_output_read': task_output_read, 'task_output_save': task_output_save}

@@ -1,4 +1,5 @@
 import AppKit
+import PDFKit
 import Security
 import WebKit
 
@@ -20,10 +21,13 @@ let allowedMethods: Set<String> = [
     "task_archive", "task_delete_check", "task_delete",
     // Claim check (2026-11-20-claim-check-design.md)
     "claims_start", "task_claims",
+    // Evidence table (2026-11-20-evidence-table-design.md)
+    "table_start", "task_table", "table_resolve", "table_export",
 ]
 
 /// Lines only Swift and the backend exchange (research/credentials.md). They never reach or come from the WebView.
-let bridgeTypes: Set<String> = ["bridge_hello", "keychain", "keychain_reply", "save_panel", "save_panel_reply"]
+let bridgeTypes: Set<String> = ["bridge_hello", "keychain", "keychain_reply", "save_panel", "save_panel_reply",
+                                  "pdf_text", "pdf_text_reply"]
 
 /// Research API keys and contact emails in the login keychain (research/credentials.md). Only this type calls
 /// Keychain APIs. One generic-password item per account: service `app.interspace.research`, this device only.
@@ -173,7 +177,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         do {
             try process.run(); backend = process
             // The handshake is the first stdin line: the backend sends Keychain and save-panel lines only after it.
-            writeLine(["type": "bridge_hello", "keychain": 1, "save_panel": 1])
+            writeLine(["type": "bridge_hello", "keychain": 1, "save_panel": 1, "pdf_text": 1])
         } catch { deliver(["type": "fatal", "error": "Could not start the local backend. Check Python installation and reopen Interspace."]) }
     }
 
@@ -200,6 +204,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             }
         } else if type == "save_panel" {
             DispatchQueue.main.async { [weak self] in self?.savePanel(message) }
+        } else if type == "pdf_text" {
+            DispatchQueue.global(qos: .utility).async { [weak self] in self?.pdfText(message) }
         }
         // Replies and the handshake only ever go to the backend; one coming from it is dropped.
     }
@@ -212,6 +218,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         guard file.path.hasPrefix(root + "/"),
               (try? file.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else { return nil }
         return file
+    }
+
+    /// The text of one downloaded open-access PDF, read by PDFKit for the claim check
+    /// (docs/superpowers/specs/2026-11-20-claim-fulltext-design.md). Only files inside app data are read; at most 2 MB.
+    func pdfText(_ message: [String: Any]) {
+        guard let id = message["id"] as? String, id.hasPrefix("pt-"), id.count <= 64 else { return }
+        var reply: [String: Any] = ["type": "pdf_text_reply", "id": id, "ok": false]
+        if let path = message["path"] as? String, let file = appDataFile(path), let document = PDFDocument(url: file),
+           let text = document.string {
+            reply["ok"] = true
+            reply["text"] = String(text.prefix(2_000_000))
+        }
+        writeLine(reply)
     }
 
     /// Lets the user save a copy of one task output (research/tasks.md). Only files inside app data can be copied.

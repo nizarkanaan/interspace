@@ -111,7 +111,7 @@ class AmendTests(unittest.TestCase):
 class DefaultTests(unittest.TestCase):
     def test_defaults_allow_every_usable_source(self):
         expected = {'semantic_scholar': 'allow', 'openalex': 'allow', 'arxiv': 'allow', 'crossref': 'allow',
-                    'unpaywall': 'off'}
+                    'unpaywall': 'off', 'fulltext': 'ask'}  # Open-access full text asks first.
         project = scope.project_default('p1', research_sources=USABLE)
         self.assertEqual(project['research'], {'sources': expected})
         task = {'id': 't1', 'token_budget': 1000}

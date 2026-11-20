@@ -155,6 +155,24 @@ CLAIM_TOOLS = (
                  'reason': {'type': 'string', 'minLength': 1, 'maxLength': 300},
                  'quote': {'type': 'string', 'maxLength': 500}}}}}}},
 )
+# The evidence table (2026-11-20-evidence-table-design.md): each extractor fills only its own provider's values.
+TABLE_TOOLS = (
+    {'v': 1, 'name': 'table_pending', 'title': 'Evidence table rows to fill', 'effect': 'read',
+     'description': 'Up to 10 rows of the evidence table that you have not filled yet, with the columns to fill and '
+                    'each row\'s source text (abstract and full-text passages). Use only that text.',
+     'input_schema': {'type': 'object', 'additionalProperties': False, 'properties': {
+         'limit': {'type': 'integer', 'minimum': 1, 'maximum': 10, 'default': 10}}}},
+    {'v': 1, 'name': 'record_table_cells', 'title': 'Record evidence values', 'effect': 'update',
+     'description': 'Record values for evidence-table cells: a short value and a quote copied exactly from the '
+                    'row\'s source text, or the value "Not reported" with no quote. A quote that is not in the source '
+                    'text is rejected.',
+     'input_schema': {'type': 'object', 'required': ['results'], 'additionalProperties': False, 'properties': {
+         'results': {'type': 'array', 'minItems': 1, 'maxItems': 100, 'items': {
+             'type': 'object', 'required': ['row', 'column', 'value'], 'additionalProperties': False, 'properties': {
+                 'row': {'type': 'string', 'maxLength': 10}, 'column': {'type': 'string', 'maxLength': 40},
+                 'value': {'type': 'string', 'minLength': 1, 'maxLength': 300},
+                 'quote': {'type': 'string', 'maxLength': 500}}}}}}},
+)
 # The task's own corpus (2026-11-20-task-corpus-design.md): offered to every session of a research task. It reads
 # Interspace's saved list and calls no source.
 CORPUS_TOOL = {'v': 1, 'name': 'research_corpus', 'title': 'Read the corpus', 'effect': 'read',

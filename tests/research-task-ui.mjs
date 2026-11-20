@@ -52,7 +52,7 @@ export default async function check(page,url){
  await page.waitForFunction(()=>!document.querySelector('#agent-view').hidden);
  const create=(await requests(page,'agent_create'))[0];
  assert(create.project_id===null&&create.kind==='research'&&create.title==='Literature review: synthetic <i>retrieval</i> methods'&&!('provider' in create),'agent_create: '+JSON.stringify(create));
- assert(JSON.stringify(create.scope.research.sources)===JSON.stringify({semantic_scholar:'allow',openalex:'allow',arxiv:'allow',crossref:'ask',unpaywall:'off'})&&create.scope.projects.length===0,'Research scope sent: '+JSON.stringify(create.scope));
+ assert(JSON.stringify(create.scope.research.sources)===JSON.stringify({semantic_scholar:'allow',openalex:'allow',arxiv:'allow',crossref:'ask',unpaywall:'off',fulltext:'ask'})&&create.scope.projects.length===0,'Research scope sent: '+JSON.stringify(create.scope));
  assert((await requests(page,'switch_project')).length===0,'Research task switched project');
  assert((await page.locator('#agent-message').inputValue()).startsWith('Write a literature review on: synthetic <i>retrieval</i> methods'),'First message not waiting in the composer');
  assert(await page.locator('#breadcrumb').isHidden()&&(await page.locator('#agent-back').textContent())==='← Research'&&await page.locator('.project-nav').isHidden(),'Research back label, no breadcrumb or project picker');
@@ -100,7 +100,7 @@ export default async function check(page,url){
  await page.locator('#agent-scope-editor').getByRole('button',{name:'Save scope',exact:true}).click();
  await page.waitForFunction(()=>window.rFixture.requests.some(r=>r.method==='scope_update'));
  const upd=(await requests(page,'scope_update'))[0].scope.research.sources;
- assert(upd.arxiv==='allow'&&upd.semantic_scholar==='off'&&Object.keys(upd).length===5,'scope_update research: '+JSON.stringify(upd));
+ assert(upd.arxiv==='allow'&&upd.semantic_scholar==='off'&&Object.keys(upd).length===6&&upd.fulltext==='off','scope_update research: '+JSON.stringify(upd));
 
  // A research team: members stay read-only, the citation checker role reads plainly, no Review changes.
  await page.evaluate(()=>{window.rFixture.history.N4=[];});

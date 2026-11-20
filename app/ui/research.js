@@ -4,7 +4,7 @@
    Every title, detail and URL from the backend is inserted with textContent; a help link is shown only for https. */
 (()=>{
 // Names of the first sources, for labels before research_sources answers. Everything else comes from the backend.
-const KNOWN={semantic_scholar:'Semantic Scholar',openalex:'OpenAlex',arxiv:'arXiv',crossref:'Crossref',unpaywall:'Unpaywall'};
+const KNOWN={semantic_scholar:'Semantic Scholar',openalex:'OpenAlex',arxiv:'arXiv',crossref:'Crossref',unpaywall:'Unpaywall',fulltext:'Open-access full text'};
 const STATE={ready:'Ready',needs_key:'Needs your key or email',error:'Test failed',unchecked:'Not tested yet',credential_store_unavailable:'Keychain not available'};
 const KIND={api_key:'API key',email:'email address'};
 const KEY_RE=/^[\x21-\x7e]{8,256}$/,EMAIL_RE=/^[^\s@<>()",;:\\]+@[^\s@<>()",;:\\]+\.[^\s@<>()",;:\\]+$/;

@@ -62,7 +62,7 @@ function editor(host,info,{projectName,onSave,onClose,saving,heading='Edit scope
  const rfs=el('fieldset','research-scope',null,form);el('legend','','Research sources',rfs);
  el('p','footnote','Allow: agents use the source without asking. Ask: each call waits for you. Off: never used. Research tools only read, and use no tokens.',rfs);
  const had=s.research?.sources&&typeof s.research.sources==='object'?s.research.sources:null;
- const names=[...new Set([...(window.interspaceResearch?.names()||[]),...Object.keys(had||{})])];
+ const names=[...new Set([...(window.interspaceResearch?.names()||[]),'fulltext',...Object.keys(had||{})])]; // Full text: any open-access host.
  const research=names.map(name=>{const c=select(rfs,researchTitle(name),uid+'-research-'+name.replace(/[^A-Za-z0-9_-]/g,'_'),Object.entries(RESEARCH),had?.[name]||'off');
   if(window.interspaceResearch&&!window.interspaceResearch.usable(name))c.closest('.field').append(el('span','footnote','Needs your key or email in Settings → Research sources before it can answer.'));
   return [name,c];});

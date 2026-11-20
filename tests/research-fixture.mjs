@@ -15,7 +15,7 @@ export const ROUTING={v:1,orchestrator:{provider:'claude',model:null},roles:{res
 
 const scopeBase={v:1,version:1,commands:{workspace:'allow',allow:[],deny:[]},network:{default:'deny',allow_hosts:[],deny_hosts:[]},apps:[],web_search:'deny',limits:{token_budget:250000,time_limit_s:3600}};
 export const PROJECT_SCOPE={...scopeBase,task_id:null,projects:[{project_id:'p1',access:'write',read:['**'],write:['**'],deny:[]}]};
-export const RESEARCH_SCOPE={...scopeBase,task_id:null,projects:[],network:{default:'deny',allow_hosts:[],deny_hosts:[]},research:{sources:{semantic_scholar:'allow',openalex:'allow',arxiv:'allow',crossref:'allow',unpaywall:'ask'}}};
+export const RESEARCH_SCOPE={...scopeBase,task_id:null,projects:[],network:{default:'deny',allow_hosts:[],deny_hosts:[]},research:{sources:{semantic_scholar:'allow',openalex:'allow',arxiv:'allow',crossref:'allow',unpaywall:'ask',fulltext:'ask'}}};
 
 let seq=0;
 export const ev=(task_id,kind,data,item_id=null)=>({v:1,task_id,seq:++seq,at:'2026-11-19T10:00:00.000Z',kind,turn_id:'t-1',item_id,data});
@@ -64,6 +64,10 @@ export async function install(page,url,opts={}){
    else if(r.method==='claims_start'){const c=(o.claims||{})[p.task_id];if(!c){queueMicrotask(()=>f.fail(r,'The report has no numbered citations to check.'));return;}f.claimsNow=JSON.parse(JSON.stringify(c.start));result=JSON.parse(JSON.stringify(c.start));}
    else if(r.method==='task_claims')result=JSON.parse(JSON.stringify(f.claimsNow||{claims:[],counts:{claims:0,pending:0},started_at:null}));
    else if(r.method==='agent_message')result={accepted:true};
+   else if(r.method==='task_table')result=JSON.parse(JSON.stringify(f.tableNow||{table:null,presets:(o.tables||{}).presets||[]}));
+   else if(r.method==='table_start'){f.tableNow=JSON.parse(JSON.stringify((o.tables||{}).started));result=JSON.parse(JSON.stringify(f.tableNow));}
+   else if(r.method==='table_resolve'){const c=f.tableNow.table.rows.find(x=>x.id===p.row).cells[p.column];c.resolved=p.value==null?null:{value:p.value};c.status=p.value==null?'disagree':'resolved';result=JSON.parse(JSON.stringify(f.tableNow));}
+   else if(r.method==='table_export')result={name:'evidence.csv'};
    else if(r.method==='task_archive'){const t=[...rows,...research].find(x=>x.id===p.task_id);t.archived=p.archived;result={archived:p.archived};queueMicrotask(()=>f.setState());}
    else if(r.method==='task_delete_check')result=JSON.parse(JSON.stringify((o.deleteChecks||{})[p.task_id]||{working:false,subagents:0,kind:'research',branches:[]}));
    else if(r.method==='task_delete'){for(const list of [rows,research]){const i=list.findIndex(x=>x.id===p.task_id);if(i>=0)list.splice(i,1);}const c=(o.deleteChecks||{})[p.task_id];const names=(c?.branches||[]).filter(b=>b.exists&&!b.checked_out).map(b=>b.name);result={deleted:[p.task_id],deleted_branches:p.branches==='delete'?names:[],kept_branches:p.branches==='delete'?[]:names.map(n=>({name:n,reason:'You chose to keep it.'}))};queueMicrotask(()=>f.setState());}

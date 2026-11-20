@@ -18,7 +18,7 @@ const START={started_at:'t0',counts:{claims:3,pending:3,supported:0,partly:0,not
 const DONE={started_at:'t0',counts:{claims:3,pending:0,supported:1,partly:1,not_supported:1,cannot_tell:0},claims:[
  claim('1:1',1,'Fallback is described in standards [1].',{verdict:'supported',reason:'Stated.',quote:'fallback is described'}),
  claim('2:1',2,'Two reports measured it [2].',{verdict:'partly',reason:'Only one report.',quote:'one operator report'}),
- claim('1:2',1,'Recovery timing is rare [1].',{verdict:'not_supported',reason:'The abstract reports timing '+XSS,quote:'median of 40 minutes'})]};
+ claim('1:2',1,'Recovery timing is rare [1].',{verdict:'not_supported',reason:'The abstract reports timing '+XSS,quote:'median of 40 minutes',source_kind:'full text'})]};
 
 export default async function check(page,url){
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
@@ -56,7 +56,7 @@ export default async function check(page,url){
  const items=await reader.locator('.claim-item .claim-verdict').allTextContents();
  assert(JSON.stringify(items)===JSON.stringify(['Not supported','Partly supported']),'Problems first: '+JSON.stringify(items));
  const first=await text(reader.locator('.claim-item').first());
- assert(first.includes('Recovery timing is rare [1].')&&first.includes(XSS)&&first.includes('median of 40 minutes'),'Literal reason and quote');
+ assert(first.includes('Recovery timing is rare [1].')&&first.includes(XSS)&&first.includes('median of 40 minutes')&&first.includes('Judged from the full text'),'Literal reason, quote and source kind');
  await reader.locator('.claim-item').first().getByRole('link',{name:'Show in text'}).click();
  assert(await page.evaluate(()=>document.activeElement?.dataset.claim)==='1:2','Show in text focuses the citation');
  assert(!errors.length,'Page errors: '+errors.join('; '));

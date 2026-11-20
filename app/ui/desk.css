@@ -456,3 +456,46 @@ button:not(:disabled):active{transform:translateY(1px)}
 .claim-sentence{font:15.5px/1.6 var(--serif)}
 .claim-reason{font-size:13.5px}
 .claim-quote{margin:0;padding-left:10px;border-left:2px solid var(--line);font:italic 14px/1.55 var(--serif);color:var(--muted)}
+
+/* Resizable split reader: a thin divider between the conversation and the results. Its hit area is wider than its
+   line, it highlights on hover and focus, and the page shows a resize cursor while dragging. */
+#agent-view.split .agent-layout{grid-template-columns:var(--chat-width,420px) 0 minmax(0,1fr)}
+.split-handle{position:relative;z-index:4;width:0;cursor:col-resize;outline:none}
+.split-handle::before{content:'';position:absolute;top:0;bottom:0;left:-5px;width:10px}
+.split-handle::after{content:'';position:absolute;top:0;bottom:0;left:-1px;width:2px;background:transparent;transition:background-color .15s ease}
+.split-handle:hover::after,.split-handle:focus-visible::after,body.resizing .split-handle::after{background:var(--accent)}
+.split-handle:focus-visible::after{width:3px;left:-1.5px}
+body.resizing,body.resizing *{cursor:col-resize!important;user-select:none}
+#agent-view.split .agent-main{border-right:1px solid var(--line)}
+@media(prefers-reduced-motion:reduce){.split-handle::after{transition:none}}
+
+/* Evidence tab (2026-11-20-evidence-table-design.md): a scrolling table whose first column stays put; disagreements
+   carry an oxblood rule, numbers to check a dotted one, and each cell says its status in words. */
+.evidence{display:grid;gap:14px;min-width:0}.evidence>*{margin:0;min-width:0}
+.evidence-picker{display:grid;gap:14px;max-width:760px}
+.evidence-choice{border:1px solid var(--line);border-radius:4px;padding:10px 14px 12px;display:grid;gap:6px;min-width:0}
+.evidence-choice legend{font-weight:550;padding:0 4px}
+.evidence-choice .display-option .footnote{margin-left:4px}
+.evidence-custom{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr) auto auto;gap:6px;align-items:center}
+.ev-wrap{overflow:auto;border:1px solid var(--line);border-radius:4px;max-height:70vh}
+.ev-wrap:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.ev-table{border-collapse:separate;border-spacing:0;font-size:13.5px;min-width:100%}
+.ev-table th,.ev-table td{border-bottom:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top;min-width:170px;max-width:280px}
+.ev-table thead th{position:sticky;top:0;z-index:2;background:var(--bg);font-weight:600}
+.ev-table tbody th{position:sticky;left:0;z-index:1;background:var(--leaf);font-weight:500;min-width:220px;border-right:1px solid var(--line)}
+.ev-table thead th:first-child{left:0;z-index:3}
+.ev-paper{display:block;font-family:var(--serif)}.ev-source{display:block}
+.ev-cell{display:table-cell}.ev-cell>*{display:block;margin:0 0 4px}
+.ev-word{font:600 11.5px var(--sans);color:var(--muted)}
+.ev-value{font-size:14px;overflow-wrap:anywhere}
+.ev-cell.is-agree .ev-word{color:var(--accent)}
+.ev-cell.is-check{box-shadow:inset 3px 0 0 var(--muted)}.ev-cell.is-check .ev-word{color:var(--ink)}
+.ev-cell.is-disagree{box-shadow:inset 3px 0 0 var(--warn);background:color-mix(in srgb,var(--warn) 5%,transparent)}.ev-cell.is-disagree .ev-word{color:var(--warn)}
+.ev-cell.is-resolved .ev-word{color:var(--accent)}
+.ev-option{border-top:1px dashed var(--line);padding-top:6px;margin-top:4px;display:grid;gap:3px}
+.ev-who{font:600 11.5px var(--sans);color:var(--muted)}
+.ev-option button,.ev-cell .quiet,.ev-cell .primary{font-size:12.5px;padding:4px 9px;justify-self:start}
+.ev-quote-line,.ev-quote blockquote{margin:0;font:italic 12.5px/1.5 var(--serif);color:var(--muted);border-left:2px solid var(--line);padding-left:8px}
+.ev-quote summary{font-size:12px;color:var(--accent)}
+.ev-cell input{width:100%;margin:2px 0 4px}
+.ev-quote{border-top:0;padding-top:0;margin:4px 0 0}

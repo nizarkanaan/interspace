@@ -72,7 +72,7 @@ class CheckTests(unittest.TestCase):
                                                 'not_supported': 0, 'cannot_tell': 3})
         batch = claims.pending(value)
         self.assertEqual([c['id'] for c in batch['claims']], ['1:1', '2:1', '1:2'])
-        self.assertIn('fallback to another operator', batch['claims'][0]['source']['abstract'])
+        self.assertIn('fallback to another operator', batch['claims'][0]['source']['text'])
 
     def test_quotes_must_be_in_the_source_and_bad_results_are_rejected_one_by_one(self):
         value = self.started()

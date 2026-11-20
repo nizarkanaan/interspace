@@ -130,6 +130,19 @@ class SavePanelTests(unittest.TestCase):
                                          'path': '/data/tasks/t1/outputs/references.bib'})
         self.assertTrue(swift.sent[0]['id'].startswith('sp-'))
 
+    def test_pdf_text_round_trip_needs_its_handshake_flag(self):
+        swift = FakeSwift(lambda m: {'type': 'pdf_text_reply', 'id': m['id'], 'ok': True, 'text': 'Full text.'})
+        swift.bridge.deliver(HELLO)
+        self.assertIsNone(swift.bridge.pdf_text('/data/tasks/t1/fulltext/a.pdf'))  # No flag: no request.
+        self.assertEqual(swift.sent, [])
+        swift.bridge.deliver(dict(HELLO, pdf_text=1))
+        reply = swift.bridge.pdf_text('/data/tasks/t1/fulltext/a.pdf')
+        self.assertEqual((reply['ok'], reply['text']), (True, 'Full text.'))
+        self.assertEqual(swift.sent[0], {'type': 'pdf_text', 'id': swift.sent[0]['id'], 'path': '/data/tasks/t1/fulltext/a.pdf'})
+        self.assertTrue(swift.sent[0]['id'].startswith('pt-'))
+        with self.assertRaises(ValueError):
+            swift.bridge.pdf_text('relative.pdf')
+
     def test_save_panel_needs_an_absolute_path_and_a_plain_name(self):
         swift = FakeSwift()
         swift.bridge.deliver(HELLO)
@@ -146,7 +159,7 @@ class SwiftContractTests(unittest.TestCase):
         swift = (ROOT / 'app/macos/main.swift').read_text()
         for text in ('"app.interspace.research"', 'kSecAttrAccessibleWhenUnlockedThisDeviceOnly',
                      'kSecAttrSynchronizable as String: kCFBooleanFalse', '64 * 1024', '"Interspace: \\(title)"',
-                     '["type": "bridge_hello", "keychain": 1, "save_panel": 1]',
+                     '["type": "bridge_hello", "keychain": 1, "save_panel": 1, "pdf_text": 1]',
                      '"semantic_scholar"', '"openalex"', '"crossref_email"', '"unpaywall_email"',
                      'bridgeTypes.contains(type)', 'appDataFile(path)'):
             self.assertIn(text, swift)

@@ -556,7 +556,7 @@ class ResearchTaskServiceTests(unittest.TestCase):
             # configured, so only Unpaywall, which needs an email, starts off.
             self.assertEqual(task['scope']['research'], {'sources': {
                 'semantic_scholar': 'allow', 'openalex': 'allow', 'arxiv': 'allow', 'crossref': 'allow',
-                'unpaywall': 'off'}})
+                'unpaywall': 'off', 'fulltext': 'ask'}})
             self.assertEqual(self.app.store.task(task_id)['id'], task_id)
         public = self.app.handle('state', {})
         self.assertEqual((public['project_id'], public['task_id']), (None, task_id))
@@ -632,7 +632,8 @@ class ResearchTaskServiceTests(unittest.TestCase):
                 self.app.research_dispatch(None, 'research_search', {})
         with self.app.lock:
             sources = self.app.store.task(created['task_id'])['scope']['research']['sources']
-        self.assertEqual(sources, {'crossref': 'allow', 'unpaywall': 'off', 'openalex': 'allow', 'broken': 'off'})
+        self.assertEqual(sources, {'crossref': 'allow', 'unpaywall': 'off', 'openalex': 'allow', 'broken': 'off',
+                                   'fulltext': 'ask'})
 
 
 if __name__ == '__main__':

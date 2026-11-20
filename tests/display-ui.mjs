@@ -44,6 +44,22 @@ export default async function check(page,url){
  assert(side,'Results are to the right of the conversation');
  assert((await text(page.locator('#agent-topbar-scope')))==='Scope needs approval'&&await page.evaluate(()=>document.documentElement.scrollHeight<=innerHeight+1),'Top bar scope, page does not scroll');
 
+ // Resizable split: drag the divider, arrow keys move it, limits hold, double-click resets.
+ const handle=page.locator('#split-handle'),chatW=()=>page.evaluate(()=>Math.round(document.getElementById('agent-stream').closest('.agent-main').getBoundingClientRect().width));
+ assert(await handle.evaluate(h=>!h.hidden)&&(await handle.getAttribute('role'))==='separator','Divider shown');
+ const start=await chatW(),box=await handle.boundingBox();
+ await page.mouse.move(box.x+box.width/2,box.y+200);await page.mouse.down();await page.mouse.move(box.x+180,box.y+200,{steps:5});await page.mouse.up();
+ const dragged=await chatW();
+ assert(dragged>start+150,'Drag widens the conversation: '+start+' -> '+dragged);
+ await handle.focus();await page.keyboard.press('ArrowLeft');
+ assert(await chatW()===dragged-24,'Arrow key moves it');
+ await page.keyboard.press('Home');assert(await chatW()===300,'Home is the narrowest');
+ await page.keyboard.press('End');const widest=await chatW();
+ assert(widest===Math.round(await page.evaluate(()=>document.querySelector('#agent-view .agent-layout').getBoundingClientRect().width))-420,'End leaves the results 420px');
+ assert(await page.evaluate(()=>localStorage.getItem('interspace.splitWidth'))===String(widest),'Width remembered');
+ {const r=await handle.evaluate(h=>{const b=h.getBoundingClientRect();return {x:b.left,y:b.top+200};});await page.mouse.dblclick(r.x,r.y);}
+ assert(await chatW()===420,'Double-click resets');
+
  // Default display: one-line search summaries, reasoning summary, failed call in full.
  const s1=await text(stream.locator('[data-item=s1]'));
  assert(s1.startsWith('Searched “fallback '+XSS+'” in OpenAlex, Crossref: 3 papers'),'Search summary: '+s1);

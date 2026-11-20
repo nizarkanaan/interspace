@@ -167,10 +167,12 @@ def start(report_text, corpus, at):
     for claim in split(report_text):
         paper = source_for(claim['reference'], corpus)
         abstract = records.clean_text(paper.get('abstract'), MAX_SOURCE) if paper and isinstance(paper.get('abstract'), str) else None
-        entry = dict(claim, paper={'title': paper.get('title'), 'doi': paper.get('doi'),
-                                   'arxiv_id': paper.get('arxiv_id')} if paper else None,
-                     source=abstract, status='pending', verdict=None, reason=None, quote=None, by=None, at=None)
-        if not abstract:
+        entry = dict(claim, paper={'title': paper.get('title'), 'doi': paper.get('doi'), 'arxiv_id': paper.get('arxiv_id'),
+                                   'oa_url': paper.get('oa_url')} if paper else None,
+                     abstract=abstract, source=abstract, source_kind='abstract' if abstract else None, fulltext_tried=False,
+                     status='pending', verdict=None, reason=None, quote=None, by=None, at=None)
+        # Full text may still come (2026-11-20-claim-fulltext-design.md): only a paper with nothing at all is can't tell.
+        if not abstract and not (paper and (paper.get('arxiv_id') or paper.get('oa_url'))):
             entry.update(status='judged', verdict='cannot_tell', reason=NO_SOURCE, by='interspace', at=at)
         claims.append(entry)
     return {'v': V, 'report_sha': report_hash(report_text), 'started_at': at, 'claims': claims}
@@ -184,18 +186,40 @@ def counts(value):
     return out
 
 
-def pending(value, limit=MAX_BATCH):
-    """Pending claims for a judge, with the only text it may judge against."""
+def next_ids(value, limit=MAX_BATCH):
+    """The ids of the next pending claims a judge will get."""
     if type(limit) is not int or not 1 <= limit <= MAX_BATCH:
         raise ValueError('limit must be from 1 to 20.')
+    return [c['id'] for c in (value or {}).get('claims') or [] if c.get('status') == 'pending'][:limit]
+
+
+def attach(claim, text, error, at):
+    """Give one claim its source text: the abstract plus the full-text passages that best match the sentence."""
+    from research import fulltext
+    claim['fulltext_tried'] = True
+    found = fulltext.passages(text, claim['sentence']) if text else []
+    if found:
+        claim['source'] = '\n\n'.join(([claim['abstract']] if claim.get('abstract') else []) + found)
+        claim['source_kind'] = 'full text'
+    elif not claim.get('abstract'):
+        claim.update(status='judged', verdict='cannot_tell', by='interspace', at=at,
+                     reason=(error or 'The full text has no passage about this sentence.')[:300])
+
+
+def pending(value, limit=MAX_BATCH, ids=None):
+    """Pending claims for a judge, with the only text it may judge against."""
+    wanted = next_ids(value, limit) if ids is None else list(ids)
+    index = {c['id']: c for c in (value or {}).get('claims') or []}
     batch = [{'id': c['id'], 'sentence': c['sentence'], 'reference': c['reference'],
-              'source': {'title': (c.get('paper') or {}).get('title'), 'abstract': c.get('source')}}
-             for c in (value or {}).get('claims') or [] if c.get('status') == 'pending'][:limit]
+              'source': {'title': (c.get('paper') or {}).get('title'), 'kind': c.get('source_kind') or 'abstract',
+                         'text': c.get('source')}}
+             for c in (index[i] for i in wanted if i in index) if c.get('status') == 'pending']
     return {'claims': batch, 'counts': counts(value),
-            'instructions': 'Judge each sentence only against its source abstract. supported: the abstract backs '
-                            'the sentence as written; partly: it backs part of it or a weaker version; '
-                            'not_supported: it does not back it or says otherwise; cannot_tell: the abstract does not '
-                            'cover it. Quote the abstract words your verdict rests on.'}
+            'instructions': 'Judge each sentence only against its source text (the abstract, plus passages of the '
+                            'full paper when kind is "full text"). supported: the text backs the sentence as written; '
+                            'partly: it backs part of it or a weaker version; not_supported: it does not back it or '
+                            'says otherwise; cannot_tell: the text does not cover it. Quote the words your verdict '
+                            'rests on exactly as they appear in the text.'}
 
 
 def _squash(text):
@@ -246,4 +270,4 @@ def public(value):
         return {'claims': [], 'counts': counts(None), 'started_at': None}
     return {'started_at': value.get('started_at'), 'counts': counts(value),
             'claims': [{k: c.get(k) for k in ('id', 'n', 'k', 'sentence', 'reference', 'paper', 'status', 'verdict',
-                                              'reason', 'quote', 'by', 'at')} for c in value.get('claims') or []]}
+                                              'reason', 'quote', 'by', 'at', 'source_kind')} for c in value.get('claims') or []]}

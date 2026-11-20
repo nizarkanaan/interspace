@@ -9,7 +9,7 @@ const count=n=>Number(n||0).toLocaleString('en-US');
 const plural=(n,one,many)=>count(n)+' '+(n===1?one:many||one+'s');
 const str=v=>typeof v==='string'?v:v==null?'':String(v);
 const PAPERS_SHOWN=5,ROWS_SHOWN=10;
-const TOOL={research_search:'Search papers',research_paper:'Look up a paper',research_citations:'Follow citations',research_fulltext:'Find an open copy',research_bibtex:'Get BibTeX',verify_citations:'Check citations',research_corpus:'Read the corpus',save_report:'Save the report',claims_pending:'Claims to check',record_claim_support:'Record claim verdicts'};
+const TOOL={research_search:'Search papers',research_paper:'Look up a paper',research_citations:'Follow citations',research_fulltext:'Find an open copy',research_bibtex:'Get BibTeX',verify_citations:'Check citations',research_corpus:'Read the corpus',save_report:'Save the report',claims_pending:'Claims to check',record_claim_support:'Record claim verdicts',table_pending:'Evidence rows to fill',record_table_cells:'Record evidence values'};
 const RESULT={ok:'Done',error:'Failed',denied:'Denied',cancelled:'Cancelled'};
 const SKIP={not_configured:'not set up',rate_limited:'rate limited',unavailable:'unavailable',bad_response:'unreadable reply',not_found:'not found',denied:'not allowed by the scope',off:'off in the scope'};
 const STATUS={
@@ -168,7 +168,7 @@ function markdown(text,parent){
 
 // Outputs panel: the task's report and BibTeX, viewed in place and saved through the app's save panel.
 const outputState=new Map();
-const KIND={report:'Report',bibtex:'BibTeX references'};
+const KIND={report:'Report',bibtex:'BibTeX references',table:'Evidence table (CSV)'};
 const size=b=>!Number.isFinite(b)?'':b<1024?b+' bytes':b<1048576?(b/1024).toFixed(1)+' KB':(b/1048576).toFixed(1)+' MB';
 function outputsPanel(container,taskId,data,{request,refresh,openReport}){
  const list=Array.isArray(data?.outputs)?data.outputs.filter(o=>o&&typeof o.name==='string'&&o.name):[];
@@ -235,6 +235,8 @@ function toolSummary(card,{call,result,output}){
  else if(tool==='research_paper')text=data.paper?'Looked up '+what+': found “'+(str(data.paper.title)||'Untitled')+'”':'Looked up '+what+': no record found';
  else if(tool==='research_fulltext')text=/^https:\/\//i.test(str(data.oa_url))?'Found an open copy of '+what:'No open copy found for '+what;
  else if(tool==='research_bibtex'){const e=Array.isArray(data.entries)?data.entries:[];text='Got BibTeX for '+plural(e.filter(x=>x&&x.bibtex).length,'reference')+(e.some(x=>x&&!x.bibtex)?', '+count(e.filter(x=>x&&!x.bibtex).length)+' not available':'');}
+ else if(tool==='table_pending')text='Read '+plural((data.rows||[]).length,'row')+' of the evidence table to fill';
+ else if(tool==='record_table_cells')text='Recorded '+plural(Number(data.recorded)||0,'evidence value')+((data.rejected||[]).length?', '+count(data.rejected.length)+' rejected':'');
  else if(tool==='claims_pending')text='Read '+plural((data.claims||[]).length,'claim')+' to check ('+count(data.counts?.pending||0)+' pending)';
  else if(tool==='record_claim_support')text='Recorded '+plural(Number(data.recorded)||0,'verdict')+((data.rejected||[]).length?', '+count(data.rejected.length)+' rejected':'');
  else if(tool==='save_report')text='Saved the report as report.md ('+count(Number(data.characters)||0)+' characters). Open it in the Report tab.';

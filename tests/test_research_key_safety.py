@@ -188,7 +188,8 @@ class ResearchKeySafetyTests(e2e.EndToEndTeamTests):
         default = self.call('scope_default', {'project_id': None, 'kind': 'research'})['scope']
         self.assertEqual(default['projects'], [])
         self.assertEqual(default['research']['sources'], {'semantic_scholar': 'allow', 'openalex': 'allow',
-                                                          'crossref': 'allow', 'unpaywall': 'allow', 'arxiv': 'allow'})
+                                                          'crossref': 'allow', 'unpaywall': 'allow', 'arxiv': 'allow',
+                                                          'fulltext': 'ask'})
         created = self.call('agent_create', {'project_id': None, 'kind': 'research', 'title': 'Related work'})
         task_id = created['task_id']
         state = self.call('state', {})

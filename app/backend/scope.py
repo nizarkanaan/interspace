@@ -254,6 +254,9 @@ def research_block(research_sources):
     if not isinstance(research_sources, dict):
         _fail('Research sources must be a mapping.')
     block = {'sources': {name: 'allow' if usable else 'off' for name, usable in research_sources.items()}}
+    # Open-access full text from any publisher host asks first (2026-11-20-claim-fulltext-design.md).
+    if block['sources']:
+        block['sources'].setdefault('fulltext', 'ask')
     _check_research(block)
     return block
 
