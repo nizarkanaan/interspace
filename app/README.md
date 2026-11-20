@@ -45,6 +45,10 @@ Keys and emails are your own. They are kept in this Mac's Keychain, are never sh
 
 **Outputs.** A finished research answer is saved as `report.md`, plus `references.bib` when the citation checker ran. **Outputs** on the task shows them; **Save** copies a file to a place you choose. Project tasks still use Review and Merge for code.
 
+When the citation checker runs as a subagent, its citation report also appears on that subagent's card in the task, so you do not need to open the subagent to see it. A subagent that has answered its brief shows **Finished**.
+
+**Browser end-to-end.** `tests/research-e2e-ui.mjs` drives the real backend (`tests/e2e/research_backend.py`) over JSON lines with fake agent runtimes, research HTTP answered from `tests/research/fixtures/`, and a fake Swift side (an in-memory Keychain and save panel). It covers Settings → Research sources, a Literature review with a researcher and a citation checker, Verify my references, and a project task's Review changes. It writes screenshots to `workspace-data/research-e2e/` (or `INTERSPACE_SHOTS`). Run it with `node tests/run-ui.cjs research-e2e-ui`.
+
 ## Connection
 
 The app finds `codex` on PATH or inside the official ChatGPT/Codex Mac app, and checks its sign-in. Claude Code uses your own `claude` sign-in. Credentials stay in each provider's own store; Interspace never reads or copies them.
