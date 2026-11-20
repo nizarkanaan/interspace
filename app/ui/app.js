@@ -5,7 +5,8 @@ let state=null,view='tasks',taskTab='conversation',sequence=0,selectionEpoch=0;
 const pending=new Map(),newDrafts=new Map();
 const node=(tag,text,parent)=>{const e=document.createElement(tag);e.textContent=text;if(parent)parent.append(e);return e;};
 const MODES={review:'Read-only review',python_fix:'Fix & test (Python)'};
-const P=window.interspaceProviders;
+const P=window.interspaceProviders,R=window.interspaceResearch;
+let newKind=null;
 function error(text){$('error').hidden=!text;$('error').textContent=text||'';}
 function request(method,params={},options={}){return new Promise((resolve,reject)=>{
  const id=String(++sequence);if(!window.webkit?.messageHandlers?.interspace){reject(Error('Open Interspace.app to use the local backend.'));return;}
@@ -24,7 +25,7 @@ window.interspaceReceive=message=>{
  else{if(message.result?.projects&&!stale)apply(message.result);call.resolve(message.result);}
 };
 function apply(next){P.fromState(next.provider_status);const changed=!state||state.project_id!==next.project_id||state.task_id!==next.task_id;state=next;if(changed)taskTab='conversation';error(state.error);render();}
-function navigate(next){selectionEpoch++;view=next;if(next==='settings'||next==='new')P.load();render();}
+function navigate(next){selectionEpoch++;if(next==='new')newKind=view==='research'||!state?.projects?.length?'research':'project';view=next;if(next==='settings'||next==='new'){P.load();R.load();}render();}
 function openProject(id){const epoch=++selectionEpoch;return request('switch_project',{project_id:id}).then(()=>{if(epoch===selectionEpoch)navigate('tasks');}).catch(()=>{});}
 function openAgent(id){selectionEpoch++;window.interspaceAgent.open(id);navigate('agent');}
 function openTask(id){if(window.interspaceAgent.isAgent(id)){openAgent(id);return Promise.resolve();}const epoch=++selectionEpoch;return request('select_task',{project_id:state.project_id,task_id:id}).then(()=>{if(epoch!==selectionEpoch)return;taskTab='conversation';navigate('detail');}).catch(()=>{});}
@@ -34,22 +35,35 @@ function render(){if(!state)return;
  const task=state.task,detail=view==='detail'&&!!task&&task.mode!=='agent';
  if(view==='detail'&&!detail)view='tasks';
  document.querySelectorAll('[data-view]').forEach(b=>b.setAttribute('aria-pressed',String(view===b.dataset.view)));
- $('heading').textContent=detail?task.title:view==='agent'?window.interspaceAgent.title():({tasks:'Tasks',new:'New task',settings:'Settings',running:'Running tasks',review:'Review changes'}[view]||'Tasks');
- $('heading-note').textContent=view==='tasks'?'An outcome, an agent, a branch you merge.':'';
- $('breadcrumb').textContent=state.project||'Your workspace';
+ $('heading').textContent=detail?task.title:view==='agent'?window.interspaceAgent.title():({tasks:'Tasks',research:'Research',new:'New task',settings:'Settings',running:'Running tasks',review:'Review changes'}[view]||'Tasks');
+ $('heading-note').textContent=view==='tasks'?'An outcome, an agent, a branch you merge.':view==='research'?'Questions answered from scholarly sources, with every citation checked.':'';
+ $('breadcrumb').textContent=view==='research'||view==='agent'&&window.interspaceAgent.isResearch(window.interspaceAgent.current())?'Research':state.project||'Your workspace';
  $('project-name').textContent=state.project||'Add a project to see its details.';
- $('new-task').hidden=view==='new';$('new-task').disabled=!state.project_id;
- $('task-desk').hidden=view!=='tasks';$('new-task-panel').hidden=view!=='new';$('settings').hidden=view!=='settings';$('review-view').hidden=view!=='review';$('task-detail').hidden=!detail;
+ // A research question needs no project, so New task is always available.
+ $('new-task').hidden=view==='new';$('new-task').textContent=view==='research'?'New research question':'New task';
+ $('task-desk').hidden=view!=='tasks';$('research-desk').hidden=view!=='research';$('new-task-panel').hidden=view!=='new';$('settings').hidden=view!=='settings';$('review-view').hidden=view!=='review';$('task-detail').hidden=!detail;
  // Subagents are child tasks: they appear under their task, not as desk rows.
- const rows=(state.tasks||[]).filter(t=>!t.parent_task_id&&!window.interspaceAgent.parentOf(t.id));
+ const rows=(state.tasks||[]).filter(t=>!t.parent_task_id&&!window.interspaceAgent.parentOf(t.id)&&t.kind!=='research');
  $('task-project').textContent=state.project||'No project selected';$('task-count').textContent=rows.length+' tasks';$('desk-tasks').replaceChildren();
  $('desk-empty').hidden=!!rows.length;
  for(const t of rows){const row=node('button','',$('desk-tasks'));row.className='desk-task';row.dataset.openTask=t.id;row.disabled=t.status==='unavailable';const title=node('div','',row);node('strong',t.title,title);const sub=node('small',t.status==='unavailable'?'Saved data unavailable — other tasks remain usable':t.mode==='agent'?'':'Earlier task (read-only) · '+(MODES[t.mode]||t.mode),title);if(t.mode==='agent'&&t.status!=='unavailable'){sub.append('Orchestrator on ');if(t.provider)P.badge(t.provider,sub);else sub.append('your default provider');sub.append((t.model?' · '+t.model:'')+' · own task branch');}node('span',t.mode==='agent'?String(t.status).replaceAll('_',' '):t.status==='unavailable'?'unavailable':'read only',row);row.onclick=()=>openTask(t.id);}
  $('active-owner').hidden=!state.active;$('activity').textContent=state.active?state.active+' · working':'';$('stop').disabled=!state.active;
  if(detail)renderHistory(task);
  if(view==='new')renderNew();
- if(view==='settings')P.renderSettings($('providers-settings'));
+ if(view==='settings'){P.renderSettings($('providers-settings'));R.renderSettings($('research-settings'));}
  window.interspaceAgent.render(state,view);
+ renderResearch();
+}
+// The sidebar's Research entry: tasks without a project (research/tasks.md), next to the projects.
+function renderResearch(){
+ const rows=window.interspaceAgent.researchRows();
+ $('research-nav-count').textContent=rows.length?String(rows.length):'';
+ if(view!=='research')return;
+ $('research-count').textContent=rows.length+' task'+(rows.length===1?'':'s');$('research-empty').hidden=!!rows.length;
+ const list=$('research-tasks');list.replaceChildren();
+ for(const t of rows){const row=node('button','',list);row.className='desk-task';row.dataset.openTask=t.id;row.disabled=t.status==='unavailable';const title=node('div','',row);node('strong',t.title,title);
+  const sub=node('small','',title);if(t.status==='unavailable')sub.textContent='Saved data unavailable — other tasks remain usable';else{sub.append('Research · Orchestrator on ');if(t.provider)P.badge(t.provider,sub);else sub.append('your default provider');sub.append((t.model?' · '+t.model:'')+' · no project');}
+  node('span',String(t.status||'').replaceAll('_',' '),row);row.onclick=()=>openAgent(t.id);}
 }
 // An earlier task: its conversation, plan text and result text. Nothing here sends anything.
 function renderHistory(task){
@@ -66,12 +80,13 @@ function renderHistory(task){
  if(h.error){const e=node('p',h.error,out);e.className='error-text';}
  for(const r of h.reports){const box=node('article','',out);box.className='finding';node('h3',(r.goal||'Saved run')+' · '+String(r.stage).replaceAll('_',' '),box);const pre=node('pre',r.text||'No final report was saved for this run.',box);pre.className='history-text';pre.tabIndex=0;}
 }
-function renderNew(){const d=newDrafts.get(state.project_id)||{goal:''};$('new-project').textContent=state.project;$('new-goal').value=d.goal||'';window.interspaceAgentNew.fill(d,state);window.interspaceAgentNew.render(state);}
+function renderNew(){let d=newDrafts.get(state.project_id);if(!d){d={goal:''};newDrafts.set(state.project_id,d);}if(newKind){d.kind=newKind;newKind=null;}$('new-project').textContent=state.project;$('new-goal').value=d.goal||'';window.interspaceAgentNew.fill(d,state);window.interspaceAgentNew.render(state);}
 function saveNew(){if(state)newDrafts.set(state.project_id,{goal:$('new-goal').value,...window.interspaceAgentNew.read()});}
 async function agentCreated({task_id,project_id,desk,goal}){
  newDrafts.delete(desk);if(goal)window.interspaceAgent.setDraft(task_id,goal);
  if(view!=='new'||state?.project_id!==desk)return;
- if(project_id!==state.project_id){const epoch=++selectionEpoch;try{await request('switch_project',{project_id});}catch{return;}if(epoch!==selectionEpoch)return;}
+ // A research task has no project: it opens without switching the desk's project.
+ if(project_id!=null&&project_id!==state.project_id){const epoch=++selectionEpoch;try{await request('switch_project',{project_id});}catch{return;}if(epoch!==selectionEpoch)return;}
  openAgent(task_id);
 }
 function tokens(n){return Number(n).toLocaleString('en-US');}
@@ -84,9 +99,11 @@ $('new-goal').oninput=saveNew;
 $('new-task-form').onsubmit=e=>{e.preventDefault();window.interspaceAgentNew.review();};
 for(const id of ['new-title','new-model'])$(id).oninput=()=>{$(id).setCustomValidity('');saveNew();};
 for(const id of ['new-agent-project','new-provider'])$(id).addEventListener('change',saveNew);
-window.interspaceAgentNew.init({request,refresh:()=>{if(state&&view==='new')renderNew();},created:agentCreated});
+$('new-bib').addEventListener('input',saveNew);
+window.interspaceAgentNew.init({request,refresh:()=>{if(state&&view==='new')renderNew();},changed:saveNew,created:agentCreated});
 window.interspaceAgent.init({request,navigate,openAgent});
 P.init({request,changed:()=>{if(state)render();}});
+R.init({request,changed:()=>{if(state)render();}});
 // Review and merge (stream 1D) registers here: it gets the bridge and a view of its own.
 // It returns to the view it was opened from; the task's project comes from the open task or the desk.
 let reviewFrom='tasks';

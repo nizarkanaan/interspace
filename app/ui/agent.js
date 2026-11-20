@@ -8,9 +8,11 @@ const $=id=>document.getElementById(id);
 const el=(tag,cls,text,parent)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=String(text);if(parent)parent.append(e);return e;};
 const tokens=n=>Number(n||0).toLocaleString('en-US');
 
-const row=id=>(state?.tasks||[]).find(t=>t.id===id);
+// Research tasks (no project) may arrive in state.research.tasks and/or in state.tasks with kind 'research'.
+const allRows=()=>{const seen=new Set();return [...(state?.tasks||[]),...(Array.isArray(state?.research?.tasks)?state.research.tasks:[])].filter(t=>t&&typeof t.id==='string'&&!seen.has(t.id)&&seen.add(t.id));};
+const row=id=>allRows().find(t=>t&&t.id===id);
 const scheduled=id=>[...(state?.scheduler?.running||[]),...(state?.scheduler?.queued||[])].find(t=>t.task_id===id);
-const isAgent=id=>row(id)?.mode==='agent'||!!scheduled(id)||S.has(id);
+const isAgent=id=>row(id)?.mode==='agent'||row(id)?.kind==='research'||!!scheduled(id)||S.has(id);
 const title=id=>row(id)?.title||'Agent task '+String(id).slice(0,8);
 // A subagent is a child task: its parent comes from the task row, the scheduler entry or the parent's events.
 const parentOf=id=>row(id)?.parent_task_id||scheduled(id)?.parent_task_id||S.parentOf(id)||null;
@@ -18,6 +20,8 @@ const subOf=id=>{const p=parentOf(id);return p?S.children(p).find(c=>c.task_id==
 const providerOf=id=>row(id)?.provider||scheduled(id)?.provider||subOf(id)?.provider||null;
 const roleOf=id=>row(id)?.role||scheduled(id)?.role||subOf(id)?.role||(parentOf(id)?'subagent':'orchestrator');
 const projectName=id=>(state?.projects||[]).find(p=>p.id===id)?.name||'Project '+String(id).slice(0,8);
+// A research task has no project: no workspace, no Review or Merge. A subagent inherits its root task's kind.
+const isResearch=id=>{for(let t=id,i=0;t&&i<8;t=parentOf(t),i++){const r=row(t);if(r)return r.kind==='research'||r.project_id===null&&r.kind!=='project';}return false;};
 function status(id){const s=S.status(id);if(s)return s;const q=scheduled(id);if(q)return {state:q.state||'queued',queue_position:q.position??null,detail:'',reason:null};const r=row(id);return r&&r.status&&r.status!=='draft'?{state:r.status,detail:'',queue_position:null,reason:null}:null;}
 const stoppable=id=>{const s=status(id);return !!s&&!S.terminal(s)&&!['idle','cancelling'].includes(s.state);};
 
@@ -51,14 +55,16 @@ function head(container,id,compact){
  // After a restart nothing resumes by itself: say so plainly, and offer no resume action.
  if(st?.state==='interrupted'&&!compact)el('p','interrupted-note','The app closed while this '+(parentOf(id)?'subagent':'task')+' was working. Nothing resumed, and nothing will on its own. Its branch and changes are kept'+(parentOf(id)?'.':'; send a message to start a new turn.'),container);
  const b=S.budget(id),q=scheduled(id);el('p','agent-budget footnote',b?S.budgetText(b):q?.tokens?'Tokens '+tokens(q.tokens.used)+' / '+tokens(q.tokens.budget):'',container);
+ const usage=window.interspaceResearchCards.usageText(S.usage(id));if(usage)el('p','research-usage footnote',usage,container);
  const provider=providerOf(id),parent=parentOf(id),model=row(id)?.model||subOf(id)?.model||null;
  const line=el('p','footnote runtime-line',null,container);
  line.append((parent?P.roleTitle(roleOf(id))+' subagent':'Orchestrator')+' on ');
  if(provider)P.badge(provider,line);else line.append('your default provider');
  line.append(model?' · '+model:' · default model');
+ if(isResearch(id))line.append(' · Research task: no project, so no files, commands or branch');
  if(parent&&!compact){const up=el('button','link-button','Part of “'+title(parent)+'”',container);up.type='button';up.onclick=()=>host.openAgent(parent);}
  const w=S.workspace(id);if(w)el('p','footnote mono','Branch '+w.branch+' · base '+w.base_commit,container);
- if(w&&!compact&&window.interspaceReview){const r=el('button','','Review changes',container);r.type='button';r.id='review-head-'+String(id).replace(/[^A-Za-z0-9_-]/g,'_');r.onclick=()=>window.interspaceReview.open(id);}
+ if(w&&!compact&&window.interspaceReview&&!isResearch(id)){const r=el('button','','Review changes',container);r.type='button';r.id='review-head-'+String(id).replace(/[^A-Za-z0-9_-]/g,'_');r.onclick=()=>window.interspaceReview.open(id);}
 }
 function scopeArea(id){
  const info=scopeInfo(id),box=$('agent-scope');if(box.dataset.rev===id+':'+info.rev)return;box.dataset.rev=id+':'+info.rev;
@@ -73,8 +79,9 @@ function scopeArea(id){
 }
 function renderAgent(){
  const id=current;$('agent-view').hidden=view!=='agent'||!id;if($('agent-view').hidden)return;
- head($('agent-head'),id);$('agent-stop').hidden=!stoppable(id);
+ head($('agent-head'),id);$('agent-stop').hidden=!stoppable(id);$('agent-back').textContent=isResearch(id)?'← Research':'← Tasks';
  scopeArea(id);
+ outputsArea(id);
  // A newer scope than the one displayed (edited elsewhere) is reloaded before it can be approved.
  const ev=S.scopeEvent(id),info=scopeInfo(id);if(ev&&info.digest&&ev.scope_digest!==info.digest&&!info.loading&&!info.saving&&ev.scope_version>=(info.scope?.version||0))loadScope(id);
  const stream=$('agent-stream');const stick=innerHeight+scrollY>=document.documentElement.scrollHeight-80;
@@ -85,6 +92,15 @@ function renderAgent(){
  const reason=gate(id);$('agent-send').disabled=!!reason;
  $('agent-note').textContent=reason||'Enter sends · Shift+Enter adds a line · / for commands · @ to mention';
 }
+// A task's outputs (report and BibTeX), from its latest `outputs` event.
+function outputsArea(id){
+ const box=$('agent-outputs'),data=S.outputs(id),key=id+':'+JSON.stringify(data)+':'+outputsRev;
+ if(box.dataset.key===key)return;box.dataset.key=key;
+ const keep=document.activeElement&&box.contains(document.activeElement)?document.activeElement.id:null;
+ window.interspaceResearchCards.outputsPanel(box,id,data,{request:host.request,refresh:()=>{outputsRev++;refresh();}});
+ if(keep){const again=document.getElementById(keep);if(again)again.focus();}
+}
+let outputsRev=0;
 // Children are grouped under their parent's column; a child whose parent is unknown still gets the parent's column.
 function children(id){
  const out=new Map();
@@ -105,7 +121,7 @@ function childRows(list,id){
 function columnIds(){
  const ids=[];const add=raw=>{const id=parentOf(raw)||raw;if(id&&!ids.includes(id))ids.push(id);};
  for(const t of state?.scheduler?.running||[])add(t.task_id);for(const t of state?.scheduler?.queued||[])add(t.task_id);
- for(const t of state?.tasks||[])if(t.mode==='agent')add(t.id);for(const id of S.ids())add(id);
+ for(const t of allRows())if(t&&(t.mode==='agent'||t.kind==='research'))add(t.id);for(const id of S.ids())add(id);
  return ids;
 }
 function renderRunning(){
@@ -129,9 +145,9 @@ window.interspaceAgent={
  init(options){
   host=options;S.init({request:options.request,open:id=>host.openAgent(id),rowStatus:id=>row(id)?.status||null,stamp:id=>{const m=window.interspaceReview?.merged?.(id);return m?m.into+':'+m.merge_commit:'';},changed:id=>{if(view==='agent'&&(id===current||parentOf(id)===current)||view==='running')refresh();}});
   window.interspaceComposer.attach({input:$('agent-message'),menu:$('agent-menu'),form:$('agent-composer'),commands,mentions,onSend:send,onInput:text=>{if(current)drafts.set(current,text);}});
-  $('agent-stop').onclick=()=>cancel(current);$('agent-back').onclick=()=>host.navigate('tasks');
+  $('agent-stop').onclick=()=>cancel(current);$('agent-back').onclick=()=>host.navigate(current&&isResearch(current)?'research':'tasks');
  },
- isAgent,title:()=>title(current),current:()=>current,parentOf,
+ isAgent,isResearch,researchRows:()=>allRows().filter(t=>t&&t.kind==='research'&&!t.parent_task_id&&!parentOf(t.id)),title:()=>title(current),current:()=>current,parentOf,
  setDraft(id,text){drafts.set(id,text);if(current===id)shownDraftFor=null;},
  open(id){current=id;S.sync(id);if(!scopes.has(id)||!scopeInfo(id).scope)loadScope(id);},
  render(nextState,nextView){state=nextState;view=nextView;refresh();}

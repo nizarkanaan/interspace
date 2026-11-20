@@ -68,7 +68,9 @@ function memberEditor(ctx,team,d,m,label,list,locked){
   const al=el('div','field',null,row),alabel=el('label','',label+' access',al);alabel.htmlFor=base+'-access';
   const access=el('select','',null,al);access.id=base+'-access';access.disabled=locked;
   for(const v of ['read','write']){const o=el('option','',ACCESS[v],access);o.value=v;}
-  const sync=()=>{const w=access.querySelector('option[value=write]');const can=!P.get(m.provider)||P.canWrite(m.provider);w.disabled=!can;w.textContent=can?ACCESS.write:ACCESS.write+' (not available on '+P.title(m.provider)+')';if(!can&&m.access==='write')m.access='read';access.value=m.access==='write'?'write':'read';};
+  // A research task has no project to write to (research/tasks.md): its members stay read-only.
+  const research=!!window.interspaceAgent?.isResearch?.(ctx.taskId);
+  const sync=()=>{const w=access.querySelector('option[value=write]');const can=!research&&(!P.get(m.provider)||P.canWrite(m.provider));w.disabled=!can;w.textContent=can?ACCESS.write:research?ACCESS.write+' (not in a research task)':ACCESS.write+' (not available on '+P.title(m.provider)+')';if(!can&&m.access==='write')m.access='read';access.value=m.access==='write'?'write':'read';};
   sync();
   const remark=()=>head.querySelector('.marker').replaceWith(marker(proposed,m));
   provider.onchange=()=>{m.provider=provider.value;model.setProvider(provider.value);if(model.value&&P.checkModel(m.provider,model.value)){model.value='';m.model=null;}sync();head.querySelector('.provider-badge').replaceWith(P.badge(m.provider));remark();};
@@ -149,7 +151,7 @@ function subagentCard(card,ctx){
  const id=name=>ctx.compact?'':name+ctx.key;
  if(!ctx.compact){const toggle=el('button','',ctx.expanded?'Hide activity':'Show activity',actions);toggle.type='button';toggle.id=id('sub-toggle-');toggle.setAttribute('aria-expanded',String(ctx.expanded));toggle.setAttribute('aria-label',(ctx.expanded?'Hide ':'Show ')+label+' activity');toggle.onclick=ctx.toggle;if(ctx.expanded){toggle.setAttribute('aria-controls',ctx.childBox.id);}}
  const open=el('button','','Open',actions);open.type='button';if(!ctx.compact)open.id=id('sub-open-');open.setAttribute('aria-label','Open '+label+' subagent');open.onclick=ctx.open;
- if(s.access==='write'||diff){const r=el('button','','Review changes',actions);r.type='button';if(!ctx.compact)r.id=id('review-');r.setAttribute('aria-label','Review '+label+' changes');r.disabled=!window.interspaceReview;r.onclick=()=>window.interspaceReview?.open(s.task_id);}
+ if((s.access==='write'||diff)&&!window.interspaceAgent?.isResearch?.(s.task_id)){const r=el('button','','Review changes',actions);r.type='button';if(!ctx.compact)r.id=id('review-');r.setAttribute('aria-label','Review '+label+' changes');r.disabled=!window.interspaceReview;r.onclick=()=>window.interspaceReview?.open(s.task_id);}
  if(ctx.expanded)card.append(ctx.childBox);
 }
 

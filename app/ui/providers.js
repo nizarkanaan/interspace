@@ -3,11 +3,12 @@
    model list and capability comes from providers_list; nothing here is provider-specific.
    Account names, details, URLs and codes are inserted with textContent only. */
 (()=>{
-const ROLES=['researcher','implementer','reviewer','tester','writer'],WRITE_ROLES=new Set(['implementer','tester']);
+// citation_checker: a read role that runs the citation checker (docs/superpowers/specs/research/tasks.md, Roles).
+const ROLES=['researcher','implementer','reviewer','tester','writer','citation_checker'],WRITE_ROLES=new Set(['implementer','tester']);
 const MODEL_RE=/^[A-Za-z0-9._:-]{1,64}$/;
 const STATE={signed_in:'Signed in',signed_out:'Signed out',missing_cli:'Command-line tool not installed',error:'Status check failed'};
 const el=(tag,cls,text,parent)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=String(text);if(parent)parent.append(e);return e;};
-const roleTitle=role=>role==='orchestrator'?'Orchestrator':String(role).charAt(0).toUpperCase()+String(role).slice(1);
+const roleTitle=role=>role==='orchestrator'?'Orchestrator':(s=>s.charAt(0).toUpperCase()+s.slice(1))(String(role).replaceAll('_',' '));
 let request=()=>Promise.reject(Error('No bridge')),changed=()=>{};
 let providers=[],status=new Map(),routing=null,loadError='',loading=null,rev=0,listSeq=0;
 const signIn=new Map(),busy=new Set(),signingOut=new Set();
@@ -119,7 +120,7 @@ function routingRow(grid,role){
  const target=role==='orchestrator'?draft.orchestrator:(draft.roles[role]=draft.roles[role]||{provider:'',model:null});
  const row=el('div','route-row',null,grid);row.dataset.role=role;
  const head=el('div','route-role',null,row);el('strong','',roleTitle(role),head);
- el('span','footnote',role==='orchestrator'?'Runs every new task':WRITE_ROLES.has(role)?'Write role: needs a provider that can write':'Read role',head);
+ el('span','footnote',role==='orchestrator'?'Runs every new task':WRITE_ROLES.has(role)?'Write role: needs a provider that can write':role==='citation_checker'?'Read role: checks references against scholarly sources':'Read role',head);
  const needsWrite=WRITE_ROLES.has(role);
  const select=providerSelect(row,{id:'route-'+role+'-provider',label:roleTitle(role)+' provider',value:target.provider,needsWrite});
  const model=modelInput(row,{id:'route-'+role+'-model',label:roleTitle(role)+' model',provider:target.provider,value:target.model||''});
@@ -173,7 +174,8 @@ function renderSettings(container){
   el('h3','','Default provider for each role',form);
   el('p','footnote','New tasks and proposed teams start from these. The Orchestrator may suggest another provider with a reason; you approve every team before it runs.',form);
   const grid=el('div','route-grid',null,form);
-  for(const role of ['orchestrator',...ROLES])routingRow(grid,role);
+  // A role the backend's routing does not list yet (an older backend) gets no row, so it is never saved half-set.
+  for(const role of ['orchestrator',...ROLES.filter(r=>r!=='citation_checker'||draft.roles?.[r])])routingRow(grid,role);
   const actions=el('div','actions',null,form);const b=el('button','primary','Save defaults',actions);b.type='submit';b.disabled=saving;
   el('span','footnote route-status',saveNote,actions).setAttribute('role','status');
   el('p','error-text route-error',saveError,form).setAttribute('role','alert');
