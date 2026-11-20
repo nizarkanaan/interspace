@@ -215,6 +215,79 @@ class CheckTests(unittest.TestCase):
                 citations.check(bad, FakeLookup(), now=0)
 
 
+
+class FalseVerifiedTests(unittest.TestCase):
+    """Wave 3B: a reference is `verified` only when what it gives was confirmed, never on a guess."""
+
+    S2_LECUN = dict(LECUN, doi=None, sources=['semantic_scholar'])  # Semantic Scholar sometimes has no DOI.
+
+    def test_an_unresolved_doi_is_not_verified_by_a_title_match_without_a_doi(self):
+        lookup = FakeLookup(searches={'semantic_scholar': [self.S2_LECUN]})
+        ref = one(citations.check([{'title': 'Deep learning', 'authors': ['LeCun'], 'year': 2015,
+                                    'doi': '10.9999/made.up'}], lookup, now=0))
+        self.assertEqual((ref['status'], ref['fields']), ('mismatch', ['doi']))
+
+    def test_an_unresolved_arxiv_id_is_not_verified_by_a_title_match(self):
+        other = dict(VASWANI, doi=None, arxiv_id='1706.99999', sources=['openalex'])
+        lookup = FakeLookup(searches={'openalex': [other]})
+        ref = one(citations.check([{'title': 'Attention is all you need', 'authors': ['Vaswani'], 'year': 2017,
+                                    'arxiv_id': '1706.03762'}], lookup, now=0))
+        self.assertEqual((ref['status'], ref['fields']), ('mismatch', ['arxiv_id']))
+
+    def test_published_doi_with_its_preprint_id_is_verified(self):
+        published = dict(VASWANI, doi='10.5555/3295222.3295349', arxiv_id=None, sources=['crossref'])
+        lookup = FakeLookup(papers={('crossref', '10.5555/3295222.3295349'): published})
+        ref = one(citations.check([{'title': 'Attention is all you need', 'authors': ['Vaswani'], 'year': 2017,
+                                    'doi': '10.5555/3295222.3295349', 'arxiv_id': '1706.03762'}], lookup, now=0))
+        self.assertEqual(ref['status'], 'verified')
+
+    def test_a_title_alone_cannot_verify_a_search_match(self):
+        lookup = FakeLookup(searches={'openalex': [dict(LECUN, sources=['openalex'])]})
+        ref = one(citations.check([{'title': 'Deep learning'}], lookup, now=0))
+        self.assertEqual(ref['status'], 'unchecked')
+        self.assertIn('author', ref['reason'])
+        self.assertEqual(ref['match']['title'], 'Deep learning')
+
+    def test_raw_line_with_another_first_author_is_a_mismatch(self):
+        lookup = FakeLookup(searches={'openalex': [dict(LECUN, sources=['openalex'])]})
+        ref = one(citations.check([{'raw': 'Goodfellow, I., Bengio, Y. & Courville, A. (2016). Deep learning. '
+                                           'MIT Press.'}], lookup, now=0))
+        self.assertEqual((ref['status'], ref['fields']), ('mismatch', ['authors']))
+
+    def test_raw_line_naming_the_first_author_is_verified(self):
+        lookup = FakeLookup(searches={'openalex': [dict(LECUN, sources=['openalex'])]})
+        ref = one(citations.check([{'raw': 'Y. Le Cun, Y. Bengio and G. Hinton. Deep learning. Nature, 2015.'}],
+                                  lookup, now=0))
+        self.assertEqual(ref['status'], 'verified')
+
+    def test_arxiv_doi_is_checked_as_an_arxiv_id(self):
+        lookup = FakeLookup(papers={('arxiv', 'arXiv:1706.03762'): VASWANI})
+        ref = one(citations.check([{'title': 'Attention is all you need', 'authors': ['Vaswani'],
+                                    'doi': 'https://doi.org/10.48550/arXiv.1706.03762v5'}], lookup, now=0))
+        self.assertEqual((ref['status'], ref['source']), ('verified', 'arxiv'))
+        self.assertEqual(citations.normalize_reference({'doi': '10.48550/arXiv.1706.03762'})['arxiv_id'],
+                         '1706.03762')
+
+
+class CompactTests(unittest.TestCase):
+    def test_compact_report_keeps_status_and_identity_and_fits_many_references(self):
+        long_title = 'A ' + 'very ' * 190 + 'long title'
+        big = dict(LECUN, title=long_title, authors=['Author %d' % i for i in range(20)])
+        lookup = FakeLookup(papers={('crossref', '10.1038/nature14539'): big})
+        refs = [{'title': long_title, 'authors': ['Author 0'] * 30, 'year': 2015, 'doi': '10.1038/nature14539',
+                 'raw': 'x' * 3000} for _ in range(200)]
+        report = citations.check(refs, lookup, now=0)
+        small = citations.compact(report)
+        self.assertEqual(small['summary'], report['summary'])
+        self.assertEqual(len(small['references']), 200)
+        entry = small['references'][0]
+        self.assertEqual((entry['index'], entry['status'], entry['match']['doi']), (0, 'verified', '10.1038/nature14539'))
+        self.assertLessEqual(len(entry['input']['title']), 120)
+        self.assertNotIn('raw', entry['input'])
+        self.assertLessEqual(len(entry['match']['authors']), 3)
+        self.assertEqual(report['references'][0]['input']['raw'], 'x' * 3000)  # The original is unchanged.
+
+
 class SourceLookupTests(unittest.TestCase):
     class NotFound(ValueError):
         code = 'not_found'
