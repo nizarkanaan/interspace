@@ -175,9 +175,9 @@ export default async function check(page,url){
   await until(async()=>(await text(outputs.locator('[data-output="references.bib"]'))).includes('Saved.'),'the save panel reply');
   assert(saves.length===1&&saves[0].suggested_name.endsWith('.bib')&&saves[0].path.startsWith(path.join(realpathSync(root),'data','tasks',review,'outputs')+path.sep),'Save panel: '+JSON.stringify(saves));
   // Research call counts, never money; no Review/Merge anywhere for this task.
-  await until(async()=>/Research calls:.*Crossref/.test(await text(page.locator('#agent-view .research-usage'))),'research usage for every source used');
+  await until(async()=>/Research requests:.*Crossref/.test(await text(page.locator('#agent-view .research-usage'))),'research usage for every source used');
   const usage=await text(page.locator('#agent-view .research-usage'));
-  assert(/Semantic Scholar \d+ call/.test(usage)&&!/\$|€|£|cost|price/i.test(usage),'Usage: '+usage);
+  assert(/Semantic Scholar \d+ sent/.test(usage)&&!/\$|€|£|cost|price/i.test(usage),'Usage: '+usage);
   assert(await page.locator('#agent-view').getByRole('button',{name:/Review|Merge/}).count()===0,'Review/Merge offered for research');
   await shot('research-report');
   await outputs.scrollIntoViewIfNeeded();await page.screenshot({path:path.join(SHOTS,'research-outputs.png')});

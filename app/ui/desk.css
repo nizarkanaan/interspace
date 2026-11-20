@@ -117,6 +117,9 @@
 .citation-summary{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px 16px;font-size:14px}
 .citation-summary .verified strong{color:var(--accent)}
 .citation-summary :is(.mismatch,.not-found,.retracted,.unknown) strong{color:var(--warn)}
+.retracted-alert{margin:0;padding:6px 10px;border-left:3px solid var(--warn);color:var(--warn);font-weight:600}
+.reference .reference-number{color:var(--muted)}
+.link-host{color:var(--muted);font-size:.9em;overflow-wrap:anywhere}
 .reference-input{font-size:14px}
 .agent-outputs{border-bottom:1px solid var(--line);padding:0 0 14px;margin:-8px 0 22px}
 .agent-outputs h2{font-size:17px;margin:0 0 4px}
