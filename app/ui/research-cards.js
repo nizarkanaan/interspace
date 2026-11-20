@@ -203,5 +203,5 @@ function usageText(u){
  return 'Research calls: '+names.map(n=>{const c=Number.isSafeInteger(calls[n])?calls[n]:0,k=Number.isSafeInteger(cached[n])?cached[n]:0;return R.title(n)+' '+plural(c,'call')+(k?', '+count(k)+' cached':'');}).join(' · ');
 }
 
-window.interspaceResearchCards={toolCard,citationCard,outputsPanel,usageText,markdown,paperList};
+window.interspaceResearchCards={toolTitle:name=>TOOL[name]||'',toolCard,citationCard,outputsPanel,usageText,markdown,paperList};
 })();

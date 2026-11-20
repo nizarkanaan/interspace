@@ -136,13 +136,16 @@ function subagentCard(card,ctx){
  const s=ctx.sub,label=P.roleTitle(s.role||'subagent'),st=ctx.status||{state:s.state||'queued'};
  card.classList.add('subagent');card.setAttribute('aria-label',label+' subagent');card.dataset.child=s.task_id;
  const head=el('div','card-head',null,card);P.badge(s.provider,head);el('strong','',label,head);
- el('span','state '+(st.state||''),ctx.statusText({state:st.state}),head);
+ // A child that answered its brief waits idle for a follow-up; on its card that reads as finished.
+ const finished=st.state==='idle'&&s.finished;
+ el('span','state '+(finished?'finished':st.state||''),finished?'Finished':ctx.statusText({state:st.state}),head);
  const facts=[(s.model||'default model'),ACCESS[s.access]||s.access];if(s.tokens_used!=null)facts.push(tokens(s.tokens_used)+' tokens');
  el('p','footnote',facts.filter(Boolean).join(' · '),card);
  if(s.brief)el('p','',s.brief,card);
  if(ctx.activity){const a=el('p','sub-activity',null,card);a.setAttribute('aria-label',label+' latest activity');el('span','footnote','Latest: ',a);a.append(ctx.activity);}
  const diff=s.diff_summary;
  if(diff&&Array.isArray(diff.files)){const add=diff.files.reduce((a,f)=>a+(f.additions||0),0),del=diff.files.reduce((a,f)=>a+(f.deletions||0),0);el('p','footnote mono',diff.files.length+' file'+(diff.files.length===1?'':'s')+' changed · +'+add+' −'+del+(diff.branch?' · '+diff.branch:''),card);}
+ if(ctx.citation&&ctx.citationCard){const box=el('div','sub-citation',null,card);ctx.citationCard(box,ctx.citation.citation,{state:ctx.citation,bump:ctx.bumpChild});}
  if(s.report_excerpt){const det=el('details','report',null,card);el('summary','','Report',det);ctx.markdown(s.report_excerpt,det);}
  const merged=window.interspaceReview?.merged?.(s.task_id);
  if(merged)el('p','merged-line',merged.merge_commit?'Merged into '+merged.into+' · '+String(merged.merge_commit).slice(0,8):'Already merged into '+merged.into,card).setAttribute('role','status');

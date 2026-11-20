@@ -15,7 +15,7 @@ export default async function check(page,url){
  assert(ss.includes('Semantic Scholar')&&ss.includes('Optional: your API key')&&ss.includes('Ready')&&ss.includes('Shared pool: often throttled'),'Semantic Scholar row: '+ss);
  assert((await text(item('arxiv'))).includes('Nothing to enter')&&await item('arxiv').locator('input').count()===0,'arXiv asks for a credential');
  const up=await text(item('unpaywall'));
- assert(up.includes('Needs your email address')&&!up.includes('Optional'),'Unpaywall not marked required: '+up);
+ assert(up.includes('Required: your email address')&&up.includes('Needs your email address')&&!up.includes('Optional'),'Unpaywall not marked required: '+up);
  assert((await text(item('crossref'))).includes('Literal <img src=x onerror="window.pwned=1"> detail')&&await settings.locator('img').count()===0,'Detail inserted as markup');
  // The email goes to that service as its contact; keys stay in the Keychain and never reach agents.
  assert((await text(item('crossref'))).includes('Your email goes to Crossref with each request, as the contact address')&&(await text(item('unpaywall'))).includes('Your email goes to Unpaywall'),'Email contact note missing');
