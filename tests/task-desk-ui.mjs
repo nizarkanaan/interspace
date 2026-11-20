@@ -61,7 +61,7 @@ export default async function check(page,url){
  assert(JSON.stringify(buttons)===JSON.stringify(['← Tasks','Conversation','Plan','Result']),'Earlier task offers actions: '+JSON.stringify(buttons));
  assert(await page.locator('#task-detail textarea, #task-detail input, #task-detail form').count()===0,'Earlier task has an input');
  const sent=await page.evaluate(()=>window.deskFixture.requests.map(r=>r.method));
- assert(sent.every(m=>['state','select_task','switch_project','providers_list'].includes(m)),'Reading an earlier task sent '+sent.join(','));
+ assert(sent.every(m=>['state','select_task','switch_project','providers_list','research_sources'].includes(m)),'Reading an earlier task sent '+sent.join(','));
  await page.locator('[data-view=tasks]').click();await page.locator('[data-open-task="old-2"]').click();
  await page.locator('[data-task-tab=plan]').click();assert(await page.locator('#plan-empty').isVisible(),'Empty plan not explained');
  await page.locator('[data-task-tab=result]').click();assert((await text('#result-body')).includes('Stopped early'),'Saved error missing');

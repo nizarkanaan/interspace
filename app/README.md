@@ -6,16 +6,17 @@ Launch `dist/Interspace.app` with a double-click. It opens its own native window
 - **Every task** is a conversation with the Orchestrator. It answers directly, or proposes a team of subagents on Claude and Codex that you approve before anything runs.
 - **Review and merge:** each writing subagent commits to its own `interspace/task-…` branch. **Review changes** shows the diff; **Merge** merges it into a branch you pick.
 - **Removed:** the Read-only review and Fix & test (Python) modes, project sources, Workspace advice, the Observatory, project conversation and connected apps. Earlier tasks still open read-only, labelled "Earlier task (read-only)".
-- **Not yet done:** a live run with real Claude and Codex sign-ins inside the app. The full team flow is tested with fake command-line tools.
+- **Research workspace (approved 2026-11-19, being built):** research questions without a project, scholarly sources with your own keys, and a citation checker. See [Research](#research). Plan: `docs/superpowers/plans/2026-11-19-research-workspace.md`.
+- **Not yet done:** a live run with real Claude and Codex sign-ins inside the app, and live research calls with your own keys. The full team flow and the research screens are tested with fake command-line tools, recorded fixtures and fake replies, never the network.
 
 ## Projects and tasks
 
 **Add project folder** registers a Git repository. The project picker switches among projects; each keeps its own tasks. **Settings → Project details** saves a name, brief, priority and next action locally, without a model call or source edits.
 
-**Settings → Providers** shows each provider's sign-in state, starts a sign-in or shows the command to run, and sets the default provider and model for each role (Orchestrator, researcher, implementer, reviewer, tester, writer).
+**Settings → Providers** shows each provider's sign-in state, starts a sign-in or shows the command to run, and sets the default provider and model for each role (Orchestrator, researcher, implementer, reviewer, tester, writer, citation checker).
 
-**New task** starts an Orchestrator conversation:
-1. Give a title and pick the project. The Orchestrator uses your default provider and model unless you change them here.
+**New task** starts an Orchestrator conversation. Choose **Research question** (no project needed; see [Research](#research)) or **Project task**:
+1. Give a title and, for a project task, pick the project. The Orchestrator uses your default provider and model unless you change them here.
 2. Review the task scope, then choose **Create task**.
 3. Approve the scope on the task, then message the Orchestrator.
 
@@ -26,6 +27,23 @@ Launch `dist/Interspace.app` with a double-click. It opens its own native window
 **Review changes → Merge.** A writing subagent's changes are committed to its own `interspace/task-…` branch. **Review changes** lists the changed files and the diff. **Merge** merges the branch into the branch you pick, in a temporary worktree, and only if the branch is still the one you reviewed. Interspace never changes your checked-out branch or working files: to merge into the branch you have checked out, run `git merge` there yourself. Conflicts are reported, and nothing is forced.
 
 Inside the scope an agent acts without asking. Outside it, that task alone pauses and asks: Allow once, Add to scope, or Deny. Read-only members and the Orchestrator can never write. Up to 4 agent runs work at once, subagents included; further runs queue.
+
+## Research
+
+Interspace is a research environment that still codes. A **research question** needs no project: agents search scholarly sources, follow citations, check every reference they cite, and give you a report and a BibTeX file.
+
+**Sources.** Semantic Scholar, OpenAlex, arXiv, Crossref and Unpaywall. **Settings → Research sources** lists each one with what it needs, its status, **Test**, **Remove** and a link to get a free key:
+- Semantic Scholar and OpenAlex: an optional API key, which raises your allowance.
+- Crossref: an optional email; Unpaywall: a required email. The email goes to that service with each request, as the contact address it asks API users for.
+- arXiv: nothing to enter.
+
+Keys and emails are your own. They are kept in this Mac's Keychain, are never shown again after you save them, and never reach agents, logs, events or git. Only Interspace's backend calls these services, over https. Research calls use no tokens; each task shows how many calls it made to each source, never money.
+
+**Research questions.** **New task → Research question** offers presets: **Literature review**, **Related work** and **Verify my references** (paste a bibliography). The scope has research sources only: no project, files, commands or network. Each source is **Allow**, **Ask** (each call waits for you) or **Off**; new scopes allow the sources you can use. Every team member only reads. Research tasks are listed under **Research** in the sidebar, next to your projects, and have no Review or Merge.
+
+**What you see.** Research tool calls show papers with title, authors, year, venue, sources and citation counts; links appear only for https addresses, and all text from the sources is shown as plain text. The **citation report** marks each reference **Verified** (title, year and first author matched a published record), **Not verified** (differs, with the fields, or not found), **Retracted**, or **Not checked** with the reason. Nothing is called verified unless the checker said so.
+
+**Outputs.** A finished research answer is saved as `report.md`, plus `references.bib` when the citation checker ran. **Outputs** on the task shows them; **Save** copies a file to a place you choose. Project tasks still use Review and Merge for code.
 
 ## Connection
 
@@ -47,7 +65,7 @@ Budgets are tokens only.
 
 ## Data and project protection
 
-Tasks, events, usage records and audit logs live in `~/Library/Application Support/Interspace`.
+Tasks, events, usage records, audit logs, research outputs and the research response cache live in `~/Library/Application Support/Interspace`. Research keys and emails live only in the macOS Keychain.
 
 Always refused:
 - credential files;

@@ -74,3 +74,59 @@
 .merged-line{margin:0;font-size:14px;color:var(--accent);overflow-wrap:anywhere}
 .interrupted-note{margin:6px 0 0;border-left:3px solid var(--warn);background:var(--surface);padding:8px 12px;overflow-wrap:anywhere}
 .review-back{justify-self:start}
+
+/* Research workspace: Research entry, task kinds and presets, research sources, paper lists, citation report, outputs.
+   Status is said in words; colour only repeats it. */
+.research-nav .nav{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.nav-count{font-size:12px;color:var(--muted)}
+.choice{border:0;padding:0;margin:0 0 18px;display:grid;gap:8px;min-width:0}
+.choice legend{font-size:14px;color:var(--muted);padding:0;margin-bottom:6px}
+.choice-option{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:7px;cursor:pointer;min-width:0}
+.choice-option:has(input:checked){border-color:var(--accent);background:var(--subtle)}
+.choice-option:has(input:disabled){opacity:.55;cursor:default}
+.choice-option input{margin-top:5px;flex-shrink:0}
+.choice-option span{display:grid;gap:2px;min-width:0;overflow-wrap:anywhere}
+.choice-option small{font-size:13px}
+.presets{grid-template-columns:repeat(auto-fill,minmax(170px,1fr))}
+.presets .choice-option{padding:8px 12px}
+#new-bib{font:13px/1.5 ui-monospace,SFMono-Regular,monospace}
+#new-preview{margin:4px 0 16px}
+#new-preview pre{font-size:13px;color:var(--muted)}
+.research-sources .key-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+.research-sources .key-row input{flex:1 1 220px;width:auto}
+.research-key{margin:6px 0}
+.research-key label{font-size:14px}
+.source-need{font-size:13px;color:var(--muted)}
+.ext-link{color:var(--accent);overflow-wrap:anywhere}
+.research-settings{margin-top:32px}
+.research-query{font-size:14px;overflow-wrap:anywhere}
+.paper-list,.reference-list{list-style:none;margin:0;padding:0;display:grid;gap:0}
+.paper,.reference{border-top:1px solid var(--line);padding:9px 0;display:grid;gap:3px;min-width:0;overflow-wrap:anywhere}
+.paper:first-child,.reference:first-child{border-top:0}
+.paper p,.reference p{margin:0}
+.paper-title{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;font-weight:550}
+.paper-meta{font-size:14px}
+.paper-facts{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center}
+.source-badges{display:inline-flex;flex-wrap:wrap;gap:4px}
+.source-badge{font-size:12px;padding:0 7px;border:1px solid var(--line);border-radius:999px;background:var(--surface)}
+.paper-flag{font-size:12px;font-weight:550;text-transform:uppercase;letter-spacing:.04em}
+.paper-flag.retracted,.reference.retracted .reference-status,.reference.mismatch .reference-status,.reference.not-found .reference-status,.reference.unknown .reference-status{color:var(--warn)}
+.reference.verified .reference-status{color:var(--accent)}
+.reference.unchecked .reference-status{color:var(--muted)}
+.paper-abstract{margin:4px 0 0;padding-top:6px}
+.citation-summary{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px 16px;font-size:14px}
+.citation-summary .verified strong{color:var(--accent)}
+.citation-summary :is(.mismatch,.not-found,.retracted,.unknown) strong{color:var(--warn)}
+.reference-input{font-size:14px}
+.agent-outputs{border-bottom:1px solid var(--line);padding:0 0 14px;margin:-8px 0 22px}
+.agent-outputs h2{font-size:17px;margin:0 0 4px}
+.output-list{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+.output-item{display:grid;gap:6px;min-width:0}
+.output-item .actions{justify-content:flex-start}
+.output-head{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline}
+.output-body{border:1px solid var(--line);border-radius:8px;padding:12px 14px;min-width:0;overflow-wrap:anywhere}
+.output-text{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;max-height:480px;overflow:auto;font:12.5px/1.55 ui-monospace,SFMono-Regular,monospace}
+.report-md h3,.report-md h4,.report-md h5,.report-md h6{margin:14px 0 6px}
+.report-md ul,.report-md ol{margin:0 0 8px;padding-left:22px}
+.report-md blockquote{margin:0 0 8px;padding-left:12px;border-left:3px solid var(--line);color:var(--muted)}
+.research-usage{margin:0 0 6px}
