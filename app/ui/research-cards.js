@@ -28,6 +28,8 @@ const FIELD={title:'title',year:'year',authors:'authors',doi:'DOI',arxiv_id:'arX
 // A list of untrusted strings, at most `max` long; anything else is dropped.
 const strings=(v,max=50)=>Array.isArray(v)?v.filter(x=>typeof x==='string'&&x.trim()).slice(0,max):[];
 function sourceBadges(list,parent){const box=el('span','source-badges',null,parent);for(const s of strings(list,10)){const b=el('span','source-badge',R.title(s),box);b.dataset.source=s;}return box;}
+// Citation-style line: `Authors (Year). Venue.`; empty parts are left out.
+function citeLine(authors,year,venue){const a=authorsText(authors),y=Number.isInteger(year)?'('+year+')':'',v=str(venue).trim();const lead=[a,y].filter(Boolean).join(' ');return [lead,v].filter(Boolean).map(x=>/[.?!]$/.test(x)?x:x+'.').join(' ');}
 function authorsText(list){const a=strings(list,200);if(!a.length)return '';return a.length>3?a.slice(0,3).join(', ')+' et al.':a.join(', ');}
 // One paper: the title links only to an https URL; DOI and arXiv ID are plain text.
 function paper(p,parent,{abstract=false}={}){
@@ -35,8 +37,8 @@ function paper(p,parent,{abstract=false}={}){
  const head=el('div','paper-title',null,li);const name=str(p.title).trim()||'Untitled';
  if(!R.link(p.url,name,head))el('strong','',name,head);
  if(p.retracted===true)el('span','paper-flag retracted','Retracted',head);
- const meta=[authorsText(p.authors),Number.isInteger(p.year)?String(p.year):'',str(p.venue)].filter(Boolean);
- if(meta.length)el('p','paper-meta',meta.join(' · '),li);
+ const meta=citeLine(p.authors,p.year,p.venue);
+ if(meta)el('p','paper-meta',meta,li);
  const facts=el('p','paper-facts footnote',null,li);
  sourceBadges(p.sources,facts);
  if(Number.isSafeInteger(p.citation_count)&&p.citation_count>=0)el('span','',plural(p.citation_count,'citation'),facts);
@@ -93,12 +95,13 @@ function toolCard(card,{call,result,output,state,bump}){
 // Citation report: counts come from the rows themselves, so a summary can never claim more than the rows show.
 function inputText(input){
  if(!input||typeof input!=='object')return 'Reference';
- const bits=[str(input.title)||str(input.raw)];const a=authorsText(input.authors);if(a)bits.push(a);if(input.year!=null)bits.push(str(input.year));if(input.doi)bits.push('doi:'+str(input.doi));if(input.arxiv_id)bits.push('arXiv:'+str(input.arxiv_id));
- return bits.filter(Boolean).join(' · ')||'Reference';
+ const a=authorsText(input.authors),y=input.year!=null&&str(input.year)?'('+str(input.year)+')':'',t=str(input.title)||str(input.raw);
+ const bits=[[a,y].filter(Boolean).join(' '),t].filter(Boolean).map(x=>/[.?!]$/.test(x)?x:x+'.');if(input.doi)bits.push('doi:'+str(input.doi));if(input.arxiv_id)bits.push('arXiv:'+str(input.arxiv_id));
+ return bits.join(' ')||'Reference';
 }
 function referenceRow(ref,list){
  const s=STATUS[ref?.status],li=el('li','reference '+(s?s.cls:'unknown'),null,list);
- if(Number.isSafeInteger(ref?.index)&&ref.index>=0)el('p','footnote reference-number','Reference '+count(ref.index+1),li);
+ if(Number.isSafeInteger(ref?.index)&&ref.index>=0){const n=el('p','reference-number',null,li);el('span','visually-hidden','Reference ',n);n.append(count(ref.index+1));}
  const label=s?s.label:'Unknown result ('+str(ref?.status)+'): not verified';
  const head=el('p','reference-status',null,li);el('strong','',label,head);
  if(ref?.status==='mismatch'){const f=strings(ref.fields,8).map(x=>FIELD[x]||x);if(f.length)head.append(' in '+f.join(', '));}
@@ -108,8 +111,8 @@ function referenceRow(ref,list){
  if(m&&typeof m==='object'){
   const line=el('p','footnote reference-match',null,li);line.append(ref.status==='verified'?'Matched: ':ref.status==='retracted'?'Matched (retracted): ':'Closest record: ');
   const name=str(m.title)||'Untitled';if(!R.link(m.url,name,line))line.append(name);
-  const meta=[authorsText(m.authors),Number.isInteger(m.year)?String(m.year):'',str(m.venue)].filter(Boolean);if(meta.length)line.append(' · '+meta.join(' · '));
-  if(m.doi)line.append(' · doi:'+str(m.doi));
+  line.append('. ');const meta=citeLine(m.authors,m.year,m.venue);if(meta)line.append(meta+' ');
+  if(m.doi)line.append('doi:'+str(m.doi));
  }
  const facts=[];if(ref?.source)facts.push('checked with '+R.title(ref.source));if(typeof ref?.similarity==='number')facts.push('title similarity '+Math.round(ref.similarity*100)+'%');
  if(facts.length)el('p','footnote',facts.join(' · '),li);
