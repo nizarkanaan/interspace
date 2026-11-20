@@ -95,13 +95,14 @@ function renderAgent(){
  const reason=gate(id);$('agent-send').disabled=!!reason;
  $('agent-note').textContent=reason||'Enter sends · Shift+Enter adds a line · / for commands · @ to mention';
  if(tab==='corpus')corpusArea(id);
+ if(tab==='report')reportArea(id);
 }
 // A task's outputs (report and BibTeX), from its latest `outputs` event.
 function outputsArea(id){
  const box=$('agent-outputs'),data=S.outputs(id),key=id+':'+JSON.stringify(data)+':'+outputsRev;
  if(box.dataset.key===key)return;box.dataset.key=key;
  const keep=document.activeElement&&box.contains(document.activeElement)?document.activeElement.id:null;
- window.interspaceResearchCards.outputsPanel(box,id,data,{request:host.request,refresh:()=>{outputsRev++;refresh();}});
+ window.interspaceResearchCards.outputsPanel(box,id,data,{request:host.request,refresh:()=>{outputsRev++;refresh();},openReport:isResearch(id)&&!parentOf(id)?()=>{tabs.set(id,'report');refresh();const t=$('agent-tabs');if(t)scrollTo(0,0);requestAnimationFrame(()=>{const f=$('agent-report');if(f)f.focus();});}:null});
  if(keep){const again=document.getElementById(keep);if(again)again.focus();}
 }
 let outputsRev=0;
@@ -115,10 +116,12 @@ function layoutTabs(id){
  const nav=$('agent-tabs'),narrow=narrowQuery.matches,corpus=isResearch(id)&&!parentOf(id);
  let tab=tabs.get(id)||'conversation';
  if(tab==='corpus'&&!corpus||tab==='details'&&!narrow)tab='conversation';
- const shown={conversation:true,corpus,details:narrow};
+ const report=corpus&&reportOutput(id)!=null;
+ if(tab==='report'&&!report)tab='conversation';
+ const shown={conversation:true,report,corpus,details:narrow};
  for(const b of nav.querySelectorAll('[data-agent-tab]')){b.hidden=!shown[b.dataset.agentTab];b.setAttribute('aria-pressed',String(b.dataset.agentTab===tab));}
  nav.hidden=Object.values(shown).filter(Boolean).length<2;
- $('agent-corpus').hidden=tab!=='corpus';$('agent-details').hidden=narrow&&tab!=='details';
+ $('agent-corpus').hidden=tab!=='corpus';$('agent-report').hidden=tab!=='report';$('agent-details').hidden=narrow&&tab!=='details';
  return tab;
 }
 // While the scope waits for approval, the conversation says so, so a task never sits waiting unnoticed.
@@ -129,6 +132,23 @@ function scopeNote(id,talk){
 function openEditor(id){
  if(narrowQuery.matches)tabs.set(id,'conversation');
  requestAnimationFrame(()=>{const e=$('agent-scope-editor');if(e&&!e.hidden)e.scrollIntoView({block:'start'});});
+}
+// Report tab (2026-11-20-report-reader-design.md): report.md at reading width, refetched when its output changes.
+const reports=new Map();
+const reportOutput=id=>(Array.isArray(S.outputs(id)?.outputs)?S.outputs(id).outputs:[]).find(o=>o&&o.name==='report.md')||null;
+function reportInfo(id){if(!reports.has(id))reports.set(id,{text:null,truncated:false,loading:false,error:'',key:null,rev:0,saving:false,note:'',saveError:''});return reports.get(id);}
+function reportArea(id){
+ const r=reportInfo(id),o=reportOutput(id),key=JSON.stringify(o),c=corpusInfo(id);
+ if(!c.data&&!c.loading&&!c.error)loadCorpus(id);
+ if(o&&r.key!==key&&!r.loading){r.key=key;r.loading=true;r.error='';r.rev++;
+  host.request('task_output_read',{task_id:id,name:'report.md'},{manual:true}).then(x=>{if(typeof x?.text!=='string')throw Error('The report could not be read.');r.text=x.text;r.truncated=!!x.truncated;})
+   .catch(e=>{r.error=e.message||'The report could not be read.';}).finally(()=>{r.loading=false;r.rev++;refresh();});}
+ const box=$('agent-report'),k=id+':'+r.rev+':'+c.rev;if(box.dataset.key===k)return;box.dataset.key=k;
+ const keep=document.activeElement&&box.contains(document.activeElement)?document.activeElement.id:null;
+ box.tabIndex=-1;
+ window.interspaceReader.render(box,{name:'report.md',bytes:o?.bytes,text:r.text,truncated:r.truncated,corpus:c.data,loading:r.loading,error:r.error,saving:r.saving,note:r.note,saveError:r.saveError,
+  onSave:()=>{r.saving=true;r.note='';r.saveError='';r.rev++;refresh();host.request('task_output_save',{task_id:id,name:'report.md'},{manual:true}).then(x=>{r.note=x?.saved?'Saved.':'Not saved.';}).catch(e=>{r.saveError=e.message||'The report was not saved.';}).finally(()=>{r.saving=false;r.rev++;refresh();});}});
+ if(keep){const again=document.getElementById(keep);if(again)again.focus();}
 }
 function corpusInfo(id){if(!corpora.has(id))corpora.set(id,{data:null,loading:false,error:'',seen:null,timer:null,ui:{q:'',filter:'all',sort:'found',all:false},rev:0});return corpora.get(id);}
 function loadCorpus(id){

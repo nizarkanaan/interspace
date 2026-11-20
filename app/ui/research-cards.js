@@ -169,7 +169,7 @@ function markdown(text,parent){
 const outputState=new Map();
 const KIND={report:'Report',bibtex:'BibTeX references'};
 const size=b=>!Number.isFinite(b)?'':b<1024?b+' bytes':b<1048576?(b/1024).toFixed(1)+' KB':(b/1048576).toFixed(1)+' MB';
-function outputsPanel(container,taskId,data,{request,refresh}){
+function outputsPanel(container,taskId,data,{request,refresh,openReport}){
  const list=Array.isArray(data?.outputs)?data.outputs.filter(o=>o&&typeof o.name==='string'&&o.name):[];
  container.replaceChildren();container.hidden=!list.length;if(!list.length)return;
  if(!outputState.has(taskId))outputState.set(taskId,new Map());const st=outputState.get(taskId);
@@ -181,14 +181,15 @@ function outputsPanel(container,taskId,data,{request,refresh}){
   const li=el('li','output-item',null,ul);li.dataset.output=o.name;
   const head=el('div','output-head',null,li);el('strong','mono',o.name,head);el('span','footnote',[KIND[o.kind]||str(o.kind),size(o.bytes)].filter(Boolean).join(' · '),head);
   const acts=el('div','actions',null,li);
-  const view=el('button','',s.open?'Hide':'View',acts);view.type='button';view.id='output-view-'+safe;view.setAttribute('aria-expanded',String(!!s.open));view.setAttribute('aria-label',(s.open?'Hide ':'View ')+o.name);
-  view.onclick=()=>{s.open=!s.open;if(s.open&&s.text==null&&!s.loading)read(taskId,o,s,request,refresh);refresh();};
+  if(o.kind==='report'&&openReport){const read=el('button','','Read',acts);read.type='button';read.id='output-read-'+safe;read.setAttribute('aria-label','Read '+o.name);read.onclick=()=>openReport(o);}
+  const view=o.kind==='report'&&openReport?null:el('button','',s.open?'Hide':'View',acts);if(view){view.type='button';view.id='output-view-'+safe;view.setAttribute('aria-expanded',String(!!s.open));view.setAttribute('aria-label',(s.open?'Hide ':'View ')+o.name);
+  view.onclick=()=>{s.open=!s.open;if(s.open&&s.text==null&&!s.loading)read(taskId,o,s,request,refresh);refresh();};}
   const save=el('button','',s.saving?'Saving…':'Save',acts);save.type='button';save.id='output-save-'+safe;save.disabled=!!s.saving;save.setAttribute('aria-label','Save '+o.name);
   save.onclick=()=>{s.saving=true;s.note='';s.error='';refresh();request('task_output_save',{task_id:taskId,name:o.name},{manual:true}).then(r=>{s.note=r?.saved?'Saved.':'Not saved.';}).catch(e=>{s.error=e.message||'The file was not saved.';}).finally(()=>{s.saving=false;refresh();});};
   if(o.kind==='bibtex')el('p','footnote','Holds the references the citation checker verified; mismatched ones are marked in a comment, and not-found or retracted ones are left out.',li);
   if(s.note)el('p','footnote',s.note,li).setAttribute('role','status');
   if(s.error)el('p','error-text',s.error,li).setAttribute('role','alert');
-  if(s.open){
+  if(s.open&&view){
    const body=el('div','output-body',null,li);body.id='output-body-'+safe;view.setAttribute('aria-controls',body.id);
    if(s.loading)el('p','muted','Loading…',body);
    else if(s.readError)el('p','error-text',s.readError,body);

@@ -168,9 +168,11 @@ export default async function check(page,url){
   assert(await final.getByRole('heading',{name:'Findings'}).count()===1&&await final.locator('li').count()>=4&&await final.locator('a[href="https://arxiv.org/abs/1706.03762"]').count()===1,'Final answer not rendered as a document');
   const outputs=page.locator('#agent-outputs');
   await until(async()=>await outputs.isVisible()&&await outputs.locator('.output-item').count()===2,'report.md and references.bib',30000);
-  await page.locator('#output-view-report_md').click();
-  await until(async()=>(await text(outputs.locator('#output-body-report_md'))).includes('short review'),'report.md text');
-  assert(await outputs.locator('#output-body-report_md h3, #output-body-report_md h2').count()>0,'Report not rendered as Markdown');
+  await page.locator('#output-read-report_md').click();
+  const reader=page.locator('#agent-report');
+  await until(async()=>(await text(reader)).includes('short review'),'report.md text');
+  assert(await reader.locator('.report-md h3, .report-md h2').count()>0,'Report not rendered as Markdown');
+  await shot('research-report-reader');
   await page.locator('#output-view-references_bib').click();
   await until(async()=>(await text(outputs.locator('#output-body-references_bib'))).includes('@'),'references.bib text');
   const bib=await text(outputs.locator('#output-body-references_bib'));
@@ -185,6 +187,7 @@ export default async function check(page,url){
   assert(await page.locator('#agent-view').getByRole('button',{name:/Review|Merge/}).count()===0,'Review/Merge offered for research');
   await shot('research-report');
   await outputs.scrollIntoViewIfNeeded();await page.screenshot({path:path.join(SHOTS,'research-outputs.png')});
+  await page.locator('[data-agent-tab=conversation]').click();
   await report.scrollIntoViewIfNeeded();await page.screenshot({path:path.join(SHOTS,'citation-report.png')});
   // Listed under Research, not on the project desk.
   await page.locator('#agent-back').click();
