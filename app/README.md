@@ -57,17 +57,14 @@ The app finds `codex` on PATH or inside the official ChatGPT/Codex Mac app, and 
 
 Model use counts against your own accounts. Returned token counts are displayed. Money and remaining subscription allowance are never inferred.
 
-## Token budgets
+## Token usage
 
-Each task has a **token budget**, 250,000 by default.
-- It counts the tokens each provider reports for every model call the task owns:
-  - **Codex:** `input + output`.
-  - **Claude:** `input + cache creation + cache read + output`.
-- **Before each turn:** the app reserves an estimate and refuses a turn that cannot fit.
-- **A run that hits the limit** stops as **Budget exhausted**.
+New tasks have **no token limit**; you are never asked for one. Each task shows the tokens its model calls used:
+- **Codex:** `input + output`.
+- **Claude:** `input + cache creation + cache read + output`.
 - **A call that reports no counts** is charged its estimate and labelled as estimated.
 
-Budgets are tokens only.
+Tasks saved by earlier versions keep the limit they were created with: a turn that cannot fit is refused, and a run that hits it stops as **Budget exhausted**. Usage is tokens only; money and remaining subscription allowance are never shown.
 
 ## Data and project protection
 

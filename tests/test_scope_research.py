@@ -127,7 +127,7 @@ class DefaultTests(unittest.TestCase):
         self.assertEqual(document['network'], {'default': 'deny', 'allow_hosts': [], 'deny_hosts': []})
         self.assertEqual(document['web_search'], 'deny')
         self.assertEqual(document['research']['sources']['crossref'], 'allow')
-        self.assertEqual(document['limits']['token_budget'], budget.DEFAULT_BUDGET)
+        self.assertIsNone(document['limits']['token_budget'])  # No token limit unless the user set one.
         self.assertEqual(scope.research_default(token_budget=5000)['limits']['token_budget'], 5000)
         self.assertEqual(scope.research_default()['research'], {'sources': {}})
 

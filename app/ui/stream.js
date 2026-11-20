@@ -47,7 +47,7 @@ function apply(m,e){
   case 'diff':{remember(m,d);m.workspace=d.workspace||m.workspace;if(d.cumulative){m.items.delete('cumulative');item(m,'cumulative').diff=d;}else item(m,key).diff=d;return;}
   case 'ask':{const it=item(m,key);it.ask=d;it.sending=false;it.answerError='';m.openAsk=key;if(d.request)remember(m,d.request);return;}
   case 'answer':{const it=item(m,key);it.answer=d;it.sending=false;if(m.openAsk===key)m.openAsk=null;return;}
-  case 'budget':m.budget=d;if(d.charge_kind!=='reserved')row(m,e,'budget',{text:(d.charge_kind==='estimated'?'Estimated ':'Reported ')+tokens(d.tokens)+' tokens'+(d.charge_kind==='estimated'?' (no counts returned)':'')+' · '+tokens(d.used)+' / '+tokens(d.budget)+' used'});return;
+  case 'budget':m.budget=d;if(d.charge_kind!=='reserved')row(m,e,'budget',{text:(d.charge_kind==='estimated'?'Estimated ':'Reported ')+tokens(d.tokens)+' tokens'+(d.charge_kind==='estimated'?' (no counts returned)':'')+' · '+tokens(d.used)+(d.budget==null?' used':' / '+tokens(d.budget)+' used')});return;
   case 'scope':m.scopeEvent=d;row(m,e,'scope',{text:'Scope v'+d.scope_version+' '+({approved:'approved',edited:'edited: approve it before the next action',amended:'amended and approved'}[d.change]||String(d.change))+(d.summary?': '+d.summary:'')});return;
   case 'error':item(m,key).error=d;return;
   // Research (docs/superpowers/specs/research/tasks.md): a citation report card, call counts and the task's outputs.
@@ -109,7 +109,7 @@ function childStatus(id,fallback){
  const r=rowStatus(id);if(r&&TERMINAL.has(r))return {state:r,detail:'',queue_position:null,reason:null};
  return {state:fallback||'queued',detail:'',queue_position:null,reason:null};
 }
-function budgetText(b){if(!b)return '';let text='Tokens '+tokens(b.used)+' / '+tokens(b.budget);if(b.reserved)text+=' · '+tokens(b.reserved)+' reserved for this turn';if(b.overshoot)text+=' · over budget by '+tokens(b.overshoot);return text;}
+function budgetText(b){if(!b)return '';let text='Tokens '+tokens(b.used)+(b.budget==null?' used':' / '+tokens(b.budget));if(b.reserved)text+=' · '+tokens(b.reserved)+' reserved for this turn';if(b.overshoot)text+=' · over budget by '+tokens(b.overshoot);return text;}
 
 // Text-safe Markdown: fenced code, `code` and **bold**; everything else stays literal text.
 function inline(text,parent){for(const part of text.split(/(`[^`\n]+`|\*\*[^*\n]+\*\*)/)){if(!part)continue;if(/^`[^`]+`$/.test(part))el('code','',part.slice(1,-1),parent);else if(/^\*\*[^*]+\*\*$/.test(part))el('strong','',part.slice(2,-2),parent);else parent.append(document.createTextNode(part));}}

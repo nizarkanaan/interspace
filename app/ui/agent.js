@@ -54,7 +54,7 @@ function head(container,id,compact){
  const st=status(id);el('p','agent-status',S.statusText(st),container).setAttribute('role','status');
  // After a restart nothing resumes by itself: say so plainly, and offer no resume action.
  if(st?.state==='interrupted'&&!compact)el('p','interrupted-note','The app closed while this '+(parentOf(id)?'subagent':'task')+' was working. Nothing resumed, and nothing will on its own. Its branch and changes are kept'+(parentOf(id)?'.':'; send a message to start a new turn.'),container);
- const b=S.budget(id),q=scheduled(id);el('p','agent-budget footnote',b?S.budgetText(b):q?.tokens?'Tokens '+tokens(q.tokens.used)+' / '+tokens(q.tokens.budget):'',container);
+ const b=S.budget(id),q=scheduled(id);el('p','agent-budget footnote',b?S.budgetText(b):q?.tokens?'Tokens '+tokens(q.tokens.used)+(q.tokens.budget==null?' used':' / '+tokens(q.tokens.budget)):'',container);
  const usage=window.interspaceResearchCards.usageText(S.usage(id));if(usage)el('p','research-usage footnote',usage,container);
  const provider=providerOf(id),parent=parentOf(id),model=row(id)?.model||subOf(id)?.model||null;
  const line=el('p','footnote runtime-line',null,container);

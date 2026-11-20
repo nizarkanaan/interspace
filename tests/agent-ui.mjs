@@ -216,6 +216,14 @@ export default async function check(page,url){
   }
  }}
  await page.emulateMedia({colorScheme:'light'});await page.setViewportSize({width:1280,height:1000});
+ // The sidebar stays in view while a long conversation scrolls the page (wide layouts); on phones it stays on top.
+ await page.evaluate(()=>{const filler=document.createElement('div');filler.id='scroll-filler';filler.style.height='4000px';document.querySelector('main').append(filler);window.scrollTo(0,document.documentElement.scrollHeight);});
+ const side=await page.evaluate(()=>{const r=document.querySelector('aside').getBoundingClientRect();return {top:r.top,height:r.height,scrolled:window.scrollY,inner:window.innerHeight};});
+ assert(side.scrolled>1000&&Math.abs(side.top)<1&&Math.abs(side.height-side.inner)<2,'Sidebar scrolled away with the page: '+JSON.stringify(side));
+ await page.setViewportSize({width:390,height:900});
+ const narrow=await page.evaluate(()=>getComputedStyle(document.querySelector('aside')).position);
+ assert(narrow==='static','Narrow sidebar should scroll with the page: '+narrow);
+ await page.evaluate(()=>{document.getElementById('scroll-filler').remove();window.scrollTo(0,0);});await page.setViewportSize({width:1280,height:1000});
  assert(!errors.length,'Page errors: '+errors.join(' | '));
  return {checks:'agent rows and legacy rows, history replay, streaming deltas, tool/diff/command cards, exact Allow once/Add to scope/Deny answers, failed answer recovery, duplicates/unknown kinds/versions, literal text, /commands and @mentions by keyboard, optimistic echo, running send gate, scope chips/editor/validation/exact edit/digest approval, gap recovery, truncated output blob, cancel, several running tasks at once, light/dark 320-1280 fit',responsiveStates:fits.length};
 }

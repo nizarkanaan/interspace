@@ -290,7 +290,7 @@ def project_default(project_id, *, token_budget=None, project_ids=None, research
 
     The project's workspace is readable and writable and workspace commands run without asking.
     No command network and no web search: the user widens the scope in the editor.
-    `token_budget` is the project's budget, or budget.DEFAULT_BUDGET when it has none.
+    `token_budget` is the project's budget, or None (no limit) when it has none.
     """
     _check_id(project_id, 'Project ID')
     document = {
@@ -299,7 +299,7 @@ def project_default(project_id, *, token_budget=None, project_ids=None, research
         'commands': {'workspace': 'allow', 'allow': [], 'deny': []},
         'network': {'default': 'deny', 'allow_hosts': [], 'deny_hosts': []},
         'apps': [], 'web_search': 'deny',
-        'limits': {'token_budget': budget.DEFAULT_BUDGET if token_budget is None else token_budget,
+        'limits': {'token_budget': token_budget,
                    'time_limit_s': DEFAULT_TIME_LIMIT_S},
     }
     return validate(_with_research(document, research_sources), project_ids=project_ids)
@@ -313,7 +313,7 @@ def research_default(*, token_budget=None, research_sources=None):
         'commands': {'workspace': 'deny', 'allow': [], 'deny': []},
         'network': {'default': 'deny', 'allow_hosts': [], 'deny_hosts': []},
         'apps': [], 'web_search': 'deny',
-        'limits': {'token_budget': budget.DEFAULT_BUDGET if token_budget is None else token_budget,
+        'limits': {'token_budget': token_budget,
                    'time_limit_s': DEFAULT_TIME_LIMIT_S},
         'research': research_block(research_sources or {}),
     }

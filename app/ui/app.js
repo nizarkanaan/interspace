@@ -90,7 +90,7 @@ async function agentCreated({task_id,project_id,desk,goal}){
  openAgent(task_id);
 }
 function tokens(n){return Number(n).toLocaleString('en-US');}
-function tokenLine(t){if(!t)return '';const head=t.budget==null?'Tokens '+tokens(t.used)+' used · No budget was set':'Tokens '+tokens(t.used)+' / '+tokens(t.budget);const extra=[];if(t.estimated)extra.push(tokens(t.estimated)+' estimated');if(t.unknown)extra.push(t.unknown+' older call'+(t.unknown===1?'':'s')+' without counts');if(t.overshoot)extra.push('over budget by '+tokens(t.overshoot));return head+(extra.length?' · '+extra.join(' · '):'');}
+function tokenLine(t){if(!t)return '';const head=t.budget==null?'Tokens '+tokens(t.used)+' used':'Tokens '+tokens(t.used)+' / '+tokens(t.budget);const extra=[];if(t.estimated)extra.push(tokens(t.estimated)+' estimated');if(t.unknown)extra.push(t.unknown+' older call'+(t.unknown===1?'':'s')+' without counts');if(t.overshoot)extra.push('over budget by '+tokens(t.overshoot));return head+(extra.length?' · '+extra.join(' · '):'');}
 
 document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>navigate(b.dataset.view));
 document.querySelectorAll('[data-task-tab]').forEach(b=>b.onclick=()=>{taskTab=b.dataset.taskTab;render();});

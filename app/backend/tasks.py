@@ -96,7 +96,7 @@ def is_research(task):
     return kind(task)=='research'
 
 
-def create(name='New agent task', *, project_id, provider=None, model=None, token_budget=budget.DEFAULT_BUDGET, kind=None):
+def create(name='New agent task', *, project_id, provider=None, model=None, token_budget=None, kind=None):
     """A new Orchestrator task. The scope (scope.md) is attached by the caller, which needs the task ID to build it.
 
     `project_id` None needs `kind='research'` (research/tasks.md); tasks with a project are `kind='project'`.

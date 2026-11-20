@@ -43,7 +43,7 @@ export default async function check(page,url){
  assert(note.includes('Literature review, no project')&&note.includes('research sources only'),'Scope note: '+note);
  // The research scope editor: a source per row, no project, commands or network fieldsets.
  const legends=await page.locator('#new-agent-scope legend').allTextContents();
- assert(JSON.stringify(legends)===JSON.stringify(['Research sources','Search and limits']),'Legends: '+JSON.stringify(legends));
+ assert(JSON.stringify(legends)===JSON.stringify(['Research sources','Search and time limit']),'Legends: '+JSON.stringify(legends));
  const unpaywall=page.getByLabel('Unpaywall',{exact:true});
  assert(await unpaywall.inputValue()==='ask'&&await page.getByLabel('arXiv',{exact:true}).inputValue()==='allow','Research defaults');
  assert((await text(page.locator('#new-agent-scope .research-scope'))).includes('Needs your key or email in Settings'),'Unusable source hint');

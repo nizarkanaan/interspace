@@ -31,14 +31,14 @@ class BuilderTests(unittest.TestCase):
         self.assertEqual(document['network'], {'default': 'deny', 'allow_hosts': [], 'deny_hosts': []})
         self.assertEqual(document['web_search'], 'deny')
         self.assertEqual(document['commands'], {'workspace': 'allow', 'allow': [], 'deny': []})
-        self.assertEqual(document['limits'], {'token_budget': budget.DEFAULT_BUDGET,
+        self.assertEqual(document['limits'], {'token_budget': None,
                                               'time_limit_s': scope.DEFAULT_TIME_LIMIT_S})
         self.assertEqual((document['v'], document['version']), (1, 1))
         self.assertEqual(document['task_id'], scope.DRAFT_TASK_ID)
 
     def test_token_budget_and_registration(self):
         self.assertEqual(scope.project_default('p1', token_budget=5000)['limits']['token_budget'], 5000)
-        self.assertEqual(scope.project_default('p1', token_budget=None)['limits']['token_budget'], budget.DEFAULT_BUDGET)
+        self.assertIsNone(scope.project_default('p1', token_budget=None)['limits']['token_budget'])
         with self.assertRaises(ValueError):
             scope.project_default('p1', token_budget=0)
         with self.assertRaisesRegex(ValueError, 'not registered'):
@@ -98,8 +98,8 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(self.app.handle('scope_default', {'project_id': self.project_id})['scope']['limits']['token_budget'], 12345)
         with self.app.lock:
             self.app.state['projects'][self.project_id]['token_budget'] = 'lots'
-        self.assertEqual(self.app.handle('scope_default', {'project_id': self.project_id})['scope']['limits']['token_budget'],
-                         budget.DEFAULT_BUDGET, 'a damaged saved budget falls back to the default')
+        self.assertIsNone(self.app.handle('scope_default', {'project_id': self.project_id})['scope']['limits']['token_budget'],
+                          'a damaged saved budget falls back to no limit')
 
     def test_unknown_project_is_refused(self):
         for value in ('ghost', None, 7):

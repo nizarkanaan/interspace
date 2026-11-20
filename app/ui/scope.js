@@ -18,7 +18,7 @@ function chips(list,info,projectName){
  if(s.network)el('li','chip',networkLabel(s.network)+(s.network.allow_hosts?.length?' · '+s.network.allow_hosts.join(', '):''),list);
  el('li','chip','Web search: '+s.web_search,list);
  for(const text of researchChips(s))el('li','chip research-chip',text,list);
- if(s.limits){el('li','chip',tokens(s.limits.token_budget)+' tokens',list);el('li','chip',Math.round(s.limits.time_limit_s/60)+' min',list);}
+ if(s.limits){if(s.limits.token_budget!=null)el('li','chip',tokens(s.limits.token_budget)+' tokens',list);el('li','chip',Math.round(s.limits.time_limit_s/60)+' min',list);}
 }
 
 // Research sources (docs/superpowers/specs/research/tasks.md): a missing key or source counts as off.
@@ -66,9 +66,8 @@ function editor(host,info,{projectName,onSave,onClose,saving,heading='Edit scope
  const research=names.map(name=>{const c=select(rfs,researchTitle(name),uid+'-research-'+name.replace(/[^A-Za-z0-9_-]/g,'_'),Object.entries(RESEARCH),had?.[name]||'off');
   if(window.interspaceResearch&&!window.interspaceResearch.usable(name))c.closest('.field').append(el('span','footnote','Needs your key or email in Settings → Research sources before it can answer.'));
   return [name,c];});
- const gfs=el('fieldset','',null,form);el('legend','','Search and limits',gfs);
+ const gfs=el('fieldset','',null,form);el('legend','','Search and time limit',gfs);
  const web=select(gfs,'Web search',uid+'-web',[['allow','Allow'],['ask','Ask'],['deny','Deny']],s.web_search||'ask');
- const budget=number(gfs,'Token budget',uid+'-budget',s.limits?.token_budget??250000,1);
  const minutes=number(gfs,'Time limit (minutes)',uid+'-time',Math.round((s.limits?.time_limit_s??3600)/60),1,1440);
  const errorBox=el('div','error-text',null,form);errorBox.setAttribute('role','alert');
  const actions=el('div','actions',null,form);const save=el('button','primary',submitLabel,actions);save.type='submit';save.disabled=!!saving;const close=el('button','',closeLabel,actions);close.type='button';close.onclick=onClose;
@@ -83,10 +82,10 @@ function editor(host,info,{projectName,onSave,onClose,saving,heading='Edit scope
   // A scope that never had research stays without the key unless a source is turned on, so its digest is unchanged.
   const chosen=Object.fromEntries(research.map(([name,c])=>[name,c.value]));
   if(had||Object.values(chosen).some(v=>v!=='off'))s.research={...(s.research||{}),sources:{...(had||{}),...chosen}};
-  const b=Number(budget.value),t=Number(minutes.value);
-  if(!Number.isSafeInteger(b)||b<1)errors.push('Token budget must be a positive whole number.');
+  const t=Number(minutes.value);
   if(!Number.isInteger(t)||t<1||t>1440)errors.push('Time limit must be 1 to 1,440 minutes.');
-  if(s.limits){s.limits.token_budget=b;if(t!==Math.round(s.limits.time_limit_s/60))s.limits.time_limit_s=t*60;}
+  // No token limit is asked for; a scope keeps whatever budget it already had (none for new tasks).
+  if(s.limits&&t!==Math.round(s.limits.time_limit_s/60))s.limits.time_limit_s=t*60;
   errorBox.replaceChildren();for(const e of errors)el('p','',e,errorBox);
   if(!errors.length)onSave(s);
  };

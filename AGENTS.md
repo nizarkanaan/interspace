@@ -31,7 +31,7 @@ The user approved `docs/superpowers/plans/2026-11-19-research-workspace.md`: Int
 
 ## Token budgets
 
-Every task-owned model call, the Orchestrator's and every subagent's, passes the per-task budget gate (`app/backend/budget.py`) before it starts. One budget covers a task and all its subagents; each provider's usage is charged by its own rule from the provider registry. Budgets are tokens only; never show or imply money or remaining account allowance. The budget is part of the task scope. See `app/README.md#token-budgets`.
+Every task-owned model call, the Orchestrator's and every subagent's, passes the per-task budget gate (`app/backend/budget.py`) before it starts. New tasks have no token limit unless one is set (the user asked on 2026-11-20 never to be asked for one); usage is still recorded. One budget covers a task and all its subagents; each provider's usage is charged by its own rule from the provider registry. Budgets are tokens only; never show or imply money or remaining account allowance. The budget is part of the task scope. See `app/README.md#token-budgets`.
 
 ## Product boundaries
 
