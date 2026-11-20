@@ -458,3 +458,71 @@ class OutputTests(ResearchCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class CorpusTests(ResearchCase):
+    """The task corpus (docs/superpowers/specs/2026-11-20-task-corpus-design.md)."""
+    REFS = [{'title': 'Deep learning', 'doi': '10.1038/nature14539', 'year': 2015},
+            {'title': 'Quantum llamas in practice', 'doi': '10.9999/none'}]
+
+    def corpus_file(self, task_id='r1'):
+        return json.loads((self.root / 'tasks' / task_id / 'corpus.json').read_text())
+
+    def test_search_and_check_results_build_the_corpus_and_emit_counts(self):
+        self.make(answering(self.results, [('research_search', {'query': 'deep learning'}),
+                                           ('verify_citations', {'references': self.REFS})]))
+        self.store.add_research_task('r1')
+        self.run_task()
+        saved = self.corpus_file()
+        [paper] = saved['papers']
+        self.assertEqual(paper['paper']['doi'], '10.1038/nature14539')
+        self.assertEqual(paper['found'][0]['member'], 'Orchestrator')
+        self.assertEqual(paper['found'][0]['query'], 'deep learning')
+        self.assertEqual((paper['check']['status'], paper['check']['by']), ('verified', 'orchestrator'))
+        self.assertEqual([u['status'] for u in saved['unverified']], ['not_found'])
+        self.assertEqual(saved['incomplete'], 0)
+        self.assertEqual(self.events_of('r1', 'corpus')[-1]['data'], {'papers': 1, 'unverified': 1})
+        served = self.sched.corpus('r1')
+        self.assertEqual(served['papers'], saved['papers'])
+
+    def test_a_members_papers_roll_up_to_the_root_task(self):
+        def child(session, text, ctx):
+            ctx.call_tool('research_search', {'query': 'members query'})
+            return default_script(session, text, ctx)
+
+        def parent(session, text, ctx):
+            proposed = ctx.call_tool('propose_team', {'summary': 's', 'members': [
+                {'role': 'researcher', 'brief': 'Search.'}]})
+            ctx.call_tool('wait_for', {'team_id': proposed['team_id'], 'timeout_s': 10})
+            return answering(self.results, [('research_search', {'query': 'own query'})])(session, text, ctx)
+        self.make(parent, child=child)
+        self.store.add_research_task('r1')
+        self.sched.submit('r1', None, 'go', None)
+        wait_for(lambda: self.events_of('r1', 'team_proposed'), message='proposal')
+        team = self.events_of('r1', 'team_proposed')[0]['data']
+        self.sched.orchestrator.answer({'task_id': 'r1', 'team_id': team['team_id'], 'decision': 'approve'})
+        wait_for(lambda: self.store.task('r1')['agent']['state'] == 'idle', message='idle')
+        [paper] = self.corpus_file()['papers']
+        self.assertEqual([(f['member'], f['query']) for f in paper['found']],
+                         [('Researcher', 'members query'), ('Orchestrator', 'own query')])
+        child_id = next(t['id'] for t in self.store.agent_tasks() if t.get('parent_task_id') == 'r1')
+        self.assertFalse((self.root / 'tasks' / child_id / 'corpus.json').exists())
+        with self.assertRaisesRegex(ValueError, 'Only research tasks have a corpus.'):
+            self.sched.corpus(child_id)
+
+    def test_an_earlier_task_is_rebuilt_from_its_events_once(self):
+        self.make(answering(self.results, [('research_search', {'query': 'deep learning'})]))
+        self.store.add_research_task('r1')
+        self.run_task()
+        (self.root / 'tasks' / 'r1' / 'corpus.json').unlink()
+        rebuilt = self.sched.corpus('r1')
+        self.assertEqual([p['paper']['title'] for p in rebuilt['papers']], ['Deep learning'])
+        self.assertEqual(rebuilt['papers'][0]['found'][0]['query'], 'deep learning')
+        self.assertTrue((self.root / 'tasks' / 'r1' / 'corpus.json').exists())
+
+    def test_project_tasks_have_no_corpus(self):
+        self.make(answering(self.results, []))
+        task = self.store.add_task('t1', 'p1')
+        task.update(role='orchestrator')
+        with self.assertRaisesRegex(ValueError, 'Only research tasks have a corpus.'):
+            self.sched.corpus('t1')

@@ -82,15 +82,18 @@ function renderAgent(){
  head($('agent-head'),id);$('agent-stop').hidden=!stoppable(id);$('agent-back').textContent=isResearch(id)?'← Research':'← Tasks';
  scopeArea(id);
  outputsArea(id);
+ const tab=corpusTabs(id);
+ $('agent-stream').hidden=tab==='corpus';$('agent-composer').hidden=tab==='corpus';
  // A newer scope than the one displayed (edited elsewhere) is reloaded before it can be approved.
  const ev=S.scopeEvent(id),info=scopeInfo(id);if(ev&&info.digest&&ev.scope_digest!==info.digest&&!info.loading&&!info.saving&&ev.scope_version>=(info.scope?.version||0))loadScope(id);
  const stream=$('agent-stream');const stick=innerHeight+scrollY>=document.documentElement.scrollHeight-80;
  S.render(stream,id);
  if(!stream.children.length&&!stream.querySelector('.empty'))el('p','empty muted','No activity yet. Describe what the agent should do.',stream);
- if(stick&&document.activeElement!==$('agent-message'))scrollTo(0,document.documentElement.scrollHeight);
+ if(stick&&tab!=='corpus'&&document.activeElement!==$('agent-message'))scrollTo(0,document.documentElement.scrollHeight);
  if(shownDraftFor!==id){shownDraftFor=id;$('agent-message').value=drafts.get(id)||'';}
  const reason=gate(id);$('agent-send').disabled=!!reason;
  $('agent-note').textContent=reason||'Enter sends · Shift+Enter adds a line · / for commands · @ to mention';
+ if(tab==='corpus')corpusArea(id);
 }
 // A task's outputs (report and BibTeX), from its latest `outputs` event.
 function outputsArea(id){
@@ -101,6 +104,28 @@ function outputsArea(id){
  if(keep){const again=document.getElementById(keep);if(again)again.focus();}
 }
 let outputsRev=0;
+// Corpus tab (2026-11-20-task-corpus-design.md): root research tasks only. Fetched when opened, and again (at most
+// once a second) after a `corpus` event while it is open.
+const tabs=new Map(),corpora=new Map();
+function corpusTabs(id){
+ const nav=$('agent-tabs'),show=isResearch(id)&&!parentOf(id),tab=show?tabs.get(id)||'conversation':'conversation';
+ nav.hidden=!show;$('agent-corpus').hidden=tab!=='corpus';
+ for(const b of nav.querySelectorAll('[data-agent-tab]'))b.setAttribute('aria-pressed',String(b.dataset.agentTab===tab));
+ return tab;
+}
+function corpusInfo(id){if(!corpora.has(id))corpora.set(id,{data:null,loading:false,error:'',seen:null,timer:null,ui:{q:'',filter:'all',sort:'found',all:false},rev:0});return corpora.get(id);}
+function loadCorpus(id){
+ const c=corpusInfo(id);if(c.loading)return;c.loading=true;c.rev++;
+ host.request('task_corpus',{task_id:id},{manual:true}).then(r=>{c.data=r&&typeof r==='object'?r:null;c.error='';}).catch(e=>{c.error=e.message||'The corpus could not be loaded.';}).finally(()=>{c.loading=false;c.rev++;refresh();});
+}
+function corpusArea(id){
+ const c=corpusInfo(id),ev=JSON.stringify(S.corpus(id));
+ if(!c.data&&!c.loading&&!c.error)loadCorpus(id);
+ else if(c.seen!==null&&ev!==c.seen&&!c.timer)c.timer=setTimeout(()=>{c.timer=null;if(current===id&&tabs.get(id)==='corpus')loadCorpus(id);},1000);
+ c.seen=ev;
+ const box=$('agent-corpus'),key=id+':'+c.rev;if(box.dataset.key===key)return;box.dataset.key=key;
+ window.interspaceCorpus.render(box,c.data,c.ui,{loading:c.loading,error:c.error,refresh:()=>{c.rev++;refresh();}});
+}
 // Children are grouped under their parent's column; a child whose parent is unknown still gets the parent's column.
 function children(id){
  const out=new Map();
@@ -145,6 +170,7 @@ window.interspaceAgent={
  init(options){
   host=options;S.init({request:options.request,open:id=>host.openAgent(id),rowStatus:id=>row(id)?.status||null,stamp:id=>{const m=window.interspaceReview?.merged?.(id);return m?m.into+':'+m.merge_commit:'';},changed:id=>{if(view==='agent'&&(id===current||parentOf(id)===current)||view==='running')refresh();}});
   window.interspaceComposer.attach({input:$('agent-message'),menu:$('agent-menu'),form:$('agent-composer'),commands,mentions,onSend:send,onInput:text=>{if(current)drafts.set(current,text);}});
+  for(const b of $('agent-tabs').querySelectorAll('[data-agent-tab]'))b.onclick=()=>{if(!current)return;tabs.set(current,b.dataset.agentTab);if(b.dataset.agentTab==='corpus'){const c=corpusInfo(current);if(c.data)loadCorpus(current);}refresh();};
   $('agent-stop').onclick=()=>cancel(current);$('agent-back').onclick=()=>host.navigate(current&&isResearch(current)?'research':'tasks');
  },
  isAgent,isResearch,researchRows:()=>(Array.isArray(state?.research?.tasks)?state.research.tasks:[]).filter(t=>t&&typeof t.id==='string'&&!t.parent_task_id&&!parentOf(t.id)),title:()=>title(current),current:()=>current,parentOf,

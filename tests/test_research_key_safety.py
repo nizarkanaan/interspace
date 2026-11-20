@@ -235,6 +235,7 @@ class ResearchKeySafetyTests(e2e.EndToEndTeamTests):
                 places[str(path.relative_to(data))] = path.read_text(errors='replace')
         self.assertTrue(any(name.startswith('audit') for name in places), list(places))
         self.assertTrue(any(name.endswith('events.jsonl') for name in places))
+        self.assertTrue(any(name.endswith('corpus.json') for name in places))  # The task corpus is scanned too.
         self.assertTrue(any(name.startswith('research-cache') for name in places))
         for secret in SECRETS.values():
             for name, text in places.items():

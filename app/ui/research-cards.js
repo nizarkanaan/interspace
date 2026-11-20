@@ -216,5 +216,5 @@ function usageText(u){
  return 'Research requests: '+names.map(n=>{const c=Number.isSafeInteger(calls[n])?calls[n]:0,k=Number.isSafeInteger(cached[n])?cached[n]:0;return R.title(n)+' '+count(c)+' sent'+(k?', '+count(k)+' answered from cache':'');}).join(' · ');
 }
 
-window.interspaceResearchCards={toolTitle:name=>TOOL[name]||'',toolCard,citationCard,outputsPanel,usageText,markdown,paperList};
+window.interspaceResearchCards={toolTitle:name=>TOOL[name]||'',paper,toolCard,citationCard,outputsPanel,usageText,markdown,paperList};
 })();

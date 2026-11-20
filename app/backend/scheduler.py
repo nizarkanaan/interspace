@@ -24,6 +24,7 @@ import uuid
 import budget
 import orchestrator
 import tasks as task_rows
+from research import corpus as research_corpus
 
 from timeutil import iso_time
 
@@ -1491,6 +1492,8 @@ class Scheduler:
             self._keep_report(run, {k: v for k, v in whole.items() if k != 'truncated'})
         if result.get('ok') and name == 'research_bibtex':
             self._keep_bibtex(run, result)
+        if result.get('ok') and not quiet:
+            self._corpus_add(run, call_id, name, arguments, whole)
         return result
 
     def _research_actions(self, run, call, result, failed):
@@ -1569,6 +1572,93 @@ class Scheduler:
                     key = _bib_key(entry.get('id'))
                     if key:
                         kept[key] = entry['bibtex'].strip()
+
+    # -- corpus (docs/superpowers/specs/2026-11-20-task-corpus-design.md) -----------------------------------
+
+    def _corpus_path(self, root_id):
+        return Path(self.events.root) / root_id / 'corpus.json'
+
+    @staticmethod
+    def _member(task):
+        """Who made a call, as the Corpus shows it: the member's role title, or 'Orchestrator' for the root task."""
+        role = task.get('role')
+        if not task.get('parent_task_id') or not isinstance(role, str):
+            return 'Orchestrator'
+        return role.replace('_', ' ').capitalize()
+
+    def _all_events(self, task_id):
+        found, after = [], 0
+        while True:
+            page = self.events.read(task_id, after, 1000)
+            found.extend(page['events'])
+            if page['complete'] or not page['events']:
+                return found
+            after = page['events'][-1]['seq']
+
+    def _corpus_save(self, root_id, value):
+        path = self._corpus_path(root_id)
+        if path.is_symlink():
+            raise ValueError('The corpus file was changed.')
+        path.parent.mkdir(parents=True, exist_ok=True)
+        value['updated_at'] = iso_time(self.clock())
+        _write_file(path, json.dumps(value, ensure_ascii=False, separators=(',', ':')))
+
+    def _corpus_load(self, root, skip=()):
+        """The root research task's corpus: the saved file, or one rebuilt (and saved) from the events of the task
+        and its members. Under `self.lock`, so a rebuild and live writes never interleave."""
+        path = self._corpus_path(root['id'])
+        try:
+            saved = None if path.is_symlink() else research_corpus.load(json.loads(path.read_text(encoding='utf-8')))
+        except (OSError, ValueError):
+            saved = None
+        if saved is not None:
+            return saved
+        members = [t for t in self.store.agent_tasks() if t.get('parent_task_id') == root['id']]
+        lists = [('Orchestrator', self._all_events(root['id']))]
+        lists += [(self._member(t), self._all_events(t['id'])) for t in members]
+        built, incomplete = research_corpus.rebuild(lists, skip=skip)
+        built['incomplete'] = incomplete
+        self._corpus_save(root['id'], built)
+        return built
+
+    def _corpus_add(self, run, call_id, name, arguments, whole):
+        """Merge a successful research call's whole result into the root research task's corpus."""
+        if not isinstance(whole, dict):
+            return
+        shown = self._research_input(name, arguments)
+        changed = False
+        try:
+            with self.lock:
+                task = self._task(run.task_id)
+                root = self._root(task)
+                if not task_rows.is_research(root):
+                    return
+                value = self._corpus_load(root, skip=(call_id,))
+                member, at = self._member(task), iso_time(self.clock())
+                if name == 'verify_citations':
+                    by = research_corpus.MEMBER if task.get('parent_task_id') else research_corpus.ORCHESTRATOR
+                    changed = research_corpus.add_report(value, whole.get('references'), by, member, at)
+                else:
+                    found = {'tool': name, 'query': shown.get('query') or shown.get('id'), 'member': member, 'at': at}
+                    changed = research_corpus.add_result(value, name, whole, found)
+                if changed:
+                    self._corpus_save(root['id'], value)
+                counts = research_corpus.counts(value)
+        except Exception:
+            self._error(run, 'corpus_failed', "Could not update the task's paper list.", True, call_id)
+            return
+        if changed:
+            self.events.append(root['id'], root['agent'].get('project_id'), 'corpus', counts)
+
+    def corpus(self, task_id):
+        """`task_corpus`: the research task's corpus, rebuilt from its saved events the first time."""
+        with self.lock:
+            task = self.store.task(task_id)
+            if not task_rows.is_research(task) or task.get('parent_task_id'):
+                raise ValueError('Only research tasks have a corpus.')
+            value = copy.deepcopy(self._corpus_load(task))
+        value.setdefault('incomplete', 0)
+        return value
 
     # -- outputs (research/tasks.md "Outputs") ---------------------------------------------------------------
 

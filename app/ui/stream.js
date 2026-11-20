@@ -54,6 +54,7 @@ function apply(m,e){
   case 'citation_report':item(m,key).citation=d;return;
   case 'research_usage':m.usage=d;return;
   case 'outputs':m.outputs=d;return;
+  case 'corpus':m.corpus=d;return;
   case 'team_proposed':case 'team_answered':{if(typeof d.team_id!=='string')break;const it=item(m,'team:'+d.team_id);it.team={...(it.team||{}),[e.kind==='team_proposed'?'proposal':'answered']:d};return;}
   case 'subagent_started':case 'subagent_status':case 'subagent_finished':{
    if(typeof d.task_id!=='string'||!d.task_id)break;const k='sub:'+d.task_id,it=item(m,k);it.sub=it.sub||{};
@@ -239,7 +240,7 @@ window.interspaceStream={
  has:id=>tasks.has(id)&&tasks.get(id).lastSeq>0,ids:()=>[...tasks.keys()],
  parentOf:id=>parents.get(id)||null,
  children:id=>{const m=tasks.get(id);return m?[...m.children.values()].map(k=>m.items.get(k)?.sub).filter(Boolean):[];},
- status:id=>tasks.get(id)?.status||null,usage:id=>tasks.get(id)?.usage||null,outputs:id=>tasks.get(id)?.outputs||null,budget:id=>tasks.get(id)?.budget||null,scopeEvent:id=>tasks.get(id)?.scopeEvent||null,workspace:id=>tasks.get(id)?.workspace||null,
+ status:id=>tasks.get(id)?.status||null,usage:id=>tasks.get(id)?.usage||null,outputs:id=>tasks.get(id)?.outputs||null,corpus:id=>tasks.get(id)?.corpus||null,budget:id=>tasks.get(id)?.budget||null,scopeEvent:id=>tasks.get(id)?.scopeEvent||null,workspace:id=>tasks.get(id)?.workspace||null,
  busy:s=>!!s&&BUSY.has(s.state),terminal:s=>!!s&&TERMINAL.has(s.state),
  mentions(id){const m=tasks.get(id);if(!m)return [];return [...m.paths].map(p=>({value:p,hint:'File'}));}
 };

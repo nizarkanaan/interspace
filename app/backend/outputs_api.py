@@ -68,4 +68,9 @@ def task_output_save(app, params):
     return {'saved': saved is True}
 
 
-METHODS = {'task_outputs': task_outputs, 'task_output_read': task_output_read, 'task_output_save': task_output_save}
+def task_corpus(app, params):
+    """`{task_id}` -> the research task's corpus (2026-11-20-task-corpus-design.md)."""
+    return app.scheduler.corpus(params.get('task_id'))
+
+
+METHODS = {'task_corpus': task_corpus, 'task_outputs': task_outputs, 'task_output_read': task_output_read, 'task_output_save': task_output_save}

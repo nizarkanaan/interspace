@@ -61,6 +61,7 @@ export async function install(page,url,opts={}){
    else if(r.method==='task_outputs')result={outputs:(f.outputs[p.task_id]||[]).map(x=>({...x}))};
    else if(r.method==='task_output_read'){const o=(f.outputs[p.task_id]||[]).find(x=>x.name===p.name);const x=(f.readable?.[p.task_id]||{})[p.name];if(!o||x==null){queueMicrotask(()=>f.fail(r,'Unknown output.'));return;}result={name:o.name,kind:o.kind,text:x,truncated:false};}
    else if(r.method==='task_output_save')result={saved:f.saved};
+   else if(r.method==='task_corpus'){const c=(o.corpora||{})[p.task_id];if(!c){queueMicrotask(()=>f.fail(r,'Only research tasks have a corpus.'));return;}result=JSON.parse(JSON.stringify(c));}
    else if(r.method==='agent_answer'||r.method==='team_answer')result={accepted:true};
    queueMicrotask(()=>f.respond(r,result));
   }}}};
