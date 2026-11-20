@@ -124,6 +124,30 @@ RESEARCH_TOOLS = (
          'references': {'type': 'array', 'items': _REFERENCE, 'minItems': 1, 'maxItems': 200}}}},
 )
 RESEARCH_TOOL_NAMES = tuple(t['name'] for t in RESEARCH_TOOLS)
+# Saving the report (2026-11-20-save-report-design.md): offered to the root Orchestrator of a research task. Only a
+# report saved with it becomes report.md; ordinary replies leave the saved report as it is.
+SAVE_REPORT_TOOL = {'v': 1, 'name': 'save_report', 'title': 'Save the report', 'effect': 'update',
+                    'description': 'Save the finished research report as this task\'s report.md, replacing the one '
+                                   'saved before. Markdown with headings and a numbered References list ([1], [2], …) '
+                                   'that matches the citations in the text. Call it only for a finished or revised '
+                                   'report; replies that ask the user something or report progress are not saved.',
+                    'input_schema': {'type': 'object', 'required': ['markdown'], 'additionalProperties': False,
+                                     'properties': {'markdown': {'type': 'string', 'minLength': 1,
+                                                                 'maxLength': 400000}}}}
+# The task's own corpus (2026-11-20-task-corpus-design.md): offered to every session of a research task. It reads
+# Interspace's saved list and calls no source.
+CORPUS_TOOL = {'v': 1, 'name': 'research_corpus', 'title': 'Read the corpus', 'effect': 'read',
+               'description': 'Every paper this research task and its team have found so far, merged, with the citation '
+                              "checker's verdict for each (verified, retracted or unchecked), plus the cited references "
+                              'that failed checking. Calls no source. Use it to see what was already found and which '
+                              'papers still need verify_citations, instead of asking the user to list them.',
+               'input_schema': {'type': 'object', 'additionalProperties': False, 'properties': {
+                   'status': {'type': 'string', 'enum': ['all', 'unchecked', 'checked', 'unverified'], 'default': 'all',
+                              'description': 'unchecked: never confirmed by the checker; checked: verified or retracted; '
+                                             'unverified: only the cited references that failed checking.'},
+                   'query': {'type': 'string', 'maxLength': 200, 'description': 'Words to find in titles, authors or venues.'},
+                   'limit': {'type': 'integer', 'minimum': 1, 'maximum': 200, 'default': 50},
+                   'offset': {'type': 'integer', 'minimum': 0, 'maximum': 2000, 'default': 0}}}}
 
 
 def _error_result(message):

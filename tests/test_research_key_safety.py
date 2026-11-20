@@ -169,6 +169,8 @@ class ResearchKeySafetyTests(e2e.EndToEndTeamTests):
             *bridged('research_search', {'query': 'deep learning review', 'limit': 5}, 'toolu_search'),
             *bridged('research_bibtex', {'ids': ['10.1038/nature14539']}, 'toolu_bib'),
             *bridged('verify_citations', {'references': REFERENCES}, 'toolu_verify'),
+            *bridged('save_report', {'markdown': '# Related work\n\nDeep learning [1]. One reference could not be '
+                                                 'verified.'}, 'toolu_save'),
             claude_text('# Related work\n\nDeep learning [1]. One reference could not be verified.'),
             claude_result(300, 50)]
         (self.root / 'claude.json').write_text(json.dumps({'by_prompt': [
@@ -206,8 +208,9 @@ class ResearchKeySafetyTests(e2e.EndToEndTeamTests):
 
         # Research calls ran through the real bridge, as untrusted content, and were decided per source.
         replies = [e['mcp_reply']['content'][0]['text'] for e in self.logged(self.claude_log) if 'mcp_reply' in e]
-        self.assertEqual(len(replies), 3)
-        self.assertTrue(all(r.startswith('<untrusted-content>') for r in replies))
+        self.assertEqual(len(replies), 4)
+        self.assertTrue(all(r.startswith('<untrusted-content>') for r in replies[:3]))
+        self.assertIn('"saved": "report.md"', replies[3])  # save_report writes; its reply is Interspace's own.
         report = self.events(task_id, 'citation_report')[0]['data']
         self.assertEqual(report['summary'], {'verified': 1, 'mismatch': 0, 'not_found': 1, 'retracted': 0,
                                              'unchecked': 0})

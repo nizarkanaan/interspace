@@ -172,6 +172,7 @@ def validate_agent(task):
     model=task.get('model')
     if model is not None and (not isinstance(model,str) or not SAVED_MODEL.match(model)):raise ValueError()
     if task.get('scope') is not None and not isinstance(task['scope'],dict):raise ValueError()
+    if task.get('archived_at') is not None and not isinstance(task['archived_at'],str):raise ValueError()
     if task.get('scope_approval') is not None and not isinstance(task['scope_approval'],dict):raise ValueError()
 
 

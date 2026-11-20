@@ -166,5 +166,39 @@ class RebuildTests(unittest.TestCase):
         self.assertIsNone(corpus.load({'v': 9}))
 
 
+
+class ViewTests(unittest.TestCase):
+    def corpus(self):
+        c = corpus.empty()
+        corpus.add_papers(c, [LECUN, VASWANI, dict(LECUN, title='Unrelated wireless energy', doi='10.5555/e')], found())
+        corpus.add_report(c, [row('verified', {'doi': LECUN['doi']}, LECUN),
+                              row('not_found', {'title': 'Imaginary transformers'})], 'orchestrator', 'Orchestrator', 't')
+        return c
+
+    def test_unchecked_lists_papers_the_checker_never_confirmed_with_their_numbers(self):
+        out = corpus.view(self.corpus(), {'status': 'unchecked'})
+        self.assertEqual(out['counts'], {'papers': 3, 'checked': 1, 'unchecked': 2, 'unverified': 1})
+        self.assertEqual([(p['n'], p['title'], p['verdict']) for p in out['papers']],
+                         [(2, 'Attention Is All You Need', 'unchecked'), (3, 'Unrelated wireless energy', 'unchecked')])
+        self.assertEqual(out['papers'][0]['arxiv_id'], '1706.03762')
+        self.assertNotIn('abstract', out['papers'][0])
+
+    def test_checked_query_unverified_and_paging(self):
+        c = self.corpus()
+        self.assertEqual([p['n'] for p in corpus.view(c, {'status': 'checked'})['papers']], [1])
+        self.assertEqual([p['n'] for p in corpus.view(c, {'query': 'ATTENTION vaswani'})['papers']], [2])
+        unverified = corpus.view(c, {'status': 'unverified'})
+        self.assertEqual(unverified['references'][0]['status'], 'not_found')
+        first = corpus.view(c, {'limit': 2})
+        self.assertEqual((len(first['papers']), first['next_offset']), (2, 2))
+        self.assertEqual([p['n'] for p in corpus.view(c, {'limit': 2, 'offset': 2})['papers']], [3])
+
+    def test_bad_arguments_are_refused(self):
+        for bad in ({'status': 'some'}, {'limit': 0}, {'limit': 201}, {'offset': -1}, {'query': 5}, {'colour': 1}):
+            with self.assertRaises(ValueError):
+                corpus.view(self.corpus(), bad)
+
+
+
 if __name__ == '__main__':
     unittest.main()

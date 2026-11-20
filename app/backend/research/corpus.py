@@ -225,3 +225,67 @@ def rebuild(task_events, skip=()):
 
 def counts(corpus):
     return {'papers': len(corpus.get('papers') or []), 'unverified': len(corpus.get('unverified') or [])}
+
+
+STATUSES = ('all', 'unchecked', 'checked', 'unverified')
+MAX_VIEW = 200
+VIEW_AUTHORS = 3
+
+
+def _verdict(entry):
+    status = (entry.get('check') or {}).get('status')
+    return status if status in CONFIRMED else 'unchecked'
+
+
+def view(corpus, arguments):
+    """`research_corpus` for an agent: a page of the corpus, filtered. Compact records only (no abstracts), each with
+    its number in the corpus, so a follow-up call can page on. ValueError for bad arguments."""
+    arguments = arguments if isinstance(arguments, dict) else {}
+    unknown = set(arguments) - {'status', 'query', 'limit', 'offset'}
+    if unknown:
+        raise ValueError('Unknown argument: ' + sorted(unknown)[0] + '.')
+    status = arguments.get('status', 'all')
+    if status not in STATUSES:
+        raise ValueError('status must be all, unchecked, checked or unverified.')
+    query = arguments.get('query', '')
+    if not isinstance(query, str) or len(query) > 200:
+        raise ValueError('query must be text of at most 200 characters.')
+    limit, offset = arguments.get('limit', 50), arguments.get('offset', 0)
+    if type(limit) is not int or not 1 <= limit <= MAX_VIEW:
+        raise ValueError('limit must be from 1 to 200.')
+    if type(offset) is not int or not 0 <= offset <= MAX_PAPERS:
+        raise ValueError('offset must be from 0 to 2000.')
+    words = [w for w in query.lower().split() if w]
+
+    def hit(texts):
+        joined = ' '.join(t for t in texts if isinstance(t, str)).lower()
+        return all(w in joined for w in words)
+
+    papers = corpus.get('papers') or []
+    counts = {'papers': len(papers), 'checked': sum(1 for p in papers if _verdict(p) != 'unchecked'),
+              'unchecked': sum(1 for p in papers if _verdict(p) == 'unchecked'),
+              'unverified': len(corpus.get('unverified') or [])}
+    result = {'counts': counts, 'status': status}
+    if status == 'unverified':
+        rows = [u for u in corpus.get('unverified') or []
+                if hit([str((u.get('reference') or {}).get(k) or '') for k in ('title', 'raw')])]
+        result['matched'] = len(rows)
+        result['references'] = [{'reference': u.get('reference'), 'status': u.get('status'),
+                                 'fields': u.get('fields') or [], 'reason': u.get('reason')}
+                                for u in rows[offset:offset + limit]]
+        return result
+    numbered = [(n, p) for n, p in enumerate(papers, 1)
+                if (status == 'all' or (status == 'checked') == (_verdict(p) != 'unchecked'))
+                and hit([p['paper'].get('title'), p['paper'].get('venue')] + list(p['paper'].get('authors') or []))]
+    result['matched'] = len(numbered)
+    result['offset'] = offset
+    result['papers'] = [{'n': n, 'title': p['paper'].get('title'),
+                         'authors': list(p['paper'].get('authors') or [])[:VIEW_AUTHORS],
+                         'year': p['paper'].get('year'), 'venue': p['paper'].get('venue'), 'doi': p['paper'].get('doi'),
+                         'arxiv_id': p['paper'].get('arxiv_id'), 'url': p['paper'].get('url'),
+                         'oa_url': p['paper'].get('oa_url'), 'citation_count': p['paper'].get('citation_count'),
+                         'sources': p['paper'].get('sources') or [], 'verdict': _verdict(p)}
+                        for n, p in numbered[offset:offset + limit]]
+    if offset + limit < len(numbered):
+        result['next_offset'] = offset + limit
+    return result

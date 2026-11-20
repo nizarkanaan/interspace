@@ -16,6 +16,8 @@ let allowedMethods: Set<String> = [
     "task_outputs", "task_output_save", "task_output_read", "task_corpus",
     // Conversation display preferences (2026-11-20-details-panel-and-display-design.md)
     "display_update",
+    // Archive and delete tasks (2026-11-20-archive-delete-design.md)
+    "task_archive", "task_delete_check", "task_delete",
 ]
 
 /// Lines only Swift and the backend exchange (research/credentials.md). They never reach or come from the WebView.

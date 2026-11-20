@@ -117,7 +117,7 @@ export default async function check(page,url){
   await page.locator('#new-model').fill('bad model');await page.locator('#new-title').fill('Bad');
   await page.getByRole('button',{name:'Review scope',exact:true}).click();
   assert(calls('scope_default').length===0,'Invalid model reached the backend');
-  await page.getByRole('button',{name:'Tasks',exact:true}).click();
+  await page.locator('[data-view=tasks]').click();
 
   await newAgent('Fix the parser','','','Please ask before reading parser.py');
   assert((await page.locator('#new-provider option').first().textContent())==='Your default: Codex','Routing default not offered: '+await page.locator('#new-provider option').first().textContent());
@@ -171,15 +171,15 @@ export default async function check(page,url){
   assert((await text(page.locator('#agent-head'))).includes('Orchestrator on Claude · claude-opus-5-5'),'Claude orchestrator line missing');
   await page.getByRole('button',{name:'Approve scope',exact:true}).click();
   await until(async()=>(await text(page.locator('#agent-view .scope-chips'))).includes('Approved'),'second approval');
-  await page.getByRole('button',{name:'Tasks',exact:true}).click();
+  await page.locator('[data-view=tasks]').click();
   const rows=await text(page.locator('#desk-tasks'));
   assert(rows.includes('Orchestrator on Claude · claude-opus-5-5')&&rows.includes('Orchestrator on Codex'),'Desk rows miss the provider: '+rows);
 
   // Several tasks at once: both wait inside their turns; each stream stays its own.
-  const send=async(id,message)=>{await page.getByRole('button',{name:'Tasks',exact:true}).click();await page.locator('[data-open-task="'+id+'"]').click();await until(()=>page.locator('#agent-view').isVisible(),'agent view');await page.locator('#agent-message').fill(message);await page.locator('#agent-message').press('Enter');};
+  const send=async(id,message)=>{await page.locator('[data-view=tasks]').click();await page.locator('[data-open-task="'+id+'"]').click();await until(()=>page.locator('#agent-view').isVisible(),'agent view');await page.locator('#agent-message').fill(message);await page.locator('#agent-message').press('Enter');};
   await send(taskA,'wait for A');
   await send(taskB,'wait for B');
-  await page.getByRole('button',{name:'Running',exact:true}).click();
+  await page.locator('[data-view=running]').click();
   await until(async()=>(await text(page.locator('#running-note'))).startsWith('2 running'),'two running tasks');
   const colA=page.locator('#running-grid [data-task="'+taskA+'"]'),colB=page.locator('#running-grid [data-task="'+taskB+'"]');
   await until(async()=>(await text(colA)).includes('Working: wait for A')&&(await text(colB)).includes('Working: wait for B'),'both streams');
@@ -207,9 +207,9 @@ export default async function check(page,url){
   const fits=[];
   for(const colorScheme of ['light','dark']){await page.emulateMedia({colorScheme});for(const width of [320,390,760,1024,1280]){await page.setViewportSize({width,height:900});
    for(const target of ['new','agent','running']){
-    if(target==='new'){await page.getByRole('button',{name:'Tasks',exact:true}).click();await page.getByRole('button',{name:'New task',exact:true}).click();}
-    if(target==='agent'){await page.getByRole('button',{name:'Tasks',exact:true}).click();await page.locator('[data-open-task="'+taskA+'"]').click();}
-    if(target==='running')await page.getByRole('button',{name:'Running',exact:true}).click();
+    if(target==='new'){await page.locator('[data-view=tasks]').click();await page.getByRole('button',{name:'New task',exact:true}).click();}
+    if(target==='agent'){await page.locator('[data-view=tasks]').click();await page.locator('[data-open-task="'+taskA+'"]').click();}
+    if(target==='running')await page.locator('[data-view=running]').click();
     const fit=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}));assert(fit.scroll<=fit.width,'Overflow '+target+' '+width+' '+colorScheme);fits.push(fit);
    }}}
   await page.emulateMedia({colorScheme:'light'});await page.setViewportSize({width:1280,height:1000});

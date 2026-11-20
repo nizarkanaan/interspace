@@ -55,6 +55,7 @@ BLOB_ID = re.compile(r'^[0-9a-f]{32}$')
 MAX_RESEARCH_RESULT_BYTES = 64 * 1024  # research/tools.md: a result is cut to 64 KB of JSON, flagged `truncated`.
 RESEARCH_USAGE_INTERVAL_S = 1.0  # research/tasks.md: `research_usage` at most once per second while calls happen.
 OUTPUT_NAMES = (('report.md', 'report'), ('references.bib', 'bibtex'))
+MAX_SAVED_REPORT = 400000  # save_report: characters of Markdown.
 RESEARCH_LISTS = ('papers', 'entries', 'references')  # The list a too-large research result is shortened by.
 
 
@@ -549,6 +550,10 @@ class RunContext:
     def report_usage(self, usage):
         self._scheduler._report_usage(self._run, usage)
 
+    def report_limits(self, raw):
+        """A usage-limit reading from this session's provider (2026-11-20-usage-limits-design.md)."""
+        self._scheduler._report_limits(self._run, raw)
+
     def tools(self):
         """Tool descriptors for the MCP bridge, built per session: the orchestration tools for the root Orchestrator,
         then the research tools whenever the scope enables a research source (research/tools.md "Who gets them").
@@ -557,6 +562,10 @@ class RunContext:
         found = list(mcp_bridge.ORCHESTRATION_TOOLS) if self._run.orchestrates else []
         if research_enabled(self.scope):
             found += list(mcp_bridge.RESEARCH_TOOLS)
+            if self.research_only:
+                found.append(mcp_bridge.CORPUS_TOOL)
+                if self._run.orchestrates:
+                    found.append(mcp_bridge.SAVE_REPORT_TOOL)
         return copy.deepcopy(found)
 
     def observed(self, request, call_id):
@@ -596,6 +605,7 @@ class _Run:
         self.research_only = False
         self.citation_report = None  # The latest `verify_citations` report of this turn (root Orchestrator runs).
         self.citation_report_own = False  # Whether it is the Orchestrator's own, which a member's never replaces.
+        self.report_saved = False  # Whether this turn saved report.md with `save_report`.
 
 
 def research_enabled(scope):
@@ -1219,6 +1229,21 @@ class Scheduler:
             for run in over:
                 self._stop(run, 'time_limit')
 
+    def _report_limits(self, run, raw):
+        """Store the provider's latest usage-limit reading on the app state; only what the provider reported."""
+        import limits
+        provider = getattr(run, 'provider', None)
+        reader = limits.READERS.get(provider)
+        windows = reader(raw) if reader else []
+        if not windows:
+            return
+        with self.lock:
+            stored = self.store.state.setdefault('provider_limits', {})
+            if not isinstance(stored, dict):
+                stored = self.store.state['provider_limits'] = {}
+            stored[provider] = limits.merge(stored.get(provider), windows, iso_time(self.clock()))
+            self.store.changed(None)
+
     def _report_usage(self, run, usage):
         """`usage` is the turn's cumulative usage so far, reported after each model request (0B: Codex sends
         `thread/tokenUsage/updated` per request). Over budget, the turn is interrupted."""
@@ -1461,9 +1486,14 @@ class Scheduler:
         failed = False
         whole = None
         try:
-            if self.research_dispatch is None:
+            if name == 'research_corpus':
+                payload = self._corpus_read(run, arguments)  # Interspace's own list: no source, no request.
+            elif name == 'save_report':
+                payload = self._save_report(run, arguments)  # Into app data only: no source, no request.
+            elif self.research_dispatch is None:
                 raise _NoResearch()
-            payload = self.research_dispatch(call, name, copy.deepcopy(arguments))
+            else:
+                payload = self.research_dispatch(call, name, copy.deepcopy(arguments))
             if not isinstance(payload, dict):
                 raise TypeError('research result')
             whole = payload  # A citation report is kept whole for references.bib; the agent gets it capped.
@@ -1650,6 +1680,15 @@ class Scheduler:
         if changed:
             self.events.append(root['id'], root['agent'].get('project_id'), 'corpus', counts)
 
+    def _corpus_read(self, run, arguments):
+        """`research_corpus` for an agent: a page of the root research task's corpus (research/corpus.py `view`)."""
+        with self.lock:
+            root = self._root(self._task(run.task_id))
+            if not task_rows.is_research(root):
+                raise ValueError('Only research tasks have a corpus.')
+            value = copy.deepcopy(self._corpus_load(root))
+        return research_corpus.view(value, arguments)
+
     def corpus(self, task_id):
         """`task_corpus`: the research task's corpus, rebuilt from its saved events the first time."""
         with self.lock:
@@ -1662,44 +1701,46 @@ class Scheduler:
 
     # -- outputs (research/tasks.md "Outputs") ---------------------------------------------------------------
 
-    def _final_answer(self, run):
-        text, after = None, 0
-        while True:
-            page = self.events.read(run.task_id, after, 1000)
-            for event in page['events']:
-                data = event.get('data') or {}
-                if (event['kind'] == 'message' and event.get('turn_id') == run.turn_id and data.get('role') == 'assistant'
-                        and data.get('final', True) and isinstance(data.get('text'), str)):
-                    text = data['text']
-                    if data.get('truncated') and isinstance(data.get('blob_id'), str):
-                        # A long answer was cut to fit its event; the whole text is in the event's attachment.
-                        text = self.events.blob(run.task_id, data['blob_id'])['text']
-            if page['complete'] or not page['events']:
-                return text
-            after = page['events'][-1]['seq']
-
-    def _write_outputs(self, run):
-        """A research task's Orchestrator ended its turn with a final answer: save the report and, after a citation
-        check, the BibTeX of the references it verified. Inside app data only; saving elsewhere is the user's."""
+    def _save_report(self, run, arguments):
+        """`save_report` (root Orchestrator of a research task): write report.md now, inside app data only."""
         if not (run.research_only and run.orchestrates):
-            return
-        try:
-            answer = self._final_answer(run)
-            if not answer or not answer.strip():
-                return
-            folder = self.events.root / run.task_id / 'outputs'
-            if folder.is_symlink():
-                raise ValueError('The outputs folder was changed.')
-            folder.mkdir(parents=True, exist_ok=True)
-            _write_file(folder / 'report.md', answer)
-            if run.citation_report is not None:
-                _write_file(folder / 'references.bib', self._bibliography(run, run.citation_report))
-            outputs = list_outputs(folder)
-        except Exception:
-            self._error(run, 'outputs_failed', 'Could not save the report in the app.', True)
-            return
+            raise ValueError('Only the Orchestrator of a research task saves a report.')
+        if not isinstance(arguments, dict) or set(arguments) != {'markdown'}:
+            raise ValueError('save_report takes only markdown.')
+        text = arguments['markdown']
+        if not isinstance(text, str) or not text.strip() or len(text) > MAX_SAVED_REPORT:
+            raise ValueError('markdown must be 1 to 400,000 characters of text.')
+        folder = self._outputs_folder(run)
+        _write_file(folder / 'report.md', text)
+        run.report_saved = True
+        self._emit_outputs(run, folder)
+        return {'saved': 'report.md', 'characters': len(text)}
+
+    def _outputs_folder(self, run):
+        folder = self.events.root / run.task_id / 'outputs'
+        if folder.is_symlink():
+            raise ValueError('The outputs folder was changed.')
+        folder.mkdir(parents=True, exist_ok=True)
+        return folder
+
+    def _emit_outputs(self, run, folder):
+        outputs = list_outputs(folder)
         self._emit(run, 'outputs', {'outputs': [{k: o[k] for k in ('name', 'kind', 'bytes')} for o in outputs]},
                    turn_id=run.turn_id)
+
+    def _write_outputs(self, run):
+        """A research task's Orchestrator finished a turn in which it saved a report: add the BibTeX of the references
+        the citation checker verified this turn. A turn without `save_report` leaves the outputs as they are, so a
+        reply that asks the user something never replaces the report (2026-11-20-save-report-design.md)."""
+        if not (run.research_only and run.orchestrates and run.report_saved and run.citation_report is not None):
+            return
+        try:
+            folder = self._outputs_folder(run)
+            _write_file(folder / 'references.bib', self._bibliography(run, run.citation_report))
+        except Exception:
+            self._error(run, 'outputs_failed', 'Could not save the references in the app.', True)
+            return
+        self._emit_outputs(run, folder)
 
     def _bibliography(self, run, report):
         kept, left_out, wanted = [], [], []

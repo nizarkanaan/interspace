@@ -153,3 +153,14 @@ Sort: [Order found ▾]
 - Choosing between debouncing and throttling the `corpus` event.
 - The exact wording of the provenance line.
 - Whether `task_corpus` lives in `outputs_api.py` or in a new module.
+
+## Agents read the corpus (added 2026-11-20)
+
+In a real run, asked to "check the unchecked papers", the Orchestrator asked the user to paste them, because no agent could see the corpus. Every session of a research task now gets one more read tool:
+
+- **The tool:** `research_corpus {status?: all|unchecked|checked|unverified, query?, limit? 1–200 (50), offset? 0–2000}`.
+  - It returns `{counts, status, matched, offset, papers: [{n, title, authors (up to 3), year, venue, doi, arxiv_id, url, oa_url, citation_count, sources, verdict}], next_offset?}`.
+  - With `unverified`, it returns `references: [{reference, status, fields, reason}]` instead.
+- **No outside calls:** it reads the root task's saved corpus, calls no source, sends no request, and records no source in the audit log. Its call still shows as a tool card, as one line in Summary mode, for example "Read the corpus: 39 not checked papers".
+- **Who gets it:** it is offered only to sessions of research tasks. Project tasks with research sources enabled don't get it, because they have no corpus.
+- **Prompt:** the Orchestrator's research workflow now says to read `research_corpus` to see what is already found or still unchecked, and never to ask the user to list papers that are in it.

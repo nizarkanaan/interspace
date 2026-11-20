@@ -44,7 +44,12 @@ DEFAULT_ROUTING = {
 # research/tasks.md "Roles": the Orchestrator's research workflow and citation rule, added when research is on.
 RESEARCH_WORKFLOW = ('Research workflow: research_search -> research_paper and research_fulltext to read -> snowball '
                      'with research_citations -> synthesize -> verify_citations -> final answer. Fetch BibTeX with '
-                     'research_bibtex for the references you keep.')
+                     'research_bibtex for the references you keep. research_corpus lists every paper this task has '
+                     'found so far with its checker verdict: read it to see what is already found or still unchecked, '
+                     'and never ask the user to list papers that are in it. When the question is answered, save the '
+                     'finished report with save_report (Markdown, a numbered References list matching your [n] '
+                     'citations); only a saved report becomes report.md, so replies that ask the user something or '
+                     'report progress are never saved.')
 CITATION_RULE = ('Never cite a paper you did not retrieve with a research tool; run `verify_citations` before any '
                  'answer that cites papers, and say which references were not verified.')
 NO_PROJECT_NOTE = ('This task has no project: there are no files to read or change and no commands. Every team '

@@ -719,6 +719,14 @@ class ClaudeSession:
 
     def _dispatch(self, message, ctx):
         kind = message['type']
+        if kind == 'rate_limit_event':
+            # Usage limits as Claude Code reports them, for the sidebar (2026-11-20-usage-limits-design.md).
+            report = getattr(ctx, 'report_limits', None)
+            if callable(report) and isinstance(message.get('rate_limit_info'), dict):
+                try:
+                    report(message['rate_limit_info'])
+                except Exception:
+                    pass  # A limit reading never fails a turn.
         if kind == 'system':
             self._system(message)
         elif kind in ('control_response', 'control_cancel_request') or kind in IGNORED_TYPES:

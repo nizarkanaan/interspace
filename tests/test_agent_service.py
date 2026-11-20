@@ -565,6 +565,11 @@ class ResearchTaskServiceTests(unittest.TestCase):
         self.assertEqual((research['selected'], research['selected_task_id'], research['task_count']), (True, task_id, 1))
         self.assertEqual([(r['id'], r['kind'], r['project_id'], r['role']) for r in research['tasks']],
                          [(task_id, 'research', None, 'orchestrator')])
+        self.assertEqual((research['tasks'][0]['scope_approved'], research['tasks'][0]['has_report']), (False, False))
+        outputs = Path(self.app.events.root) / task_id / 'outputs'
+        outputs.mkdir(parents=True)
+        (outputs / 'report.md').write_text('# Review')
+        self.assertTrue(self.app.handle('state', {})['research']['tasks'][0]['has_report'])
         self.assertEqual(public['task']['agent']['project_id'], None)
         # Leaving and coming back to the Research entry, and choosing no task.
         project_id = self.repo('repo')

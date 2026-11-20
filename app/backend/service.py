@@ -21,6 +21,7 @@ import tasks
 import budget
 import routing
 import display
+import limits
 import scheduler
 
 AGENT_METHODS = ('agent_create', 'agent_message', 'agent_answer', 'agent_cancel', 'task_events', 'task_blob',
@@ -29,7 +30,7 @@ APP_METHODS = ('state', 'connection', 'cancel', 'sign_in', 'switch_project', 'se
                'select_project', 'update_project')
 # Wave 1 streams register backend methods here instead of editing this file. Each module may define
 # METHODS = {'method_name': handler(app, params)}; handlers run on the agent pool and must return JSON-safe data.
-EXTENSIONS = ('providers_api', 'orchestrator', 'worktree_merge', 'research_api', 'outputs_api', 'display')
+EXTENSIONS = ('providers_api', 'orchestrator', 'worktree_merge', 'research_api', 'outputs_api', 'display', 'tasks_api')
 # Messages only the Swift shell sends to the backend (research/credentials.md). They never come from the WebView:
 # Swift drops these types from the UI. They go to the optional `bridge` module, never to the request handlers.
 BRIDGE_TYPES = ('bridge_hello', 'keychain_reply', 'save_panel_reply')
@@ -392,6 +393,13 @@ class Application:
                 if row['mode']=='agent':
                     row.update(status=task['agent'].get('state') or 'draft',provider=tasks.provider(task),model=task.get('model'),
                                role=task.get('role'),parent_task_id=task.get('parent_task_id'))
+                    # The sidebar groups tasks by what they need (2026-11-20-sidebar-modes-design.md).
+                    row['archived']=isinstance(task.get('archived_at'),str)
+                    try:row['scope_approved']=bool(self.scheduler.approved(task))
+                    except (KeyError,TypeError,ValueError):row['scope_approved']=False
+                    if row['kind']=='research':
+                        report=Path(self.events.root)/identity/'outputs'/'report.md'
+                        row['has_report']=report.is_file() and not report.is_symlink()
                 else:
                     row.update(status='read_only',read_only=True)
                 result.append(row)
@@ -413,6 +421,7 @@ class Application:
             data = copy.deepcopy({key:self.state[key] for key in ('version','active','connection')})
             data['provider_status'] = copy.deepcopy(self.state.get('provider_status') or {})
             data['display'] = display.current(self.state)
+            data['provider_limits'] = limits.public(self.state)
             data.update(task_id=shown.get('selected_task_id') if shown and isinstance(shown.get('selected_task_id'),str) else None,
                         task=self.task_view(task) if task else None,
                         tasks=self.task_summaries(project) if project else [],

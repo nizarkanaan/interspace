@@ -578,7 +578,14 @@ class CodexSession:
         method = message['method']
         params = message.get('params')
         if method in ('account/rateLimits/updated',):
-            return False  # Never surfaced: it shows remaining account allowance (AGENTS.md).
+            # Usage limits as Codex reports them, for the sidebar (2026-11-20-usage-limits-design.md); never events.
+            report = getattr(turn.ctx, 'report_limits', None) if turn is not None else None
+            if callable(report) and isinstance(params, dict):
+                try:
+                    report(params)
+                except Exception:
+                    pass  # A limit reading never fails a turn.
+            return False
         if not isinstance(params, dict):
             if method.startswith(('item/', 'turn/', 'thread/tokenUsage')):
                 raise ProtocolError()

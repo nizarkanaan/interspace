@@ -201,6 +201,7 @@ def literature_review(ctx, text):
         say(ctx, 'The team was not approved, so I stopped.', 'b')
         return done()
     ctx.call_tool('wait_for', {'team_id': proposed['team_id'], 'timeout_s': 90})
+    ctx.call_tool('save_report', {'markdown': REPORT})  # Only a saved report becomes report.md.
     say(ctx, REPORT, 'c')
     return done()
 
@@ -210,9 +211,11 @@ def verify_references(ctx, text):
     say(ctx, 'Checking %d references with the citation checker.' % len(lines), 'a')
     report = ctx.call_tool('verify_citations', {'references': [{'raw': line} for line in lines]})
     summary = report.get('summary') or {}
-    say(ctx, '# Reference check\n\n' + '\n'.join('- %s: %s' % (k.replace('_', ' '), summary.get(k, 0))
-                                                for k in ('verified', 'mismatch', 'not_found', 'retracted', 'unchecked'))
-        + '\n\nOnly the references marked verified matched a published record.', 'b')
+    checked = ('# Reference check\n\n' + '\n'.join('- %s: %s' % (k.replace('_', ' '), summary.get(k, 0))
+                                                   for k in ('verified', 'mismatch', 'not_found', 'retracted', 'unchecked'))
+               + '\n\nOnly the references marked verified matched a published record.')
+    ctx.call_tool('save_report', {'markdown': checked})
+    say(ctx, checked, 'b')
     return done()
 
 

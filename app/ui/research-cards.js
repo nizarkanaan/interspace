@@ -9,7 +9,7 @@ const count=n=>Number(n||0).toLocaleString('en-US');
 const plural=(n,one,many)=>count(n)+' '+(n===1?one:many||one+'s');
 const str=v=>typeof v==='string'?v:v==null?'':String(v);
 const PAPERS_SHOWN=5,ROWS_SHOWN=10;
-const TOOL={research_search:'Search papers',research_paper:'Look up a paper',research_citations:'Follow citations',research_fulltext:'Find an open copy',research_bibtex:'Get BibTeX',verify_citations:'Check citations'};
+const TOOL={research_search:'Search papers',research_paper:'Look up a paper',research_citations:'Follow citations',research_fulltext:'Find an open copy',research_bibtex:'Get BibTeX',verify_citations:'Check citations',research_corpus:'Read the corpus',save_report:'Save the report'};
 const RESULT={ok:'Done',error:'Failed',denied:'Denied',cancelled:'Cancelled'};
 const SKIP={not_configured:'not set up',rate_limited:'rate limited',unavailable:'unavailable',bad_response:'unreadable reply',not_found:'not found',denied:'not allowed by the scope',off:'off in the scope'};
 const STATUS={
@@ -87,6 +87,7 @@ function toolCard(card,{call,result,output,state,bump}){
  else if('paper' in data){if(data.paper)paper(data.paper,el('ol','paper-list',null,card),{abstract:true});else el('p','muted','No record found for this ID.',card);}
  else if('oa_url' in data){const p=el('p','',null,card);if(!R.link(data.oa_url,'Open-access copy',p))p.textContent=data.oa_url?'A copy was found, but its address is not https, so it is not shown.':'No open-access copy found.';const f=[data.license,data.version,data.host_type].map(str).filter(Boolean);if(f.length)el('p','footnote',f.join(' · ')+(data.source?' · from '+R.title(data.source):''),card);}
  else if(Array.isArray(data.entries)){for(const e of data.entries.slice(0,100)){const box=el('div','bib-entry',null,card);el('p','footnote mono',str(e?.id),box);if(e?.bibtex){const pre=el('pre','tool-output',str(e.bibtex),box);pre.tabIndex=0;pre.setAttribute('aria-label','BibTeX for '+str(e.id));}else el('p','error-text','No BibTeX: '+(str(e?.error).replaceAll('_',' ')||'not available'),box);}}
+ else if(data.saved==='report.md')el('p','','Saved as report.md ('+count(Number(data.characters)||0)+' characters). It replaces the report saved before.',card);
  else if(Array.isArray(data.references)&&data.summary)el('p','footnote','Checked '+plural(data.references.length,'reference')+'. The citation report below gives the result for each one.',card);
  else{const pre=el('pre','tool-output',output,card);pre.tabIndex=0;pre.setAttribute('aria-label','Result');}
  if(data.truncated)el('p','footnote','The result was shortened to fit.',card);
@@ -227,13 +228,15 @@ function toolSummary(card,{call,result,output}){
  const n=list=>Array.isArray(list)?list.length:null;
  const from=Array.isArray(data?.searched)&&data.searched.length?' in '+data.searched.filter(s=>typeof s==='string').map(R.title).join(', '):'';
  let text;
- if(!r)text={research_search:'Searching '+what,research_citations:'Following citations of '+what,research_paper:'Looking up '+what,research_fulltext:'Looking for an open copy of '+what,research_bibtex:'Getting BibTeX',verify_citations:'Checking citations'}[tool]||'Running '+(TOOL[tool]||'a research tool');
+ if(!r)text={research_search:'Searching '+what,research_citations:'Following citations of '+what,research_paper:'Looking up '+what,research_fulltext:'Looking for an open copy of '+what,research_bibtex:'Getting BibTeX',verify_citations:'Checking citations',research_corpus:'Reading the corpus',save_report:'Saving the report'}[tool]||'Running '+(TOOL[tool]||'a research tool');
  else if(!data)text=(TOOL[tool]||'Research')+(what?' '+what:'')+': open the details to see the result';
  else if(tool==='research_search')text='Searched '+what+from+': '+plural(n(data.papers)||0,'paper');
  else if(tool==='research_citations')text='Followed citations of '+what+': '+plural(n(data.papers)||0,'paper');
  else if(tool==='research_paper')text=data.paper?'Looked up '+what+': found “'+(str(data.paper.title)||'Untitled')+'”':'Looked up '+what+': no record found';
  else if(tool==='research_fulltext')text=/^https:\/\//i.test(str(data.oa_url))?'Found an open copy of '+what:'No open copy found for '+what;
  else if(tool==='research_bibtex'){const e=Array.isArray(data.entries)?data.entries:[];text='Got BibTeX for '+plural(e.filter(x=>x&&x.bibtex).length,'reference')+(e.some(x=>x&&!x.bibtex)?', '+count(e.filter(x=>x&&!x.bibtex).length)+' not available':'');}
+ else if(tool==='save_report')text='Saved the report as report.md ('+count(Number(data.characters)||0)+' characters). Open it in the Report tab.';
+ else if(tool==='research_corpus'){const which={unchecked:' not checked',checked:' checked'}[data.status]||'';text=data.status==='unverified'?'Read the corpus: '+plural(Number(data.matched)||0,'reference')+' not verified':'Read the corpus: '+plural(Number(data.matched)||0,(which?which.trim()+' paper':'paper'),(which?which.trim()+' papers':'papers'));}
  else if(tool==='verify_citations')text='Checked '+plural(n(data.references)||0,'reference')+'. The citation report has the result for each one.';
  else text=(TOOL[tool]||'Research')+(what?' '+what:'');
  el('p','research-line-text',text,card);

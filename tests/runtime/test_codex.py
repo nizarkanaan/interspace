@@ -96,6 +96,9 @@ class FakeContext:
     def report_usage(self, value):
         self.usages.append(value)
 
+    def report_limits(self, raw):
+        self.limits = getattr(self, 'limits', []) + [raw]
+
     def kinds(self):
         return [kind for kind, _, _ in self.events]
 
@@ -346,6 +349,7 @@ class TurnTests(CodexCase):
         result = session.run_turn('Say hello', ctx)
         self.assertEqual(result['status'], 'completed')
         self.assertEqual(result['usage']['input_tokens'], 3000)
+        self.assertEqual(ctx.limits, [{'rateLimits': {'primary': {'usedPercent': 98}}}])  # Forwarded, never an event.
         self.assertEqual(result['usage']['output_tokens'], 120)
         self.assertEqual([u['input_tokens'] for u in ctx.usages], [1000, 3000])
         self.assertEqual(ctx.kinds(), ['message_delta', 'message_delta', 'message', 'reasoning', 'plan_update'])

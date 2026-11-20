@@ -124,6 +124,11 @@ class ResearchCase(unittest.TestCase):
         return [e for e in found if kind is None or e['kind'] == kind]
 
 
+def saving(markdown):
+    """The Orchestrator's `save_report` call: only a saved report becomes report.md."""
+    return ('save_report', {'markdown': markdown})
+
+
 def answering(results, calls, text='Answer citing [1].'):
     def script(session, text_in, ctx):
         for name, arguments in calls:
@@ -146,7 +151,7 @@ class ToolListTests(ResearchCase):
         self.run_task()
         names, access, workspaces, primary, scratch, research_only = seen['parent']
         self.assertEqual(names, ['propose_team', 'team_status', 'wait_for', 'message_member']
-                         + list(mcp_bridge.RESEARCH_TOOL_NAMES))
+                         + list(mcp_bridge.RESEARCH_TOOL_NAMES) + ['research_corpus', 'save_report'])
         self.assertEqual((access, workspaces, research_only), ('read', {}, True))
         self.assertEqual(primary, str(self.root / 'research-runs' / 'r1'))
         self.assertEqual(scratch, primary)
@@ -353,10 +358,11 @@ class OutputTests(ResearchCase):
     def outputs(self, task_id='r1'):
         return self.root / 'tasks' / task_id / 'outputs'
 
-    def test_final_answer_writes_report_and_verified_bibtex(self):
+    def test_a_saved_report_writes_report_and_verified_bibtex(self):
         self.make(answering(self.results, [('research_bibtex', {'ids': ['10.1038/nature14539']}),
-                                           ('verify_citations', {'references': self.REFS})],
-                            text='# Related work\n\nDeep learning [1].'))
+                                           ('verify_citations', {'references': self.REFS}),
+                                           saving('# Related work\n\nDeep learning [1].')],
+                            text='The report is saved.'))
         self.store.add_research_task('r1', sources={'crossref': 'allow', 'arxiv': 'allow', 'openalex': 'allow',
                                                     'semantic_scholar': 'allow'})
         self.run_task()
@@ -380,14 +386,14 @@ class OutputTests(ResearchCase):
         self.assertEqual(outputs[1]['bytes'], len(bib.encode('utf-8')))
 
     def test_without_a_citation_report_only_the_report_is_written(self):
-        self.make(answering(self.results, [], text='No papers needed.'))
+        self.make(answering(self.results, [saving('No papers needed.')]))
         self.store.add_research_task('r1')
         self.run_task()
         self.assertEqual(sorted(os.listdir(self.outputs())), ['report.md'])
         self.assertEqual([o['name'] for o in self.events_of('r1', 'outputs')[-1]['data']['outputs']], ['report.md'])
 
     def test_a_bibtex_entry_the_sources_cannot_give_is_built_from_the_verified_record(self):
-        self.make(answering(self.results, [('verify_citations', {'references': self.REFS[:1]})]))
+        self.make(answering(self.results, [('verify_citations', {'references': self.REFS[:1]}), saving('# R')]))
         self.store.add_research_task('r1', sources={'crossref': 'allow'})
         original = self.research.__call__
 
@@ -403,13 +409,13 @@ class OutputTests(ResearchCase):
         self.assertIn('doi = {10.1038/nature14539}', bib)
 
     def test_the_schedulers_own_bibtex_fetch_is_no_agent_tool_card_but_is_audited(self):
-        self.make(answering(self.results, [('verify_citations', {'references': self.REFS[:2]})]))
+        self.make(answering(self.results, [('verify_citations', {'references': self.REFS[:2]}), saving('# R')]))
         self.store.add_research_task('r1', sources={'crossref': 'allow', 'arxiv': 'allow'})
         self.run_task()
         self.assertEqual(self.research.calls[-1][0], 'research_bibtex')  # Fetched at the end, for references.bib.
         tools = [e['data'].get('tool') for e in self.events_of('r1', 'tool_call')]
-        self.assertEqual(tools, ['verify_citations'])
-        self.assertEqual(len(self.events_of('r1', 'tool_result')), 1)
+        self.assertEqual(tools, ['verify_citations', 'save_report'])
+        self.assertEqual(len(self.events_of('r1', 'tool_result')), 2)
         bibtex = [r for r in self.audit.records if (r.get('request') or {}).get('tool') == 'research_bibtex']
         self.assertEqual({r['kind'] for r in bibtex}, {'decision', 'action'})
         self.assertIn(BIBTEX['10.1038/nature14539'], (self.outputs() / 'references.bib').read_text())
@@ -417,7 +423,7 @@ class OutputTests(ResearchCase):
     def test_a_report_too_large_for_the_agent_still_gives_every_reference_to_references_bib(self):
         refs = [{'title': 'Deep learning', 'doi': '10.1038/nature14539', 'year': 2015, 'raw': 'r%d ' % i + 'x' * 3900}
                 for i in range(60)] + [{'title': 'Quantum llamas in practice', 'doi': '10.9999/none'}]
-        self.make(answering(self.results, [('verify_citations', {'references': refs})]))
+        self.make(answering(self.results, [('verify_citations', {'references': refs}), saving('# R')]))
         self.store.add_research_task('r1', sources={'crossref': 'allow'})
         self.run_task()
         result = self.results[0]
@@ -432,12 +438,48 @@ class OutputTests(ResearchCase):
         self.assertIn('% Verified: 60.', bib)
         self.assertIn('% Left out, not found: Quantum llamas in practice', bib)
 
-    def test_a_long_final_answer_is_saved_whole(self):
+    def test_a_long_saved_report_is_saved_whole(self):
         text = '# Review\n\n' + ('A long paragraph of findings. ' * 4000)
-        self.make(answering(self.results, [], text=text))
+        self.make(answering(self.results, [saving(text)]))
         self.store.add_research_task('r1')
         self.run_task()
         self.assertEqual((self.outputs() / 'report.md').read_text(), text)
+
+    def test_a_reply_without_save_report_keeps_the_saved_report(self):
+        self.make(answering(self.results, [('verify_citations', {'references': self.REFS[:1]}), saving('# Review')]))
+        self.store.add_research_task('r1', sources={'crossref': 'allow'})
+        self.run_task()
+        bib = (self.outputs() / 'references.bib').read_text()
+        events = len(self.events_of('r1', 'outputs'))
+        self.parent_runtime.script = answering(self.results, [('verify_citations', {'references': self.REFS[:1]})],
+                                               text='Please paste the papers marked Unchecked.')
+        self.run_task(text='Check the unchecked papers')
+        self.assertEqual((self.outputs() / 'report.md').read_text(), '# Review')
+        self.assertEqual((self.outputs() / 'references.bib').read_text(), bib)
+        self.assertEqual(len(self.events_of('r1', 'outputs')), events)
+
+    def test_save_report_is_checked_and_offered_only_to_a_research_orchestrator(self):
+        names = []
+
+        def parent(session, text, ctx):
+            names.append([t['name'] for t in ctx.tools()])
+            return answering(self.results, [('save_report', {'markdown': '  '}),
+                                            ('save_report', {'markdown': '# R', 'title': 'x'})])(session, text, ctx)
+        self.make(parent)
+        self.store.add_research_task('r1')
+        self.run_task()
+        self.assertIn('save_report', names[0])
+        self.assertEqual([r['error']['code'] for r in self.results], ['invalid_request', 'invalid_request'])
+        self.assertFalse((self.outputs() / 'report.md').exists())
+        task = self.store.add_task('t2', 'p1')
+        task.update(role='orchestrator')
+        task['scope']['research'] = {'sources': {'crossref': 'allow'}}
+        task['scope_approval']['scope_digest'] = self.scope.digest(task['scope'])
+        self.parent_runtime.script = lambda s, t, ctx: (names.append([x['name'] for x in ctx.tools()]),
+                                                        default_script(s, t, ctx))[1]
+        self.run_task('t2', 'p1')
+        self.assertNotIn('save_report', names[-1])
+        self.assertNotIn('research_corpus', names[-1])
 
     def test_project_tasks_and_children_write_no_outputs(self):
         self.make(answering(self.results, []))
@@ -454,10 +496,6 @@ class OutputTests(ResearchCase):
         self.store.add_research_task('r1')
         self.run_task()
         self.assertFalse(self.outputs().exists())
-
-
-if __name__ == '__main__':
-    unittest.main()
 
 
 class CorpusTests(ResearchCase):
@@ -526,3 +564,25 @@ class CorpusTests(ResearchCase):
         task.update(role='orchestrator')
         with self.assertRaisesRegex(ValueError, 'Only research tasks have a corpus.'):
             self.sched.corpus('t1')
+
+    def test_agents_read_the_corpus_without_calling_a_source(self):
+        self.make(answering(self.results, [('research_search', {'query': 'deep learning'}),
+                                           ('research_corpus', {'status': 'unchecked'}),
+                                           ('verify_citations', {'references': self.REFS[:1]}),
+                                           ('research_corpus', {'status': 'checked'}),
+                                           ('research_corpus', {'status': 'nonsense'})]))
+        self.store.add_research_task('r1')
+        self.run_task()
+        unchecked, checked, bad = self.results[1], self.results[3], self.results[4]
+        self.assertTrue(unchecked['ok'])
+        self.assertEqual([(p['n'], p['doi'], p['verdict']) for p in unchecked['papers']],
+                         [(1, '10.1038/nature14539', 'unchecked')])
+        self.assertEqual([p['verdict'] for p in checked['papers']], ['verified'])
+        self.assertEqual(bad['error']['code'], 'invalid_request')
+        self.assertNotIn('research_corpus', [name for name, _ in self.research.calls])
+        cards = [e['data'] for e in self.events_of('r1', 'tool_call') if e['data'].get('tool') == 'research_corpus']
+        self.assertEqual(len(cards), 3)
+
+
+if __name__ == '__main__':
+    unittest.main()

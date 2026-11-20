@@ -106,6 +106,9 @@ class FakeContext:
     def report_usage(self, usage):
         pass
 
+    def report_limits(self, raw):
+        self.limits = getattr(self, 'limits', []) + [raw]
+
     def kinds(self):
         return [kind for kind, _, _ in self.events]
 
@@ -663,6 +666,7 @@ class TurnTests(ClaudeCase):
         _, ctx, outcome = self.turn({'turns': [steps]})
         self.assertEqual(outcome['status'], 'completed', outcome)
         self.assertNotIn('rate_limit', json.dumps(ctx.events))
+        self.assertEqual(ctx.limits, [{'status': 'allowed'}])  # Forwarded for the sidebar, never an event.
 
     def test_cancel_before_turn_does_not_launch(self):
         ctx = FakeContext(self.root)

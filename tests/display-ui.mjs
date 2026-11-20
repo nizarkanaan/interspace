@@ -19,6 +19,8 @@ export default async function check(page,url){
   call('s1','research_search',{query:'fallback '+XSS}),result('s1',{papers:[paper(1),paper(2),paper(3)],searched:['openalex','crossref'],skipped:[]}),
   call('s2','research_paper',{id:'doi:10.5555/fb.1'}),result('s2',{paper:paper(1)}),
   call('s3','research_search',{query:'failing search'}),result('s3',{},'error'),
+  call('s5','save_report',{}),result('s5',{saved:'report.md',characters:1234}),
+  call('s4','research_corpus',{status:'unchecked'}),result('s4',{counts:{papers:3,checked:1,unchecked:2,unverified:0},status:'unchecked',matched:2,offset:0,papers:[paper(2),paper(3)]}),
   ev('r1','plan_update',{steps:[{text:'Search',status:'completed'}]},'plan1'),
   ev('r1','message',{role:'assistant',text:'The evidence on fallback is thin.',final:true},'m1'),
   ev('r1','outputs',{outputs:[{name:'report.md',kind:'report',bytes:100}]}),
@@ -46,6 +48,8 @@ export default async function check(page,url){
  const s1=await text(stream.locator('[data-item=s1]'));
  assert(s1.startsWith('Searched “fallback '+XSS+'” in OpenAlex, Crossref: 3 papers'),'Search summary: '+s1);
  assert((await text(stream.locator('[data-item=s2]'))).includes('Looked up doi:10.5555/fb.1: found “Fallback paper 1”'),'Lookup summary');
+ assert((await text(stream.locator('[data-item=s5]'))).startsWith('Saved the report as report.md (1,234 characters).'),'Save summary');
+ assert((await text(stream.locator('[data-item=s4]'))).startsWith('Read the corpus: 2 not checked papers'),'Corpus summary: '+await text(stream.locator('[data-item=s4]')));
  assert(await stream.locator('[data-item=s1] .paper').count()===0,'Summary has no paper list');
  assert((await text(stream.locator('[data-item=s3]'))).includes('Crossref did not answer.'),'Failed call shown in full');
  const think=await text(stream.locator('[data-item=think1] .reasoning-summary'));
@@ -82,6 +86,7 @@ export default async function check(page,url){
 
  // Narrow: the panel is the Details tab.
  await page.setViewportSize({width:800,height:900});
+ await page.waitForFunction(()=>!document.querySelector('#agent-view.split')); // The split reader leaves on the next frame.
  const details=page.locator('[data-agent-tab=details]');
  await details.waitFor();
  assert(await panel.isHidden(),'Panel hidden on Conversation when narrow');

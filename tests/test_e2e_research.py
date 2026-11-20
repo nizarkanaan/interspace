@@ -308,6 +308,7 @@ class ResearchEndToEnd(unittest.TestCase):
             *bridged('propose_team', TEAM, 'toolu_team'),
             *bridged('wait_for', {'team_id': '$team_id', 'timeout_s': 60}, 'toolu_wait'),
             *bridged('verify_citations', {'references': REFERENCES}, 'toolu_verify'),
+            *bridged('save_report', {'markdown': REPORT}, 'toolu_save'),  # Only a saved report becomes report.md.
             claude_text(REPORT),
             claude_result(500, 80)]
         (self.root / 'claude.json').write_text(json.dumps({'by_prompt': [
@@ -474,6 +475,7 @@ class ResearchEndToEnd(unittest.TestCase):
             *bridged('verify_citations', {'references': REFERENCES}, 'toolu_verify'),
             *bridged('propose_team', team, 'toolu_team'),
             *bridged('wait_for', {'team_id': '$team_id', 'timeout_s': 60}, 'toolu_wait'),
+            *bridged('save_report', {'markdown': REPORT}, 'toolu_save'),
             claude_text(REPORT),
             claude_result(300, 50)]
         (self.root / 'claude.json').write_text(json.dumps({'by_prompt': [
