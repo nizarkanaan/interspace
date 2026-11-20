@@ -1,66 +1,21 @@
 """Settings → Research sources (docs/superpowers/specs/research/credentials.md).
 
 `service.extension_methods` registers METHODS; each handler is `(app, params)` and runs on the request pool.
-Source facts and status come from stream 1B's `research.sources(app)`. Until that exists, a small fallback table
-with the spike-0B facts stands in. A key or email goes in through `research_credential_set` and never comes back:
-rows carry only `configured`, and errors carry fixed text.
+Source facts and status come from `research.sources(app)`. A key or email goes in through `research_credential_set`
+and never comes back: rows carry only `configured`, and errors carry fixed text.
 """
-import importlib
+import copy
 
+import research
 from research import credentials
 
-SOURCE_NAMES = ('semantic_scholar', 'openalex', 'arxiv', 'crossref', 'unpaywall')
+SOURCE_NAMES = research.SOURCES
 UNAVAILABLE = 'credential_store_unavailable'
 MAX_DETAIL = 300
 
 
-class _FallbackSource:
-    """The facts of one source before the 1B clients exist. Its status makes no network call."""
-
-    def __init__(self, app, name, title, credential, kind, required, capabilities, help_url, missing):
-        self.app = app
-        self.name, self.title, self.credential, self.credential_kind = name, title, credential, kind
-        self.required, self.capabilities, self.help_url = required, capabilities, help_url
-        self.missing = missing
-
-    def status(self, test=False):
-        configured = bool(self.credential) and credentials.for_app(self.app).configured(self.credential)
-        if configured:
-            state, detail = 'ready', ('Email saved.' if self.credential_kind == 'email' else 'Key saved.')
-        else:
-            state, detail = ('needs_key' if self.required else 'ready'), self.missing
-        return {'source': self.name, 'configured': configured, 'required': self.required, 'state': state,
-                'detail': detail}
-
-
-_FALLBACK = (
-    ('semantic_scholar', 'Semantic Scholar', 'semantic_scholar', 'api_key', False,
-     ('search', 'paper', 'citations', 'bibtex'), 'https://www.semanticscholar.org/product/api',
-     'Works without a key, but the shared pool is often busy. A free key gives steadier access.'),
-    ('openalex', 'OpenAlex', 'openalex', 'api_key', False,
-     ('search', 'paper', 'citations', 'retraction'), 'https://openalex.org/settings/api',
-     'Works without a key on a small shared allowance. A free key raises it.'),
-    ('arxiv', 'arXiv', None, None, False,
-     ('search', 'paper', 'fulltext', 'bibtex'), 'https://info.arxiv.org/help/api/index.html',
-     'No key needed.'),
-    ('crossref', 'Crossref', 'crossref_email', 'email', False,
-     ('search', 'paper', 'bibtex', 'retraction'), 'https://www.crossref.org/documentation/retrieve-metadata/rest-api/',
-     'Works without an email. Adding yours uses Crossref\'s faster polite pool.'),
-    ('unpaywall', 'Unpaywall', 'unpaywall_email', 'email', True,
-     ('fulltext',), 'https://unpaywall.org/products/api',
-     'Unpaywall needs your email address as its contact.'),
-)
-
-
-def _research_module(attribute):
-    return getattr(importlib.import_module('research'), attribute, None)
-
-
 def _sources(app):
-    build = _research_module('sources')
-    if build is not None:
-        return list(build(app))
-    return [_FallbackSource(app, *facts) for facts in _FALLBACK]
+    return list(research.sources(app))
 
 
 def _source(app, params):
@@ -121,21 +76,28 @@ def _counts(table):
     if not isinstance(table, dict):
         return {}
     return {name: count for name, count in table.items()
-            if isinstance(name, str) and isinstance(count, int) and not isinstance(count, bool) and count >= 0}
+            if name in SOURCE_NAMES and isinstance(count, int) and not isinstance(count, bool) and count >= 0}
+
+
+def _task_usage(app, task_id):
+    """The counts the scheduler keeps on a task's root (research/tasks.md `research_usage` event)."""
+    with app.lock:
+        task = app.store.task(task_id)
+        parent_id = task.get('parent_task_id')
+        root = app.store.task(parent_id) if parent_id else task
+        agent = root.get('agent') if isinstance(root.get('agent'), dict) else {}
+        return copy.deepcopy(agent.get('research_usage') or {})
 
 
 def research_usage(app, params):
-    """Call counts per source, never money. From 1B's `research.usage(app, task_id)` once it exists."""
+    """Call counts per source, never money: one task's (`task_id`), else this app run's from `research.usage`."""
     task_id = params.get('task_id')
     if task_id is not None and not isinstance(task_id, str):
         raise ValueError('Unknown task.')
-    usage = _research_module('usage')
-    if usage is None:
-        zeros = {name: 0 for name in SOURCE_NAMES}
-        return {'calls': dict(zeros), 'cached': dict(zeros)}
-    result = usage(app, task_id)
+    result = research.usage(app) if task_id is None else _task_usage(app, task_id)
     result = result if isinstance(result, dict) else {}
-    return {'calls': _counts(result.get('calls')), 'cached': _counts(result.get('cached'))}
+    zeros = {name: 0 for name in SOURCE_NAMES}
+    return {'calls': dict(zeros, **_counts(result.get('calls'))), 'cached': dict(zeros, **_counts(result.get('cached')))}
 
 
 METHODS = {
