@@ -235,10 +235,19 @@ class BibtexTests(DispatchCase):
 
 
 class VerifyTests(DispatchCase):
-    def test_not_available_until_the_checker_exists(self):
-        with mock.patch.object(research, '_citations_module', return_value=None):
-            with self.assertRaisesRegex(ValueError, 'Citation checking is not available yet.'):
-                self.call('verify_citations', {'references': [{'title': 'X'}]})
+    def test_the_real_checker_runs_over_the_sources(self):
+        self.transport.add(CR_HOST, '/works/10.1038/nature14539', ('crossref', 'lookup_lecun'))
+        self.transport.add(S2_HOST, '/graph/v1/paper/search', fakes.reply(503, {'message': 'busy'}))
+        ctx = FakeContext(deny={'openalex'})
+        report = self.call('verify_citations', {'references': [
+            {'doi': '10.1038/nature14539', 'title': 'Deep learning', 'year': 2015, 'authors': ['Yann LeCun']},
+            {'title': 'A paper only the search sources could find'}]}, ctx)
+        first, second = report['references']
+        self.assertEqual((first['status'], first['source']), ('verified', 'crossref'))
+        # Semantic Scholar is down and OpenAlex is denied, so the second cannot be checked.
+        self.assertEqual(second['status'], 'unchecked')
+        self.assertEqual(second['reason'], 'semantic_scholar: unavailable, openalex: denied')
+        self.assertEqual(report['summary']['verified'], 1)
 
     def test_checker_gets_a_lookup_that_authorizes(self):
         self.transport.add(CR_HOST, '/works/10.1038/nature14539', ('crossref', 'lookup_lecun'))
@@ -252,7 +261,7 @@ class VerifyTests(DispatchCase):
             return {'v': 1, 'summary': {}, 'references': [{'index': 0}]}
 
         ctx = FakeContext(deny={'openalex'})
-        with mock.patch.object(research, '_citations_module', return_value=types.SimpleNamespace(check=check)):
+        with mock.patch.object(research.citations, 'check', check):
             report = self.call('verify_citations', {'references': [{'doi': '10.1038/nature14539'}]}, ctx)
         self.assertEqual(report['references'], [{'index': 0}])
         self.assertEqual(seen['paper']['title'], 'Deep learning')

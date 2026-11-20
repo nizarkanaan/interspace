@@ -5,11 +5,10 @@ the scope, denied, unable to serve the call or failing is skipped and named in `
 whole only for bad arguments. Results are plain JSON, capped at 64 KB.
 """
 from concurrent.futures import ThreadPoolExecutor
-import importlib
 import json
 import threading
 
-from . import records
+from . import citations, credentials, records
 from .records import parse_id  # noqa: F401  (contract: research.parse_id)
 
 SOURCES = ('semantic_scholar', 'openalex', 'arxiv', 'crossref', 'unpaywall')
@@ -24,33 +23,6 @@ _registry_lock = threading.Lock()
 
 # Registry -------------------------------------------------------------------
 
-class _NoCredentials:
-    """Used when no credential store exists yet: nothing is configured."""
-
-    def get(self, account):
-        return None
-
-    def configured(self, account):
-        return False
-
-
-def _credentials(app):
-    """`app.research_credentials` (one shared instance, so Settings changes drop its read cache), else built
-    from `research.credentials` over the Swift bridge, else a store with nothing configured."""
-    existing = getattr(app, 'research_credentials', None)
-    if existing is not None:
-        return existing
-    try:
-        module = importlib.import_module(__name__ + '.credentials')
-    except ModuleNotFoundError as error:
-        if error.name != __name__ + '.credentials':
-            raise
-        return _NoCredentials()
-    store = module.Credentials(getattr(app, 'bridge', None))
-    app.research_credentials = store
-    return store
-
-
 def sources(app):
     """The `Source` instances in SOURCES order, built once per app from `app.http`, credentials and the cache."""
     with _registry_lock:
@@ -63,10 +35,10 @@ def sources(app):
             web = http.Http()
             app.http = web
         store = cache.Cache(app.storage / 'research-cache')
-        credentials = _credentials(app)
+        store_of_keys = credentials.for_app(app)   # the one store Settings also uses, so changes drop its cache
         modules = {'semantic_scholar': semantic_scholar, 'openalex': openalex, 'arxiv': arxiv,
                    'crossref': crossref, 'unpaywall': unpaywall}
-        built = tuple(modules[name].Source(http=web, credentials=credentials, cache=store) for name in SOURCES)
+        built = tuple(modules[name].Source(http=web, credentials=store_of_keys, cache=store) for name in SOURCES)
         app._research_sources = built
         return list(built)
 
@@ -197,7 +169,8 @@ class Lookup:
     """What the citation checker calls (`research.citations.check(references, lookup)`).
 
     Each method authorizes the source with tool `verify_citations` and raises `Skipped(source, reason)` when
-    the source is off, denied, cannot serve the call or fails.
+    the source is off, denied, cannot serve the call or fails. Called as `lookup(source, verb, value)`, the
+    checker's own interface, it raises `citations.Skipped(reason)` instead.
     """
 
     def __init__(self, registry, gate):
@@ -229,6 +202,17 @@ class Lookup:
     def match(self, source, title):
         """Semantic Scholar's single best title match, or None."""
         return self._call(source, 'search', lambda s: s.match(title) if hasattr(s, 'match') else None)
+
+    def __call__(self, source, verb, value):
+        """`citations.check`'s lookup: `paper` by identifier, or `search` by title for the best few records."""
+        try:
+            if verb == 'paper':
+                return self.paper(source, value)
+            if verb == 'search':
+                return self.search(source, value, limit=citations.SEARCH_LIMIT)
+            raise Skipped(source, 'unsupported')
+        except ValueError as error:   # Skipped, or an identifier this source cannot take
+            raise citations.Skipped(_reason(error)) from None
 
 
 class _NoSource:
@@ -385,25 +369,12 @@ def _bibtex(registry, gate, arguments):
     return _cap({'entries': entries}, 'entries')
 
 
-def _citations_module():
-    """`research.citations` (stream 1C), or None until it exists."""
-    try:
-        return importlib.import_module(__name__ + '.citations')
-    except ModuleNotFoundError as error:
-        if error.name != __name__ + '.citations':
-            raise
-        return None
-
-
 def _verify(registry, gate, arguments):
     _check_keys(arguments, ('references',), ('references',))
     references = _list(arguments, 'references', 1, 200)
     if any(not isinstance(reference, dict) for reference in references):
         raise ValueError('Each reference must be an object.')
-    module = _citations_module()
-    if module is None:
-        raise ValueError('Citation checking is not available yet.')
-    report = module.check(references, Lookup(registry, gate))
+    report = citations.check(references, Lookup(registry, gate))
     return _cap(report, 'references')
 
 

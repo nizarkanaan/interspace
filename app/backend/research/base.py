@@ -6,7 +6,7 @@ in its `capabilities`. This class adds identifier parsing, the cache, credential
 import time
 import xml.etree.ElementTree as ET
 
-from . import http, records
+from . import credentials, http, records
 
 VERBS = {'search': 'search', 'paper': 'look up papers', 'citations': 'list citations',
          'fulltext': 'find open-access links', 'bibtex': 'give BibTeX'}
@@ -130,6 +130,8 @@ class Source:
                'detail': None}
         try:
             row['configured'] = self.configured()
+        except credentials.CredentialStoreUnavailable:
+            raise   # Settings reports it as `credential_store_unavailable` (credentials.md "Handshake")
         except ValueError as error:   # the Keychain could not be read; its message is safe to show
             return dict(row, state='error', detail=str(error))
         if self.required and not row['configured']:

@@ -12,14 +12,15 @@ Any other exception from a lookup also counts as a skip, with a fixed reason: up
 
 `source_lookup(sources, authorize)` builds such a lookup over Source instances (research/<source>.py).
 
-Title helpers come from `research.records` (stream 1B) when it is present, else from the small fallback below.
+Title helpers come from `research.records`.
 """
-import difflib
 import re
 import time
 import unicodedata
 
 from timeutil import iso_time
+
+from . import records
 
 V = 1
 MAX_REFERENCES = 200
@@ -57,34 +58,10 @@ class Skipped(Exception):
 
 # ------------------------------------------------------------------------------------------ titles
 
-def _records():
-    """`research.records` from stream 1B, or None while it is not in this build."""
-    try:
-        from research import records
-    except ImportError:
-        return None
-    if callable(getattr(records, 'normalize_title', None)) and callable(getattr(records, 'title_similarity', None)):
-        return records
-    return None
-
-
-def _fallback_normalize(text):
-    text = unicodedata.normalize('NFKD', text or '')
-    text = ''.join(c for c in text if not unicodedata.combining(c)).lower()
-    text = re.sub(r'[^\w\s]|_', ' ', text)
-    return ' '.join(text.split())
-
-
 def similarity(a, b):
     """Normalized title similarity from 0 to 1. A leading `RETRACTED:` is ignored (spike-0b.md gotcha 3)."""
     a, b = RETRACTED_PREFIX.sub('', a or ''), RETRACTED_PREFIX.sub('', b or '')
-    records = _records()
-    if records is not None:
-        return float(records.title_similarity(a, b))
-    left, right = _fallback_normalize(a), _fallback_normalize(b)
-    if not left or not right:
-        return 0.0
-    return difflib.SequenceMatcher(None, left, right).ratio()
+    return float(records.title_similarity(a, b))
 
 
 # ---------------------------------------------------------------------------------------- references
