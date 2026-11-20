@@ -24,7 +24,7 @@ window.interspaceReceive=message=>{
  if(message.error){if(!stale)error(message.error);call.reject(Error(message.error));}
  else{if(message.result?.projects&&!stale)apply(message.result);call.resolve(message.result);}
 };
-function apply(next){P.fromState(next.provider_status);const changed=!state||state.project_id!==next.project_id||state.task_id!==next.task_id;state=next;if(changed)taskTab='conversation';error(state.error);render();}
+function apply(next){P.fromState(next.provider_status);window.interspaceDisplay.set(next.display);const changed=!state||state.project_id!==next.project_id||state.task_id!==next.task_id;state=next;if(changed)taskTab='conversation';error(state.error);render();}
 function navigate(next){selectionEpoch++;if(next==='new')newKind=view==='research'||!state?.projects?.length?'research':'project';view=next;if(next==='settings'||next==='new'){P.load();R.load();}render();}
 function openProject(id){const epoch=++selectionEpoch;return request('switch_project',{project_id:id}).then(()=>{if(epoch===selectionEpoch)navigate('tasks');}).catch(()=>{});}
 function openAgent(id){selectionEpoch++;window.interspaceAgent.open(id);navigate('agent');}
@@ -50,7 +50,7 @@ function render(){if(!state)return;
  $('active-owner').hidden=!state.active;$('activity').textContent=state.active?state.active+' · working':'';$('stop').disabled=!state.active;
  if(detail)renderHistory(task);
  if(view==='new')renderNew();
- if(view==='settings'){P.renderSettings($('providers-settings'));R.renderSettings($('research-settings'));}
+ if(view==='settings'){P.renderSettings($('providers-settings'));R.renderSettings($('research-settings'));window.interspaceDisplay.renderSettings($('display-settings'));}
  window.interspaceAgent.render(state,view);
  renderResearch();
 }
@@ -104,6 +104,7 @@ window.interspaceAgentNew.init({request,refresh:()=>{if(state&&view==='new')rend
 window.interspaceAgent.init({request,navigate,openAgent});
 P.init({request,changed:()=>{if(state)render();}});
 R.init({request,changed:()=>{if(state)render();}});
+window.interspaceDisplay.init({request,changed:()=>{if(state)window.interspaceAgent.render(state,view);}});
 // Review and merge (stream 1D) registers here: it gets the bridge and a view of its own.
 // It returns to the view it was opened from; the task's project comes from the open task or the desk.
 let reviewFrom='tasks';

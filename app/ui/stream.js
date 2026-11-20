@@ -159,7 +159,10 @@ function askCard(m,it,card,compact){
 function patchText(patch){const out=[];const walk=(v,path)=>{if(Array.isArray(v)){v.forEach(x=>typeof x==='object'&&x?walk(x,path):out.push(path+': '+x));}else if(v&&typeof v==='object'){for(const [k,x] of Object.entries(v))walk(x,path?path+'.'+k:k);}else out.push(path+': '+v);};walk(patch,'');return out.join('; ');}
 function toolCard(m,it,card){
  const c=it.call||{},r=it.result;
- if(c.category==='research'){window.interspaceResearchCards.toolCard(card,{call:c,result:r,output:it.fullOutput??(r?.output?.text||''),state:it,bump:()=>{it.version++;changed(m.id);}});if(r?.output?.truncated)blobButton(m,it,'Show full result',r.output.blob_id,'fullOutput',card);return;}
+ if(c.category==='research'&&display().searches==='summary'&&!it.showFull&&!(r&&r.status&&r.status!=='ok')){
+  window.interspaceResearchCards.toolSummary(card,{call:c,result:r,output:it.fullOutput??(r?.output?.text||'')});
+  const b=el('button','link-button','Show details',card);b.type='button';b.setAttribute('aria-expanded','false');b.onclick=()=>{it.showFull=true;it.version++;changed(m.id);};return;}
+ if(c.category==='research'){window.interspaceResearchCards.toolCard(card,{call:c,result:r,output:it.fullOutput??(r?.output?.text||''),state:it,bump:()=>{it.version++;changed(m.id);}});if(r?.output?.truncated)blobButton(m,it,'Show full result',r.output.blob_id,'fullOutput',card);if(it.showFull&&display().searches==='summary'){const b=el('button','link-button','Show less',card);b.type='button';b.setAttribute('aria-expanded','true');b.onclick=()=>{it.showFull=false;it.version++;changed(m.id);};}return;}
  card.classList.add('tool');
  const head=el('div','card-head',null,card);el('span','badge',CATEGORY[c.category]||c.category||'Tool',head);el('strong','mono',c.title||c.tool||'Tool call',head);
  el('span','state '+(r?r.status:'running'),r?(RESULT[r.status]||r.status)+(r.exit_code!=null?' · exit '+r.exit_code:'')+(r.duration_ms!=null?' · '+r.duration_ms+' ms':''):it.call?'Running':'Output',head);
@@ -173,6 +176,31 @@ function toolCard(m,it,card){
  if(r?.error)el('p','error-text',(r.error.code?r.error.code+': ':'')+r.error.message,card);
  if(it.diff)diffBlock(m,it,it.diff,card);
 }
+// Conversation display (2026-11-20-details-panel-and-display-design.md). Your messages, replies, questions, team
+// cards, subagents, errors and failed calls always show; the rest follows Settings → Conversation display.
+const NOTE_ROWS=new Set(['budget','scope','status']);
+const display=()=>window.interspaceDisplay?.get?.()||{thinking:'summary',searches:'summary',tools:true,citations:true,plans:true,notes:true};
+function visible(it,d){
+ if(it.message||it.team||it.sub||it.ask||it.error||it.blobError)return true;
+ if(it.row)return d.notes||!NOTE_ROWS.has(it.row);
+ if(it.citation)return !!d.citations;
+ if(it.call||it.result||it.output!=null){
+  if(it.result&&it.result.status&&it.result.status!=='ok')return true;
+  return it.call?.category==='research'?d.searches!=='hidden':!!d.tools;
+ }
+ if(it.diff)return !!d.tools;
+ if(it.reasoning!=null)return d.thinking!=='hidden';
+ if(it.plan)return !!d.plans;
+ return true;
+}
+const SUMMARY_CHARS=280;
+function reasoningCard(it,card,d){
+ const text=String(it.reasoning);card.classList.add('reasoning-card');
+ if(d.thinking==='full'){el('p','footnote reasoning-label','Reasoning',card);markdown(text,card);return;}
+ const first=text.split(/\n\s*\n/)[0].trim(),short=first.length>SUMMARY_CHARS?first.slice(0,SUMMARY_CHARS).replace(/\s+\S*$/,'')+'…':first;
+ const p=el('p','reasoning-summary',null,card);el('span','footnote reasoning-label','Reasoning ',p);p.append(short);
+ if(short!==text.trim()){const d2=el('details','reasoning',null,card);el('summary','','Show all',d2);markdown(text,d2);}
+}
 function build(m,it,compact){
  if(it.row){const r=el('p','row-event '+it.row,it.text);r.dataset.item=it.key;return r;}
  if(it.message){const msg=el('div','message '+it.message.role+(it.message.pending?' pending':''));msg.dataset.item=it.key;el('small','',it.message.role==='user'?'You':'Agent',msg);(it.message.role==='assistant'&&it.message.final&&window.interspaceAgent?.isResearch?.(m.id)?window.interspaceResearchCards.markdown:markdown)(it.message.text,msg);if(!it.message.final&&!it.message.pending)el('span','streaming footnote','Writing…',msg);if(it.message.pending&&!it.message.failed)el('span','footnote','Sending…',msg);if(it.message.failed)el('p','error-text','Not sent: '+it.message.failed,msg);return msg;}
@@ -185,7 +213,7 @@ function build(m,it,compact){
  else if(it.citation)window.interspaceResearchCards.citationCard(card,it.citation,{state:it,bump:()=>{it.version++;changed(m.id);}});
  else if(it.call||it.result||it.output!=null)toolCard(m,it,card);
  else if(it.diff){card.classList.add('diff-card');diffBlock(m,it,it.diff,card);}
- else if(it.reasoning!=null){const d=el('details','reasoning',null,card);el('summary','','Reasoning summary',d);markdown(it.reasoning,d);}
+ else if(it.reasoning!=null)reasoningCard(it,card,display());
  else if(it.plan){el('h3','','Plan',card);const ol=el('ol','plan-steps',null,card);for(const s of it.plan){const li=el('li',s.status,null,ol);el('span','footnote',{completed:'Done',in_progress:'In progress',pending:'Pending'}[s.status]||s.status,li);li.append(' '+String(s.text??''));}}
  if(it.error){card.classList.add('error-card');el('p','error-text',(it.error.recoverable?'Error (the task stays usable)':'Error')+' · '+it.error.code+': '+it.error.message,card);}
  if(it.blobError)el('p','error-text',it.blobError,card);
@@ -214,9 +242,10 @@ function childChanged(id){
 function render(container,taskId,options={}){
  const m=model(taskId);let cache=views.get(container);if(!cache){cache=new Map();views.set(container,cache);}
  const focus=document.activeElement&&container.contains(document.activeElement)&&document.activeElement.id?document.activeElement.id:null;
- let list=[...m.items.values()];
+ const shown=display(),shownKey=JSON.stringify(shown);
+ let list=[...m.items.values()].filter(it=>visible(it,shown));
  if(options.compact){const open=m.openAsk&&m.items.get(m.openAsk);list=list.slice(-COMPACT_ITEMS);if(open&&!list.includes(open))list.push(open);}
- const nodes=list.map(it=>{const hit=cache.get(it.key),version=stamp(m,it);if(hit&&hit.version===version)return hit.node;const next=build(m,it,options.compact);if(hit){const was=hit.node.querySelector('details');const now=next.querySelector('details');if(was&&now)now.open=was.open;}cache.set(it.key,{version,node:next});return next;});
+ const nodes=list.map(it=>{const hit=cache.get(it.key),version=stamp(m,it)+'|'+shownKey;if(hit&&hit.version===version)return hit.node;const next=build(m,it,options.compact);if(hit){const was=hit.node.querySelector('details');const now=next.querySelector('details');if(was&&now)now.open=was.open;}cache.set(it.key,{version,node:next});return next;});
  for(const key of [...cache.keys()])if(!m.items.has(key))cache.delete(key);
  nodes.forEach((n,i)=>{if(container.children[i]!==n)container.insertBefore(n,container.children[i]||null);});
  while(container.children.length>nodes.length)container.lastElementChild.remove();

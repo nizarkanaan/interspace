@@ -121,7 +121,7 @@ export default async function check(page,url){
  assert(await c1.getByRole('button',{name:'Hide Researcher activity',exact:true}).getAttribute('aria-expanded')==='true','Expanded state not exposed');
  await push([ev('C1',3,'message',{role:'assistant',text:'Child live update',final:true},{item_id:'k3'})]);
  assert((await text(nested)).includes('Child live update'),'Live child event not shown in the nested stream');
- assert(!(await text(page.locator('#agent-view > #agent-stream > .message'))).includes('Child live update'),'Child event leaked into the parent stream');
+ assert(!(await text(page.locator('#agent-view #agent-stream > .message'))).includes('Child live update'),'Child event leaked into the parent stream');
 
  // A finished writer child: diff summary, report and Review changes.
  await push([ev('T',12,'subagent_finished',{team_id:'team1',member_id:'m2',task_id:'C2',state:'completed',report_excerpt:'Added **validation**.\nLiteral <script>window.pwned=2</script>',diff_summary:{branch:'interspace/task-c2c2c2c2',files:[{path:'src/parser.py',change:'modified',additions:12,deletions:3},{path:'tests/test_parser.py',change:'added',additions:20,deletions:0}]}})]);

@@ -99,7 +99,7 @@ export default async function check(page,url){
  assert((await text(stream)).includes('Fixed parse_date to strip whitespace')||(await text(stream)).includes('Fixed `parse_date`')||(await stream.locator('code').filter({hasText:'parse_date'}).count())===1,'Final message missing');
  assert((await text(page.locator('#agent-view .agent-budget'))).includes('21,480 / 250,000'),'Budget header wrong: '+await text(page.locator('#agent-view .agent-budget')));
  assert((await text(page.locator('#agent-view .agent-status'))).includes('Waiting for your message'),'Idle status missing');
- assert(!/\$|USD|dollar|price/i.test(await text(view)),'Money text shown');
+ assert(!/\$|\bUSD\b|dollar|price/i.test(await text(view)),'Money text shown'); // Whole words: adjacent labels run together in textContent.
 
  // Duplicate events are ignored; unknown kinds and versions show a plain row; text stays literal.
  const cards=await stream.locator('[data-item]').count();

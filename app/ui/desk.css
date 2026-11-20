@@ -211,3 +211,59 @@ h2{font:500 21px/1.3 var(--serif);letter-spacing:-.1px}
 .corpus-found{margin:2px 0 0}
 @media(max-width:600px){.corpus-list .paper{grid-template-columns:1.75rem minmax(0,1fr)}.paper-verdict{margin-left:0;flex-basis:100%}}
 .corpus-unverified .reference{grid-template-columns:minmax(0,1fr);border-left:2px solid var(--warn);padding:10px 0 10px 12px}.corpus-unverified .reference+.reference{margin-top:8px}
+
+/* Wide windows and full screen: the content column is centred, the page heading keeps New task beside the title,
+   and a task view is one aligned column (heading, scope, tabs, conversation and composer share one width).
+   The Conversation | Corpus tabs stay pinned at the top while the page scrolls. */
+main{margin-inline:auto}
+.heading{flex-wrap:nowrap;align-items:flex-start}.heading>div{flex:1 1 auto;min-width:0}.heading>button{flex:0 0 auto;margin-top:22px}
+main:has(#agent-view:not([hidden])){max-width:1400px}
+#agent-view .stream,#agent-view .agent-scope,#agent-view .agent-composer,#agent-view .agent-outputs,#agent-view .corpus{max-width:none}
+#agent-tabs{position:sticky;top:0;z-index:3;background:var(--leaf);margin:0 0 22px;padding-top:6px}
+@media(max-width:600px){.heading{flex-wrap:wrap}.heading>button{margin-top:0}}
+.corpus-unverified .reference>*{grid-column:1}
+
+/* Task details (2026-11-20-details-panel-and-display-design.md): the task's controls are a margin note beside the
+   conversation: a sticky column set off by one hairline, same leaf ground, quieter type. Below 1100px it is the
+   Details tab. */
+.agent-layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:0 44px;align-items:start}
+.agent-main{min-width:0}
+.agent-details{position:sticky;top:0;max-height:100vh;overflow:auto;overscroll-behavior:contain;padding:22px 0 28px 26px;border-left:1px solid var(--line);display:grid;gap:22px;min-width:0}
+.agent-details>*{margin:0;min-width:0}
+.agent-details .agent-bar{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:start}
+.agent-details .agent-bar>div{min-width:0}
+.agent-details .agent-status{font:600 16px/1.35 var(--serif)}
+.agent-details .footnote{font-size:12.5px;line-height:1.5}
+.agent-details .runtime-line .provider-badge{margin:0 2px}
+.agent-details .agent-scope{border:0;padding:0;margin:0}
+.details-heading{font:600 15px/1.3 var(--serif);margin:0 0 10px}
+.agent-details .agent-outputs{border:0;padding:0;margin:0}
+.agent-details .agent-outputs h2{font:600 15px/1.3 var(--serif);margin:0 0 4px}
+.agent-details .output-head{display:grid;gap:0}
+.agent-details .chip{font-size:12px}
+.scope-note{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;border-left-color:var(--warn);margin:0 0 18px}
+.scope-note span{flex:1 1 220px}
+#agent-scope-editor:not(:empty){border:1px solid var(--line);border-radius:4px;padding:4px 16px 16px;margin:0 0 22px}
+#agent-scope-editor .scope-editor{max-width:none}
+@media(max-width:1099px){
+ main:has(#agent-view:not([hidden])){max-width:1000px}
+ .agent-layout{grid-template-columns:minmax(0,1fr)}
+ .agent-details{position:static;max-height:none;overflow:visible;border-left:0;padding:0}
+}
+
+/* Conversation display (2026-11-20-details-panel-and-display-design.md): a summarised search is one quiet line,
+   not a card; a reasoning summary reads as a marginal aside in the serif. */
+.card.research-line{border:0;border-left:2px solid var(--line);border-radius:0;padding:2px 0 2px 12px;gap:2px;background:transparent}
+.research-line-text{font-size:14px;color:var(--muted);overflow-wrap:anywhere}
+.card.research-line .link-button{font-size:12.5px;padding:2px 0;border:0;background:transparent;color:var(--accent)}
+.card.reasoning-card{border:0;border-left:2px solid var(--line);border-radius:0;padding:2px 0 2px 12px;background:transparent}
+.reasoning-summary{font:italic 15px/1.6 var(--serif);color:var(--muted);max-width:70ch}
+.reasoning-label{font-style:normal;margin-right:4px}
+.reasoning-card details{border:0;padding:0;margin:2px 0 0}.reasoning-card summary{font-size:12.5px;color:var(--accent)}
+.display-form{display:grid;gap:14px}
+.display-choice{border:1px solid var(--line);border-radius:4px;padding:10px 14px 12px;display:grid;gap:6px;min-width:0}
+.display-choice legend{font-weight:550;padding:0 4px}
+.display-choice .footnote{margin:0}
+.display-options{display:flex;flex-wrap:wrap;gap:6px 18px}
+.display-option{display:flex;align-items:center;gap:6px;font-size:14px}
+.display-status:empty{display:none}

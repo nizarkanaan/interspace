@@ -129,6 +129,10 @@ export default async function check(page,url){
   await until(()=>team.getByRole('button',{name:'Approve team',exact:true}).isVisible(),'the research team proposal',30000);
   const toolCards=stream.locator('.card.tool.research');
   assert(await toolCards.count()>=2,'Research tool cards: '+await toolCards.count());
+  // Searches show as one line by default (Settings → Conversation display); Show details opens the paper list.
+  const line=toolCards.filter({hasText:/^Searched /}).first();
+  assert(/^Searched .+: \d+ papers?Show details$/.test(await text(line)),'Search summary: '+await text(line));
+  await line.getByRole('button',{name:'Show details',exact:true}).click();
   const search=toolCards.filter({hasText:'Search papers'}).first();
   assert(await search.locator('.paper').count()>0&&await search.locator('.source-badge').count()>0,'Paper list: '+await text(search));
   const hrefs=await stream.locator('a').evaluateAll(as=>as.map(a=>a.getAttribute('href')));

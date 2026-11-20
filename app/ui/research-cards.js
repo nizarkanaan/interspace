@@ -216,5 +216,27 @@ function usageText(u){
  return 'Research requests: '+names.map(n=>{const c=Number.isSafeInteger(calls[n])?calls[n]:0,k=Number.isSafeInteger(cached[n])?cached[n]:0;return R.title(n)+' '+count(c)+' sent'+(k?', '+count(k)+' answered from cache':'');}).join(' · ');
 }
 
-window.interspaceResearchCards={toolTitle:name=>TOOL[name]||'',paper,toolCard,citationCard,outputsPanel,usageText,markdown,paperList};
+// One line for a research call (Settings → Conversation display → Paper searches: Summary). Counts come from the
+// result itself; nothing is guessed when the result cannot be read.
+function toolSummary(card,{call,result,output}){
+ const c=call||{},r=result,input=c.input&&typeof c.input==='object'?c.input:{},tool=str(input.tool||c.tool);
+ card.classList.add('tool','research','research-line');
+ const what=input.query?'“'+str(input.query)+'”':input.id?str(input.id):'';
+ const data=r&&output?parse(output):null;
+ const n=list=>Array.isArray(list)?list.length:null;
+ const from=Array.isArray(data?.searched)&&data.searched.length?' in '+data.searched.filter(s=>typeof s==='string').map(R.title).join(', '):'';
+ let text;
+ if(!r)text={research_search:'Searching '+what,research_citations:'Following citations of '+what,research_paper:'Looking up '+what,research_fulltext:'Looking for an open copy of '+what,research_bibtex:'Getting BibTeX',verify_citations:'Checking citations'}[tool]||'Running '+(TOOL[tool]||'a research tool');
+ else if(!data)text=(TOOL[tool]||'Research')+(what?' '+what:'')+': open the details to see the result';
+ else if(tool==='research_search')text='Searched '+what+from+': '+plural(n(data.papers)||0,'paper');
+ else if(tool==='research_citations')text='Followed citations of '+what+': '+plural(n(data.papers)||0,'paper');
+ else if(tool==='research_paper')text=data.paper?'Looked up '+what+': found “'+(str(data.paper.title)||'Untitled')+'”':'Looked up '+what+': no record found';
+ else if(tool==='research_fulltext')text=/^https:\/\//i.test(str(data.oa_url))?'Found an open copy of '+what:'No open copy found for '+what;
+ else if(tool==='research_bibtex'){const e=Array.isArray(data.entries)?data.entries:[];text='Got BibTeX for '+plural(e.filter(x=>x&&x.bibtex).length,'reference')+(e.some(x=>x&&!x.bibtex)?', '+count(e.filter(x=>x&&!x.bibtex).length)+' not available':'');}
+ else if(tool==='verify_citations')text='Checked '+plural(n(data.references)||0,'reference')+'. The citation report has the result for each one.';
+ else text=(TOOL[tool]||'Research')+(what?' '+what:'');
+ el('p','research-line-text',text,card);
+}
+
+window.interspaceResearchCards={toolTitle:name=>TOOL[name]||'',paper,toolSummary,toolCard,citationCard,outputsPanel,usageText,markdown,paperList};
 })();

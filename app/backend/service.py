@@ -20,6 +20,7 @@ import projects
 import tasks
 import budget
 import routing
+import display
 import scheduler
 
 AGENT_METHODS = ('agent_create', 'agent_message', 'agent_answer', 'agent_cancel', 'task_events', 'task_blob',
@@ -28,7 +29,7 @@ APP_METHODS = ('state', 'connection', 'cancel', 'sign_in', 'switch_project', 'se
                'select_project', 'update_project')
 # Wave 1 streams register backend methods here instead of editing this file. Each module may define
 # METHODS = {'method_name': handler(app, params)}; handlers run on the agent pool and must return JSON-safe data.
-EXTENSIONS = ('providers_api', 'orchestrator', 'worktree_merge', 'research_api', 'outputs_api')
+EXTENSIONS = ('providers_api', 'orchestrator', 'worktree_merge', 'research_api', 'outputs_api', 'display')
 # Messages only the Swift shell sends to the backend (research/credentials.md). They never come from the WebView:
 # Swift drops these types from the UI. They go to the optional `bridge` module, never to the request handlers.
 BRIDGE_TYPES = ('bridge_hello', 'keychain_reply', 'save_panel_reply')
@@ -411,6 +412,7 @@ class Application:
                 except ValueError as error:task_error=str(error)
             data = copy.deepcopy({key:self.state[key] for key in ('version','active','connection')})
             data['provider_status'] = copy.deepcopy(self.state.get('provider_status') or {})
+            data['display'] = display.current(self.state)
             data.update(task_id=shown.get('selected_task_id') if shown and isinstance(shown.get('selected_task_id'),str) else None,
                         task=self.task_view(task) if task else None,
                         tasks=self.task_summaries(project) if project else [],

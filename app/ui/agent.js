@@ -70,10 +70,10 @@ function scopeArea(id){
  const info=scopeInfo(id),box=$('agent-scope');if(box.dataset.rev===id+':'+info.rev)return;box.dataset.rev=id+':'+info.rev;
  const list=box.querySelector('.scope-chips');Scope.chips(list,info,projectName);
  const actions=box.querySelector('.scope-actions');actions.replaceChildren();
- if(info.scope){const edit=el('button','',info.editing?'Close editor':'Edit scope',actions);edit.type='button';edit.disabled=info.saving;edit.setAttribute('aria-expanded',String(info.editing));edit.onclick=()=>{info.editing=!info.editing;touch(id);};
+ if(info.scope){const edit=el('button','',info.editing?'Close editor':'Edit scope',actions);edit.type='button';edit.disabled=info.saving;edit.setAttribute('aria-expanded',String(info.editing));edit.onclick=()=>{info.editing=!info.editing;if(info.editing)openEditor(id);touch(id);};
   if(!Scope.approved(info)){const ok=el('button','primary','Approve scope',actions);ok.type='button';ok.disabled=info.saving;ok.onclick=()=>approveScope(id);}}
  if(info.error)el('p','error-text',info.error,actions).setAttribute('role','alert');
- const editor=box.querySelector('.scope-host');
+ const editor=$('agent-scope-editor');
  if(info.editing&&info.scope){if(editor.dataset.for!==id+':'+info.scope.version){editor.dataset.for=id+':'+info.scope.version;Scope.editor(editor,info,{projectName,saving:info.saving,onSave:doc=>saveScope(id,doc),onClose:()=>{info.editing=false;touch(id);}});}else editor.querySelector('button[type=submit]').disabled=info.saving;}
  else{editor.replaceChildren();delete editor.dataset.for;}
 }
@@ -82,14 +82,15 @@ function renderAgent(){
  head($('agent-head'),id);$('agent-stop').hidden=!stoppable(id);$('agent-back').textContent=isResearch(id)?'← Research':'← Tasks';
  scopeArea(id);
  outputsArea(id);
- const tab=corpusTabs(id);
- $('agent-stream').hidden=tab==='corpus';$('agent-composer').hidden=tab==='corpus';
+ const tab=layoutTabs(id),talk=tab==='conversation';
+ $('agent-stream').hidden=!talk;$('agent-composer').hidden=!talk;$('agent-scope-editor').hidden=!talk;
+ scopeNote(id,talk);
  // A newer scope than the one displayed (edited elsewhere) is reloaded before it can be approved.
  const ev=S.scopeEvent(id),info=scopeInfo(id);if(ev&&info.digest&&ev.scope_digest!==info.digest&&!info.loading&&!info.saving&&ev.scope_version>=(info.scope?.version||0))loadScope(id);
  const stream=$('agent-stream');const stick=innerHeight+scrollY>=document.documentElement.scrollHeight-80;
  S.render(stream,id);
  if(!stream.children.length&&!stream.querySelector('.empty'))el('p','empty muted','No activity yet. Describe what the agent should do.',stream);
- if(stick&&tab!=='corpus'&&document.activeElement!==$('agent-message'))scrollTo(0,document.documentElement.scrollHeight);
+ if(stick&&talk&&document.activeElement!==$('agent-message'))scrollTo(0,document.documentElement.scrollHeight);
  if(shownDraftFor!==id){shownDraftFor=id;$('agent-message').value=drafts.get(id)||'';}
  const reason=gate(id);$('agent-send').disabled=!!reason;
  $('agent-note').textContent=reason||'Enter sends · Shift+Enter adds a line · / for commands · @ to mention';
@@ -107,11 +108,27 @@ let outputsRev=0;
 // Corpus tab (2026-11-20-task-corpus-design.md): root research tasks only. Fetched when opened, and again (at most
 // once a second) after a `corpus` event while it is open.
 const tabs=new Map(),corpora=new Map();
-function corpusTabs(id){
- const nav=$('agent-tabs'),show=isResearch(id)&&!parentOf(id),tab=show?tabs.get(id)||'conversation':'conversation';
- nav.hidden=!show;$('agent-corpus').hidden=tab!=='corpus';
- for(const b of nav.querySelectorAll('[data-agent-tab]'))b.setAttribute('aria-pressed',String(b.dataset.agentTab===tab));
+// Task details (2026-11-20-details-panel-and-display-design.md): status, scope and outputs sit in a side panel; in a
+// narrow window the panel is the Details tab. Corpus is for root research tasks only.
+const narrowQuery=matchMedia('(max-width: 1099px)');
+function layoutTabs(id){
+ const nav=$('agent-tabs'),narrow=narrowQuery.matches,corpus=isResearch(id)&&!parentOf(id);
+ let tab=tabs.get(id)||'conversation';
+ if(tab==='corpus'&&!corpus||tab==='details'&&!narrow)tab='conversation';
+ const shown={conversation:true,corpus,details:narrow};
+ for(const b of nav.querySelectorAll('[data-agent-tab]')){b.hidden=!shown[b.dataset.agentTab];b.setAttribute('aria-pressed',String(b.dataset.agentTab===tab));}
+ nav.hidden=Object.values(shown).filter(Boolean).length<2;
+ $('agent-corpus').hidden=tab!=='corpus';$('agent-details').hidden=narrow&&tab!=='details';
  return tab;
+}
+// While the scope waits for approval, the conversation says so, so a task never sits waiting unnoticed.
+function scopeNote(id,talk){
+ const info=scopeInfo(id),waiting=!!info.scope&&!Scope.approved(info)&&!info.editing;
+ $('agent-scope-note').hidden=!talk||!waiting;
+}
+function openEditor(id){
+ if(narrowQuery.matches)tabs.set(id,'conversation');
+ requestAnimationFrame(()=>{const e=$('agent-scope-editor');if(e&&!e.hidden)e.scrollIntoView({block:'start'});});
 }
 function corpusInfo(id){if(!corpora.has(id))corpora.set(id,{data:null,loading:false,error:'',seen:null,timer:null,ui:{q:'',filter:'all',sort:'found',all:false},rev:0});return corpora.get(id);}
 function loadCorpus(id){
@@ -170,7 +187,12 @@ window.interspaceAgent={
  init(options){
   host=options;S.init({request:options.request,open:id=>host.openAgent(id),rowStatus:id=>row(id)?.status||null,stamp:id=>{const m=window.interspaceReview?.merged?.(id);return m?m.into+':'+m.merge_commit:'';},changed:id=>{if(view==='agent'&&(id===current||parentOf(id)===current)||view==='running')refresh();}});
   window.interspaceComposer.attach({input:$('agent-message'),menu:$('agent-menu'),form:$('agent-composer'),commands,mentions,onSend:send,onInput:text=>{if(current)drafts.set(current,text);}});
-  for(const b of $('agent-tabs').querySelectorAll('[data-agent-tab]'))b.onclick=()=>{if(!current)return;tabs.set(current,b.dataset.agentTab);if(b.dataset.agentTab==='corpus'){const c=corpusInfo(current);if(c.data)loadCorpus(current);}refresh();};
+  for(const b of $('agent-tabs').querySelectorAll('[data-agent-tab]'))b.onclick=()=>{if(!current)return;const nav=$('agent-tabs'),stuck=nav.getBoundingClientRect().top<=1;tabs.set(current,b.dataset.agentTab);if(b.dataset.agentTab==='corpus'){const c=corpusInfo(current);if(c.data)loadCorpus(current);}refresh();
+   // Conversation opens at its latest message; Corpus opens at its top when the tab row is pinned.
+   if(b.dataset.agentTab==='conversation')scrollTo(0,document.documentElement.scrollHeight);
+   else if(stuck){let p=nav.previousElementSibling;while(p&&p.hidden)p=p.previousElementSibling;scrollTo(0,p?p.getBoundingClientRect().bottom+scrollY:0);}};
+  $('agent-scope-review').onclick=()=>{if(!current)return;if(narrowQuery.matches){tabs.set(current,'details');refresh();}const b=$('agent-scope').querySelector('.primary')||$('agent-scope').querySelector('button');if(b)b.focus();};
+  narrowQuery.addEventListener('change',()=>refresh());
   $('agent-stop').onclick=()=>cancel(current);$('agent-back').onclick=()=>host.navigate(current&&isResearch(current)?'research':'tasks');
  },
  isAgent,isResearch,researchRows:()=>(Array.isArray(state?.research?.tasks)?state.research.tasks:[]).filter(t=>t&&typeof t.id==='string'&&!t.parent_task_id&&!parentOf(t.id)),title:()=>title(current),current:()=>current,parentOf,

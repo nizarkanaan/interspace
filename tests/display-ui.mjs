@@ -1,0 +1,96 @@
+/* Task details panel and conversation display (docs/superpowers/specs/2026-11-20-details-panel-and-display-design.md),
+   from fixture events only: the panel holds status, scope and outputs beside the conversation (a Details tab when
+   narrow); searches and reasoning show as summaries by default; Settings → Conversation display hides kinds of output,
+   but replies, questions and failed calls always show. */
+import {install,requests,assert,text,ev,resetSeq} from './research-fixture.mjs';
+const XSS='<img src=x onerror="window.pwned=1">';
+const LONG='First I will search OpenAlex and Crossref for fallback studies. '.repeat(8)+'\n\nThen I will check every reference.';
+const call=(id,tool,input)=>ev('r1','tool_call',{call_id:id,category:'research',tool,title:tool,input:{tool,...input},decision:{decision:'allow',rule:'research.allow',scope_version:1}},id);
+const result=(id,data,status='ok')=>ev('r1','tool_result',{call_id:id,status,duration_ms:5,output:{text:JSON.stringify(data),truncated:false,blob_id:null},error:status==='ok'?null:{code:'unavailable',message:'Crossref did not answer.'}},id);
+const paper=i=>({v:1,title:'Fallback paper '+i,authors:['Ada Example'],year:2020,venue:'Fixture',doi:'10.5555/fb.'+i,sources:['openalex']});
+
+export default async function check(page,url){
+ const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ resetSeq();
+ const history=[
+  ev('r1','scope',{scope_version:1,scope_digest:'sha256:aa',change:'approved',summary:'Scope approved.'}),
+  ev('r1','message',{role:'user',text:'Review fallback evidence',final:true},'u1'),
+  ev('r1','reasoning',{text:LONG},'think1'),
+  call('s1','research_search',{query:'fallback '+XSS}),result('s1',{papers:[paper(1),paper(2),paper(3)],searched:['openalex','crossref'],skipped:[]}),
+  call('s2','research_paper',{id:'doi:10.5555/fb.1'}),result('s2',{paper:paper(1)}),
+  call('s3','research_search',{query:'failing search'}),result('s3',{},'error'),
+  ev('r1','plan_update',{steps:[{text:'Search',status:'completed'}]},'plan1'),
+  ev('r1','message',{role:'assistant',text:'The evidence on fallback is thin.',final:true},'m1'),
+  ev('r1','outputs',{outputs:[{name:'report.md',kind:'report',bytes:100}]}),
+  ev('r1','status',{state:'idle',detail:'',queue_position:null,reason:null})];
+ await install(page,url,{researchRows:[{id:'r1',mode:'agent',kind:'research',project_id:null,title:'Fallback review',status:'idle',provider:'codex',model:null}],history:{r1:history},
+  outputs:{r1:[{name:'report.md',kind:'report',bytes:100}]}});
+ await page.setViewportSize({width:1440,height:900});
+ await page.locator('[data-view=research]').click();
+ await page.locator('[data-open-task=r1]').click();
+ const stream=page.locator('#agent-stream');
+ await page.waitForFunction(()=>document.querySelectorAll('#agent-stream .message').length===2);
+
+ // Panel: status, scope and outputs sit beside the conversation, not above it; no Details tab when wide.
+ const panel=page.locator('#agent-details');
+ assert(await panel.isVisible(),'Panel visible when wide');
+ for(const id of ['agent-head','agent-scope'])assert(await panel.locator('#'+id).count()===1,id+' in the panel');
+ assert(await page.locator('[data-agent-tab=details]').isHidden(),'No Details tab when wide');
+ const side=await page.evaluate(()=>{const s=document.getElementById('agent-stream').getBoundingClientRect(),p=document.getElementById('agent-details').getBoundingClientRect();return p.left>=s.right;});
+ assert(side,'Panel is to the right of the conversation');
+
+ // Default display: one-line search summaries, reasoning summary, failed call in full.
+ const s1=await text(stream.locator('[data-item=s1]'));
+ assert(s1.startsWith('Searched “fallback '+XSS+'” in OpenAlex, Crossref: 3 papers'),'Search summary: '+s1);
+ assert((await text(stream.locator('[data-item=s2]'))).includes('Looked up doi:10.5555/fb.1: found “Fallback paper 1”'),'Lookup summary');
+ assert(await stream.locator('[data-item=s1] .paper').count()===0,'Summary has no paper list');
+ assert((await text(stream.locator('[data-item=s3]'))).includes('Crossref did not answer.'),'Failed call shown in full');
+ const think=await text(stream.locator('[data-item=think1] .reasoning-summary'));
+ assert(think.startsWith('Reasoning')&&think.endsWith('…')&&!think.includes('check every reference')&&await stream.locator('[data-item=think1] details').evaluate(d=>!d.open),'Reasoning summary: '+think);
+ // Show details expands one search in place, by keyboard.
+ await stream.locator('[data-item=s1]').getByRole('button',{name:'Show details'}).focus();await page.keyboard.press('Enter');
+ await page.waitForFunction(()=>document.querySelectorAll('#agent-stream [data-item=s1] .paper').length===3);
+ await stream.locator('[data-item=s1]').getByRole('button',{name:'Show less'}).click();
+ assert(await stream.locator('[data-item=s1] .paper').count()===0,'Show less');
+
+ // Settings: hide searches, thinking, plans and notes; replies and the failed call stay.
+ await page.locator('[data-view=settings]').click();
+ const settings=page.locator('#display-settings');
+ await settings.getByLabel('Hidden').first().check();
+ await page.waitForFunction(()=>window.rFixture.requests.some(r=>r.method==='display_update'));
+ for(const label of ['Plans','Status notes (scope, token and status lines)'])await settings.getByLabel(label).uncheck();
+ await settings.locator('#display-searches-hidden').check();
+ await page.waitForFunction(()=>document.querySelector('#display-settings .display-status')?.textContent==='Saved.');
+ const sent=(await requests(page,'display_update')).at(-1).display;
+ assert(sent.thinking==='hidden'&&sent.searches==='hidden'&&sent.plans===false&&sent.notes===false&&sent.tools===true,'Sent: '+JSON.stringify(sent));
+ await page.locator('[data-view=research]').click();await page.locator('[data-open-task=r1]').click();
+ await page.waitForFunction(()=>document.querySelectorAll('#agent-stream .message').length===2);
+ for(const key of ['s1','s2','think1','plan1'])assert(await stream.locator('[data-item='+key+']').count()===0,key+' hidden');
+ assert(await stream.locator('.row-event').count()===0,'Status notes hidden');
+ assert(await stream.locator('[data-item=s3]').count()===1,'Failed call still shown');
+ assert((await text(stream)).includes('The evidence on fallback is thin.'),'Reply still shown');
+
+ // Full: whole reasoning, whole search cards.
+ await page.locator('[data-view=settings]').click();await page.locator('#display-thinking-full').check();await page.locator('#display-searches-full').check();
+ await page.waitForFunction(()=>window.rFixture.requests.filter(r=>r.method==='display_update').at(-1)?.params.display.searches==='full');
+ await page.locator('[data-view=research]').click();await page.locator('[data-open-task=r1]').click();
+ await page.waitForFunction(()=>document.querySelectorAll('#agent-stream [data-item=s1] .paper').length===3);
+ assert((await text(stream.locator('[data-item=think1]'))).includes('check every reference'),'Full reasoning');
+
+ // Narrow: the panel is the Details tab.
+ await page.setViewportSize({width:800,height:900});
+ const details=page.locator('[data-agent-tab=details]');
+ await details.waitFor();
+ assert(await panel.isHidden(),'Panel hidden on Conversation when narrow');
+ await details.click();
+ assert(await panel.isVisible()&&await stream.isHidden(),'Details tab shows the panel');
+ assert((await text(panel)).includes('report.md'),'Outputs in Details');
+ await page.locator('[data-agent-tab=conversation]').click();
+ assert(await stream.isVisible()&&await panel.isHidden(),'Back to Conversation');
+ const fit=await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth);
+ assert(fit,'No sideways scroll when narrow');
+ await page.setViewportSize({width:1280,height:1000});
+ assert(!errors.length,'Page errors: '+errors.join('; '));
+ assert(!(await page.evaluate(()=>window.pwned)),'Script ran');
+ return {checks:'details panel beside the conversation (Details tab when narrow), one-line search summaries with Show details/less by keyboard, reasoning summary, failed calls always shown, settings hide searches/thinking/plans/notes with replies kept, full mode, literal text, no sideways scroll'};
+}

@@ -4,7 +4,7 @@ const path=require('path');
 const {pathToFileURL}=require('url');
 const fs=require('fs');
 // review-ui belongs to the review and merge stream; it runs once tests/review-ui.mjs exists.
-const SUITES=['task-desk-ui','project-ui','agent-ui','team-card-ui','subagents-ui','providers-ui','live-ui','e2e-ui','hardening-ui','research-settings-ui','research-cards-ui','research-task-ui','corpus-ui','research-e2e-ui',...(fs.existsSync(path.resolve('tests/review-ui.mjs'))?['review-ui']:[])];
+const SUITES=['task-desk-ui','project-ui','agent-ui','team-card-ui','subagents-ui','providers-ui','live-ui','e2e-ui','hardening-ui','research-settings-ui','research-cards-ui','research-task-ui','corpus-ui','display-ui','research-e2e-ui',...(fs.existsSync(path.resolve('tests/review-ui.mjs'))?['review-ui']:[])];
 (async()=>{
  const browser=await chromium.launch({headless:true,executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'});
  try{

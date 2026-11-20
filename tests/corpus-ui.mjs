@@ -75,9 +75,13 @@ export default async function check(page,url){
  await push(page,[ev('r1','corpus',{papers:59,unverified:2})]);
  await page.waitForFunction(n=>window.rFixture.requests.filter(r=>r.method==='task_corpus').length>n,before,{timeout:5000});
 
+ // The tab row stays pinned while the list scrolls, and a switch made there starts the new tab at its top.
+ await page.evaluate(()=>scrollTo(0,document.documentElement.scrollHeight));
+ assert(Math.abs(await page.evaluate(()=>document.getElementById('agent-tabs').getBoundingClientRect().top))<=1,'Tabs pinned');
  // Back to Conversation; the tab row is not shown for a project task's view.
  await page.locator('[data-agent-tab=conversation]').click();
  assert(await page.locator('#agent-stream').isVisible()&&await box.isHidden(),'Conversation again');
+ assert(await page.evaluate(()=>innerHeight+scrollY>=document.documentElement.scrollHeight-2),'Conversation opens at its end');
 
  await page.locator('[data-agent-tab=corpus]').click();
  const fits=await fit(page,'corpus',null,process.env.INTERSPACE_SHOTS?true:false);

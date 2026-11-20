@@ -96,8 +96,8 @@ export default async function check(page,url){
  // Editing a project scope to allow arXiv adds the research key with every listed source.
  await page.waitForFunction(()=>!document.querySelector('#agent-view').hidden&&document.querySelector('#agent-scope .scope-chips').textContent.includes('Research: off'));
  await page.getByRole('button',{name:'Edit scope',exact:true}).click();
- await page.locator('#agent-scope').getByLabel('arXiv',{exact:true}).selectOption('allow');
- await page.locator('#agent-scope').getByRole('button',{name:'Save scope',exact:true}).click();
+ await page.locator('#agent-scope-editor').getByLabel('arXiv',{exact:true}).selectOption('allow');
+ await page.locator('#agent-scope-editor').getByRole('button',{name:'Save scope',exact:true}).click();
  await page.waitForFunction(()=>window.rFixture.requests.some(r=>r.method==='scope_update'));
  const upd=(await requests(page,'scope_update'))[0].scope.research.sources;
  assert(upd.arxiv==='allow'&&upd.semantic_scholar==='off'&&Object.keys(upd).length===5,'scope_update research: '+JSON.stringify(upd));

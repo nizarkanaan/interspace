@@ -32,8 +32,8 @@ export async function install(page,url,opts={}){
    {name:'codex',title:'Codex',models:[],default_model:null,capabilities:{write:true,web_search:true,approvals:true}}],
    status:[{provider:'claude',state:'signed_in',account:'Fixture',detail:''},{provider:'codex',state:'signed_in',account:'Fixture',detail:''}],routing:o.routing};
   let projectId=projects[0]?.id||null;
-  const state=()=>({version:4,projects,project_id:projectId,project:projects.find(p=>p.id===projectId)?.name||null,task_id:null,task:null,tasks:rows.filter(r=>r.project_id===projectId),research:{tasks:research},active:null,error:'',scheduler:{max_running:4,running:[],queued:[]}});
-  const f=window.rFixture={requests:[],hold:{},held:[],failNext:{},history:o.history||{},scopes:o.scopes||{},outputs:o.outputs||{},saved:o.saved??true,rows,research,sources,
+  const state=()=>({display:f.display,version:4,projects,project_id:projectId,project:projects.find(p=>p.id===projectId)?.name||null,task_id:null,task:null,tasks:rows.filter(r=>r.project_id===projectId),research:{tasks:research},active:null,error:'',scheduler:{max_running:4,running:[],queued:[]}});
+  const f=window.rFixture={display:o.display||undefined,requests:[],hold:{},held:[],failNext:{},history:o.history||{},scopes:o.scopes||{},outputs:o.outputs||{},saved:o.saved??true,rows,research,sources,
    respond(r,result){window.interspaceReceive({id:r.id,result});},fail(r,error){window.interspaceReceive({id:r.id,error});},
    push(events){for(const event of events)window.interspaceReceive({type:'event',event});},
    setState(){window.interspaceReceive({type:'state',state:state()});}};
@@ -61,6 +61,7 @@ export async function install(page,url,opts={}){
    else if(r.method==='task_outputs')result={outputs:(f.outputs[p.task_id]||[]).map(x=>({...x}))};
    else if(r.method==='task_output_read'){const o=(f.outputs[p.task_id]||[]).find(x=>x.name===p.name);const x=(f.readable?.[p.task_id]||{})[p.name];if(!o||x==null){queueMicrotask(()=>f.fail(r,'Unknown output.'));return;}result={name:o.name,kind:o.kind,text:x,truncated:false};}
    else if(r.method==='task_output_save')result={saved:f.saved};
+   else if(r.method==='display_update'){f.display={v:1,thinking:'summary',searches:'summary',tools:true,citations:true,plans:true,notes:true,...p.display};result=f.display;}
    else if(r.method==='task_corpus'){const c=(o.corpora||{})[p.task_id];if(!c){queueMicrotask(()=>f.fail(r,'Only research tasks have a corpus.'));return;}result=JSON.parse(JSON.stringify(c));}
    else if(r.method==='agent_answer'||r.method==='team_answer')result={accepted:true};
    queueMicrotask(()=>f.respond(r,result));
