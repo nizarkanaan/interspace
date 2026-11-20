@@ -25,6 +25,7 @@ import budget
 import orchestrator
 import tasks as task_rows
 from research import corpus as research_corpus
+from research import claims as research_claims
 
 from timeutil import iso_time
 
@@ -564,6 +565,7 @@ class RunContext:
             found += list(mcp_bridge.RESEARCH_TOOLS)
             if self.research_only:
                 found.append(mcp_bridge.CORPUS_TOOL)
+                found += list(mcp_bridge.CLAIM_TOOLS)
                 if self._run.orchestrates:
                     found.append(mcp_bridge.SAVE_REPORT_TOOL)
         return copy.deepcopy(found)
@@ -1488,6 +1490,8 @@ class Scheduler:
         try:
             if name == 'research_corpus':
                 payload = self._corpus_read(run, arguments)  # Interspace's own list: no source, no request.
+            elif name in ('claims_pending', 'record_claim_support'):
+                payload = self._claims_tool(run, name, arguments)  # The task's own claims file: no source, no request.
             elif name == 'save_report':
                 payload = self._save_report(run, arguments)  # Into app data only: no source, no request.
             elif self.research_dispatch is None:
@@ -1689,6 +1693,82 @@ class Scheduler:
             value = copy.deepcopy(self._corpus_load(root))
         return research_corpus.view(value, arguments)
 
+    # -- claim check (docs/superpowers/specs/2026-11-20-claim-check-design.md) ------------------------------
+
+    def _claims_path(self, root_id):
+        return Path(self.events.root) / root_id / 'claims.json'
+
+    def _claims_load(self, root_id):
+        path = self._claims_path(root_id)
+        try:
+            value = None if path.is_symlink() else json.loads(path.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            return None
+        return value if isinstance(value, dict) and value.get('v') == research_claims.V else None
+
+    def _report_text(self, root_id):
+        path = Path(self.events.root) / root_id / 'outputs' / 'report.md'
+        if path.is_symlink() or not path.is_file():
+            raise ValueError('This task has no saved report yet.')
+        return path.read_text(encoding='utf-8')
+
+    def claims_start(self, task_id):
+        """`claims_start`: split the saved report into claims and start a new check, replacing any earlier one."""
+        with self.lock:
+            task = self.store.task(task_id)
+            if not task_rows.is_research(task) or task.get('parent_task_id'):
+                raise ValueError('Only research tasks have a claim check.')
+            if (task.get('agent') or {}).get('state') in ('queued', 'starting', 'running', 'waiting_lock', 'cancelling'):
+                raise ValueError('Wait for the task to finish before checking claims.')
+            text = self._report_text(task_id)
+            value = research_claims.start(text, self._corpus_load(task), iso_time(self.clock()))
+            if not value['claims']:
+                raise ValueError('The report has no numbered citations to check.')
+            self._claims_save(task_id, value)
+            counts = research_claims.counts(value)
+        self.events.append(task_id, None, 'claims', counts)
+        return research_claims.public(value)
+
+    def claims(self, task_id):
+        """`task_claims`: the current claim check for the UI."""
+        with self.lock:
+            task = self.store.task(task_id)
+            if not task_rows.is_research(task) or task.get('parent_task_id'):
+                raise ValueError('Only research tasks have a claim check.')
+            return research_claims.public(self._claims_load(task_id))
+
+    def _claims_save(self, root_id, value):
+        path = self._claims_path(root_id)
+        if path.is_symlink():
+            raise ValueError('The claims file was changed.')
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _write_file(path, json.dumps(value, ensure_ascii=False, separators=(',', ':')))
+
+    def _claims_tool(self, run, name, arguments):
+        arguments = arguments if isinstance(arguments, dict) else {}
+        with self.lock:
+            task = self._task(run.task_id)
+            root = self._root(task)
+            if not task_rows.is_research(root):
+                raise ValueError('Only research tasks have a claim check.')
+            value = self._claims_load(root['id'])
+            if name == 'claims_pending':
+                if set(arguments) - {'limit'}:
+                    raise ValueError('claims_pending takes only limit.')
+                if value is None:
+                    raise ValueError('No claim check has started. The user starts one with Check claims.')
+                return research_claims.pending(value, arguments.get('limit', research_claims.MAX_BATCH))
+            if set(arguments) != {'results'}:
+                raise ValueError('record_claim_support takes only results.')
+            by = (run.provider or 'agent') + ' ' + (self._member(task) or 'agent')
+            out = research_claims.record(value, self._report_text(root['id']), arguments['results'], by,
+                                         iso_time(self.clock()))
+            if out['recorded']:
+                self._claims_save(root['id'], value)
+        if out['recorded']:
+            self.events.append(root['id'], root['agent'].get('project_id'), 'claims', out['counts'])
+        return out
+
     def corpus(self, task_id):
         """`task_corpus`: the research task's corpus, rebuilt from its saved events the first time."""
         with self.lock:
@@ -1710,6 +1790,9 @@ class Scheduler:
         text = arguments['markdown']
         if not isinstance(text, str) or not text.strip() or len(text) > MAX_SAVED_REPORT:
             raise ValueError('markdown must be 1 to 400,000 characters of text.')
+        problem = research_claims.report_problem(text)
+        if problem:
+            raise ValueError(problem)  # A status reply or a question never becomes report.md.
         folder = self._outputs_folder(run)
         _write_file(folder / 'report.md', text)
         run.report_saved = True

@@ -34,6 +34,11 @@ function cancel(id){host.request('agent_cancel',{task_id:id},{manual:true}).catc
 
 // Composer gate: a turn runs to completion before the next message; the scope must be approved.
 function gate(id){const s=status(id),info=scopeInfo(id);if(s?.state==='paused_team')return 'Approve or decline the proposed team first.';if(S.busy(s))return 'The agent is working. You can send when this turn finishes.';if(info.scope&&!Scope.approved(info))return 'Approve the scope before sending.';return '';}
+// A message the app sends for the user (Check claims), leaving any draft in the composer alone.
+function post(id,text){
+ const clientId='c-'+Date.now().toString(36)+'-'+(++clientCount);S.optimistic(id,text,clientId);
+ host.request('agent_message',{task_id:id,text,client_id:clientId},{manual:true}).catch(e=>{S.failed(id,clientId,e.message);});
+}
 function send(text){
  const id=current;if(!id||gate(id))return;
  const clientId='c-'+Date.now().toString(36)+'-'+(++clientCount);
@@ -174,10 +179,18 @@ function reportArea(id){
  if(o&&r.key!==key&&!r.loading){r.key=key;r.loading=true;r.error='';r.rev++;
   host.request('task_output_read',{task_id:id,name:'report.md'},{manual:true}).then(x=>{if(typeof x?.text!=='string')throw Error('The report could not be read.');r.text=x.text;r.truncated=!!x.truncated;})
    .catch(e=>{r.error=e.message||'The report could not be read.';}).finally(()=>{r.loading=false;r.rev++;refresh();});}
- const box=$('agent-report'),k=id+':'+r.rev+':'+c.rev;if(box.dataset.key===k)return;box.dataset.key=k;
+ // Claim check (2026-11-20-claim-check-design.md): loaded when the tab opens and again after each `claims` event.
+ const ev=JSON.stringify(S.claims(id));
+ if(r.claimsSeen!==ev&&!r.claimsLoading){r.claimsSeen=ev;r.claimsLoading=true;host.request('task_claims',{task_id:id},{manual:true}).then(x=>{r.claims=x;}).catch(()=>{}).finally(()=>{r.claimsLoading=false;r.rev++;refresh();});}
+ const busy=['queued','starting','running','waiting_lock','cancelling'].includes(status(id)?.state);
+ const box=$('agent-report'),k=id+':'+r.rev+':'+c.rev+':'+busy;if(box.dataset.key===k)return;box.dataset.key=k;
  const keep=document.activeElement&&box.contains(document.activeElement)?document.activeElement.id:null;
  box.tabIndex=-1;
  window.interspaceReader.render(box,{name:'report.md',bytes:o?.bytes,text:r.text,truncated:r.truncated,corpus:c.data,loading:r.loading,error:r.error,saving:r.saving,note:r.note,saveError:r.saveError,
+  claims:r.claims,checking:r.checking,checkError:r.checkError,canCheck:!!r.text&&!busy,
+  onCheck:()=>{r.checking=true;r.checkError='';r.rev++;refresh();
+   host.request('claims_start',{task_id:id},{manual:true}).then(x=>{r.claims=x;const why=gate(id);if(why)throw Error(why);post(id,'Check the claims in the saved report.');})
+    .catch(e=>{r.checkError=e.message||'The claim check could not start.';}).finally(()=>{r.checking=false;r.rev++;refresh();});},
   onSave:()=>{r.saving=true;r.note='';r.saveError='';r.rev++;refresh();host.request('task_output_save',{task_id:id,name:'report.md'},{manual:true}).then(x=>{r.note=x?.saved?'Saved.':'Not saved.';}).catch(e=>{r.saveError=e.message||'The report was not saved.';}).finally(()=>{r.saving=false;r.rev++;refresh();});}});
  if(keep){const again=document.getElementById(keep);if(again)again.focus();}
 }

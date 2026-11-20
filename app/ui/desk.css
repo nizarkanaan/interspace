@@ -437,3 +437,22 @@ button:not(:disabled):active{transform:translateY(1px)}
 .mode-switch .mode{white-space:nowrap}
 @media(max-width:900px){.mode-switch .mode{padding:7px 4px;font-size:13.5px}.sidebar-new{font-size:13.5px;padding:9px 10px}}
 .mode-switch .mode .nav-count{color:inherit}
+
+/* Claim check (2026-11-20-claim-check-design.md): citation links take their claim's verdict colour; the words are in
+   the link's accessible name and in the Claims to look at list. */
+.reader-actions{display:flex;flex-wrap:wrap;gap:8px}
+.claim-summary{margin:0;font-size:13.5px;color:var(--ink)}
+.cite-link.claim-supported{color:var(--accent);font-weight:600}
+.cite-link.claim-partly{color:var(--ink);text-decoration:underline dotted;text-underline-offset:3px}
+.cite-link.claim-not_supported{color:var(--warn);font-weight:600;text-decoration:underline;text-underline-offset:3px}
+.cite-link.claim-cannot_tell{color:var(--muted)}
+.claim-list{border:1px solid var(--line);border-radius:4px;padding:10px 14px;background:var(--leaf);max-width:68ch;margin:0}
+.claim-list summary{font:600 15px/1.4 var(--serif)}
+.claim-list ol{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:12px}
+.claim-item{border-left:2px solid var(--line);padding:2px 0 2px 12px;display:grid;gap:4px}
+.claim-item>*{margin:0}
+.claim-item.is-not_supported{border-color:var(--warn)}.claim-item.is-partly{border-color:var(--muted)}
+.claim-verdict{font:600 12px var(--sans);color:var(--muted)}.is-not_supported .claim-verdict{color:var(--warn)}
+.claim-sentence{font:15.5px/1.6 var(--serif)}
+.claim-reason{font-size:13.5px}
+.claim-quote{margin:0;padding-left:10px;border-left:2px solid var(--line);font:italic 14px/1.55 var(--serif);color:var(--muted)}

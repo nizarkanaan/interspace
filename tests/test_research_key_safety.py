@@ -150,6 +150,11 @@ def fake_research_module(storage_of, http):
     return module
 
 
+SAVED_REPORT = ('# Related work\n\nDeep learning [1]. One reference could not be verified, so it is not cited, and '
+                'the remaining evidence comes from the verified survey listed below.\n\n## References\n\n'
+                '1. LeCun, Y., Bengio, Y. and Hinton, G. (2015). Deep learning. Nature. doi:10.1038/nature14539\n')
+
+
 class ResearchKeySafetyTests(e2e.EndToEndTeamTests):
     """Reuses the end-to-end setup (fake CLIs, real Application) with a research scenario."""
 
@@ -169,8 +174,7 @@ class ResearchKeySafetyTests(e2e.EndToEndTeamTests):
             *bridged('research_search', {'query': 'deep learning review', 'limit': 5}, 'toolu_search'),
             *bridged('research_bibtex', {'ids': ['10.1038/nature14539']}, 'toolu_bib'),
             *bridged('verify_citations', {'references': REFERENCES}, 'toolu_verify'),
-            *bridged('save_report', {'markdown': '# Related work\n\nDeep learning [1]. One reference could not be '
-                                                 'verified.'}, 'toolu_save'),
+            *bridged('save_report', {'markdown': SAVED_REPORT}, 'toolu_save'),
             claude_text('# Related work\n\nDeep learning [1]. One reference could not be verified.'),
             claude_result(300, 50)]
         (self.root / 'claude.json').write_text(json.dumps({'by_prompt': [

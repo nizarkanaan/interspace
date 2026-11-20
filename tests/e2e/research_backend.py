@@ -181,11 +181,15 @@ Earlier deep learning surveys framed the field (LeCun, Bengio and Hinton).
 - Self-attention trains in parallel and scales with data.
 - Follow-up work cites the original paper widely.
 
-## References and their check
+## How the references were checked
 - Vaswani et al. (2017): verified by the citation checker.
 - LeCun et al.: the year given (2012) differs from the published record (2015).
 - Wakefield et al. (1998): retracted; not cited as evidence.
 - "A synthetic survey of imaginary retrieval transformers": not found in any source, so it is not cited.
+
+## References
+1. Vaswani, A. et al. (2017). Attention is all you need. arXiv:1706.03762
+2. LeCun, Y., Bengio, Y. and Hinton, G. (2015). Deep learning. Nature. doi:10.1038/nature14539
 """
 
 
@@ -213,7 +217,8 @@ def verify_references(ctx, text):
     summary = report.get('summary') or {}
     checked = ('# Reference check\n\n' + '\n'.join('- %s: %s' % (k.replace('_', ' '), summary.get(k, 0))
                                                    for k in ('verified', 'mismatch', 'not_found', 'retracted', 'unchecked'))
-               + '\n\nOnly the references marked verified matched a published record.')
+               + '\n\nOnly the references marked verified matched a published record.\n\n## References\n'
+               + '\n'.join('%d. %s' % (i + 1, line) for i, line in enumerate(lines)))
     ctx.call_tool('save_report', {'markdown': checked})
     say(ctx, checked, 'b')
     return done()

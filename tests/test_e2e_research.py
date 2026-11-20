@@ -65,7 +65,10 @@ TEAM = {'summary': 'Read further and check the references.',
                     {'role': 'citation_checker', 'brief': 'Check the LeCun reference before it is cited.'}]}
 WRITE_TEAM = {'summary': 'Write the report into a file.',
               'members': [{'role': 'implementer', 'brief': 'Write report.md.'}]}
-REPORT = '# Related work\n\nTransformers [Vaswani et al.] build on deep learning [LeCun et al. 2015].'
+REPORT = ('# Related work\n\nTransformers replaced recurrence with self-attention [1] and build on the deep learning '
+          'methods surveyed in [2].\n\n## References\n\n1. Vaswani, A. et al. (2017). Attention is all you need. '
+          'arXiv:1706.03762\n2. LeCun, Y., Bengio, Y. and Hinton, G. (2015). Deep learning. Nature. '
+          'doi:10.1038/nature14539\n')
 
 
 def guarded_connect(original):

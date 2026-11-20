@@ -18,6 +18,8 @@ let allowedMethods: Set<String> = [
     "display_update",
     // Archive and delete tasks (2026-11-20-archive-delete-design.md)
     "task_archive", "task_delete_check", "task_delete",
+    // Claim check (2026-11-20-claim-check-design.md)
+    "claims_start", "task_claims",
 ]
 
 /// Lines only Swift and the backend exchange (research/credentials.md). They never reach or come from the WebView.

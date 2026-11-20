@@ -24,3 +24,14 @@ Until now, the last reply of every completed Orchestrator turn in a research tas
 - One explicit tool, instead of guessing from the reply's length or headings, which would fail on short reports and long questions.
 - `references.bib` follows the saved report, not every citation check.
 - A report replaced before this change is not recovered automatically. Its text is still in the task's conversation, so the user can ask the Orchestrator to save it again.
+
+## Only reports (added 2026-11-20)
+
+On a build from before `save_report`, the agent's status reply ("I checked all 39 previously unchecked records…") replaced a full review. The user asked that only the actual report can ever become the report.
+
+- **What counts as a report.** `save_report` now refuses anything that is not one, using `research/claims.py` `report_problem`. A report must:
+  - start with a title heading (`# Title`);
+  - be at least 200 characters long;
+  - have a References section (References, Bibliography, Works cited or Reference list) with at least one entry, numbered to match the `[n]` citations.
+- **What happens otherwise.** Status updates, questions and summaries of work are refused with an explanation telling the agent to answer in its reply instead. Nothing is written.
+- **No other way in.** No path saves a reply as the report, and no "Save as report" control is offered.

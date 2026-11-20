@@ -73,4 +73,14 @@ def task_corpus(app, params):
     return app.scheduler.corpus(params.get('task_id'))
 
 
-METHODS = {'task_corpus': task_corpus, 'task_outputs': task_outputs, 'task_output_read': task_output_read, 'task_output_save': task_output_save}
+def claims_start(app, params):
+    """`{task_id}` -> a new claim check over the saved report (2026-11-20-claim-check-design.md)."""
+    return app.scheduler.claims_start(params.get('task_id'))
+
+
+def task_claims(app, params):
+    """`{task_id}` -> the current claim check: verdicts, reasons and quotes."""
+    return app.scheduler.claims(params.get('task_id'))
+
+
+METHODS = {'claims_start': claims_start, 'task_claims': task_claims, 'task_corpus': task_corpus, 'task_outputs': task_outputs, 'task_output_read': task_output_read, 'task_output_save': task_output_save}

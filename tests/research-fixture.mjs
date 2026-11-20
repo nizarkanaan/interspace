@@ -61,6 +61,9 @@ export async function install(page,url,opts={}){
    else if(r.method==='task_outputs')result={outputs:(f.outputs[p.task_id]||[]).map(x=>({...x}))};
    else if(r.method==='task_output_read'){const o=(f.outputs[p.task_id]||[]).find(x=>x.name===p.name);const x=(f.readable?.[p.task_id]||{})[p.name];if(!o||x==null){queueMicrotask(()=>f.fail(r,'Unknown output.'));return;}result={name:o.name,kind:o.kind,text:x,truncated:false};}
    else if(r.method==='task_output_save')result={saved:f.saved};
+   else if(r.method==='claims_start'){const c=(o.claims||{})[p.task_id];if(!c){queueMicrotask(()=>f.fail(r,'The report has no numbered citations to check.'));return;}f.claimsNow=JSON.parse(JSON.stringify(c.start));result=JSON.parse(JSON.stringify(c.start));}
+   else if(r.method==='task_claims')result=JSON.parse(JSON.stringify(f.claimsNow||{claims:[],counts:{claims:0,pending:0},started_at:null}));
+   else if(r.method==='agent_message')result={accepted:true};
    else if(r.method==='task_archive'){const t=[...rows,...research].find(x=>x.id===p.task_id);t.archived=p.archived;result={archived:p.archived};queueMicrotask(()=>f.setState());}
    else if(r.method==='task_delete_check')result=JSON.parse(JSON.stringify((o.deleteChecks||{})[p.task_id]||{working:false,subagents:0,kind:'research',branches:[]}));
    else if(r.method==='task_delete'){for(const list of [rows,research]){const i=list.findIndex(x=>x.id===p.task_id);if(i>=0)list.splice(i,1);}const c=(o.deleteChecks||{})[p.task_id];const names=(c?.branches||[]).filter(b=>b.exists&&!b.checked_out).map(b=>b.name);result={deleted:[p.task_id],deleted_branches:p.branches==='delete'?names:[],kept_branches:p.branches==='delete'?[]:names.map(n=>({name:n,reason:'You chose to keep it.'}))};queueMicrotask(()=>f.setState());}

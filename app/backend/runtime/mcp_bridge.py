@@ -128,12 +128,33 @@ RESEARCH_TOOL_NAMES = tuple(t['name'] for t in RESEARCH_TOOLS)
 # report saved with it becomes report.md; ordinary replies leave the saved report as it is.
 SAVE_REPORT_TOOL = {'v': 1, 'name': 'save_report', 'title': 'Save the report', 'effect': 'update',
                     'description': 'Save the finished research report as this task\'s report.md, replacing the one '
-                                   'saved before. Markdown with headings and a numbered References list ([1], [2], …) '
-                                   'that matches the citations in the text. Call it only for a finished or revised '
-                                   'report; replies that ask the user something or report progress are not saved.',
+                                   'saved before. It must start with a title heading (# Title) and end with a '
+                                   '## References section: a numbered list matching the [n] citations in the text. '
+                                   'Anything else (a status update, a question, a summary of what you did) is '
+                                   'refused; give those in your reply instead.',
                     'input_schema': {'type': 'object', 'required': ['markdown'], 'additionalProperties': False,
                                      'properties': {'markdown': {'type': 'string', 'minLength': 1,
                                                                  'maxLength': 400000}}}}
+# The claim check (2026-11-20-claim-check-design.md): offered to every session of a research task. The judge reads
+# pending claims with their source text and records verdicts; a quote must appear in that source text.
+CLAIM_TOOLS = (
+    {'v': 1, 'name': 'claims_pending', 'title': 'Claims to check', 'effect': 'read',
+     'description': 'Up to 20 claims from the saved report that still need a verdict, each with the only source '
+                    'text (the cited paper\'s abstract) to judge it against.',
+     'input_schema': {'type': 'object', 'additionalProperties': False, 'properties': {
+         'limit': {'type': 'integer', 'minimum': 1, 'maximum': 20, 'default': 20}}}},
+    {'v': 1, 'name': 'record_claim_support', 'title': 'Record claim verdicts', 'effect': 'update',
+     'description': 'Record verdicts for claims from claims_pending: supported, partly, not_supported or '
+                    'cannot_tell, a short reason, and a quote copied exactly from the source text (required unless '
+                    'cannot_tell). A quote that is not in the source text is rejected.',
+     'input_schema': {'type': 'object', 'required': ['results'], 'additionalProperties': False, 'properties': {
+         'results': {'type': 'array', 'minItems': 1, 'maxItems': 50, 'items': {
+             'type': 'object', 'required': ['id', 'verdict', 'reason'], 'additionalProperties': False, 'properties': {
+                 'id': {'type': 'string', 'maxLength': 20},
+                 'verdict': {'type': 'string', 'enum': ['supported', 'partly', 'not_supported', 'cannot_tell']},
+                 'reason': {'type': 'string', 'minLength': 1, 'maxLength': 300},
+                 'quote': {'type': 'string', 'maxLength': 500}}}}}}},
+)
 # The task's own corpus (2026-11-20-task-corpus-design.md): offered to every session of a research task. It reads
 # Interspace's saved list and calls no source.
 CORPUS_TOOL = {'v': 1, 'name': 'research_corpus', 'title': 'Read the corpus', 'effect': 'read',

@@ -42,7 +42,7 @@ export default async function check(page,url){
 
  // Verdicts in words, from the corpus.
  const verdict=async n=>text(reader.locator('#report-ref-'+n+' .report-verdict'));
- assert(await verdict(1)==='Verified'&&await verdict(2)==='Not checked'&&await verdict(3)==='Retracted: do not cite'&&await verdict(4)==='Not verified'&&await verdict(5)==='Not in the corpus','Verdicts');
+ assert(await verdict(1)==='Verified'&&await verdict(2)==='Not checked'&&await verdict(3)==='Retracted: do not cite'&&await verdict(4)==='Not verified'&&await verdict(5)==='Not found by the agents: possibly cited from memory','Verdicts');
  assert((await text(reader.locator('.reader-summary')))==='5 references: 1 verified, 1 retracted, 1 not verified, 1 not checked, 1 not in the corpus.','Summary: '+await text(reader.locator('.reader-summary')));
  assert((await text(reader.locator('#report-ref-4'))).includes(XSS)&&await reader.locator('img,script').count()===0,'Literal reference text');
 
