@@ -2,14 +2,27 @@
 
 Launch `dist/Interspace.app` with a double-click. It opens its own native window; no HTML file, browser tab or local web server is required. The backend starts and stops with the application.
 
-**Status (2026-11-19): a multi-provider agent workspace.** Claude Code and Codex run as agents under one Orchestrator; Gemini comes later. Plan: `docs/superpowers/plans/2026-11-15-multi-provider.md`.
+**Status (2026-11-20): a multi-provider agent workspace with a research reader.** Claude Code and Codex run as agents under one Orchestrator; Gemini comes later.
 - **Every task** is a conversation with the Orchestrator. It answers directly, or proposes a team of subagents on Claude and Codex that you approve before anything runs.
 - **Review and merge:** each writing subagent commits to its own `interspace/task-…` branch. **Review changes** shows the diff; **Merge** merges it into a branch you pick.
+- **Research:** research questions without a project, scholarly sources with your own keys, a corpus of found papers, a citation checker, a report reader, a claim check and a two-agent evidence table. See [Research](#research).
 - **Removed:** the Read-only review and Fix & test (Python) modes, project sources, Workspace advice, the Observatory, project conversation and connected apps. Earlier tasks still open read-only, labelled "Earlier task (read-only)".
-- **Research workspace (approved 2026-11-19, being built):** research questions without a project, scholarly sources with your own keys, and a citation checker. See [Research](#research). Plan: `docs/superpowers/plans/2026-11-19-research-workspace.md`.
-- **Not yet done:** a live run with real Claude and Codex sign-ins inside the app, and live research calls with your own keys. The full team flow and the research screens are tested with fake command-line tools, recorded fixtures and fake replies, never the network.
+- **Verification:** the team flow and the research screens are tested with fake command-line tools, recorded fixtures and fake replies, never the network. Live runs with real sign-ins have started, but the claim check, full text and evidence table have not yet been tried live.
 
 ## Projects and tasks
+
+**Sidebar.** A **Research | Code** switch follows the page you are on.
+- **New research question** or **New code task** starts a task of that kind.
+- In Code mode, the **Project** picker and **Add project folder** sit under the button.
+- The mode's tasks are grouped under **Needs you**, **Working** and **Done**, each with its state in words: Approve the team, Answer a question, Working, Report ready, Stopped after an error. Subagents are listed under their task, not here.
+- **Running now** lists every running task across both modes.
+- **Usage** shows each provider's usage limits as the provider reported them during its latest run (percent used, status, reset time), with the time of the reading. It updates only while an agent of that provider runs.
+
+**Task actions.** Right-click a task, or press Shift+F10 or the context-menu key on it, for **Open**, **Stop** (while it works), **Archive** or **Restore**, and **Delete…**.
+- A task that is working, or waiting on you, can't be archived or deleted until you stop it.
+- **Archived tasks** move to a closed **Archived** list at the bottom of the sidebar, and you can restore them.
+- **Delete** is permanent, and asks first. It removes the task, its subagents, its conversation, its outputs and its private project copy.
+- **Deleting a code task with a published branch** says how many commits are not merged and offers **Review and merge first**. You choose to delete the branch or keep it. A branch that is checked out in your working copy is never deleted, and each branch deletion is written to the audit log.
 
 **Add project folder** registers a Git repository. The project picker switches among projects; each keeps its own tasks. **Settings → Project details** saves a name, brief, priority and next action locally, without a model call or source edits.
 
@@ -30,32 +43,55 @@ Inside the scope an agent acts without asking. Outside it, that task alone pause
 
 ## Research
 
-Interspace is a research environment that still codes. A **research question** needs no project: agents search scholarly sources, follow citations, and give you a report. They are told to check what they cite with the citation checker before answering; that is an instruction to the agents, not something the app enforces, so the citation report shows exactly what was checked. When it ran, you also get a BibTeX file.
-
-**Status.** Everything here is tested with recorded source replies and fake agents only. No live call to a research source or a model has run inside the app yet.
+Interspace is a research environment that still codes. A **research question** needs no project: agents search scholarly sources, follow citations, and write a report. The app keeps track of every paper they found, lets you check every cited claim, and fills an evidence table with two independent models.
 
 **Sources.** Semantic Scholar, OpenAlex, arXiv, Crossref and Unpaywall. **Settings → Research sources** lists each one with what it needs, its status, **Test**, **Remove** and a link to get a free key:
 - Semantic Scholar and OpenAlex: an optional API key, which raises your allowance.
 - Crossref: an optional email; Unpaywall: a required email. The email goes to that service with each request, as the contact address it asks API users for.
 - arXiv: nothing to enter.
 
-Keys and emails are your own. They are kept in this Mac's Keychain, are never shown again after you save them, and never reach agents, logs, events or git. Only Interspace's backend calls these services, over https. Research calls use no tokens; each task shows, per source, the requests it sent and the answers that came from the cache instead, never money.
+Keys and emails are your own. They are kept in this Mac's Keychain, are never shown again after you save them, and never reach agents, logs, events or git. Research calls use no tokens; each task shows, per source, the requests it sent and the answers that came from the cache, never money.
 
-**Research questions.** **New task → Research question** offers presets: **Literature review**, **Related work** and **Verify my references** (paste a bibliography). The scope has research sources only: no project, files, commands or network. Each source is **Allow**, **Ask** (each call waits for you) or **Off**; new scopes allow the sources you can use. Every team member only reads. Research tasks are listed under **Research** in the sidebar, next to your projects, and have no Review or Merge.
+**Scope.** **New task → Research question** offers **Literature review**, **Related work** and **Verify my references**.
+- The scope has research sources only: no project, files, commands or network.
+- Each source is **Allow**, **Ask** (each call waits for you) or **Off**.
+- **Open-access full text** is a separate permission for downloading free copies of papers from publishers' own sites. New research tasks have it on **Ask**; for an older task, add it in **Edit scope**.
+- Every team member only reads.
 
-**What you see.** Research tool calls show papers with title, authors, year, venue, sources and citation counts; links appear only for https addresses, and all text from the sources is shown as plain text. A search names the sources it skipped and why (not set up, rate limited, unavailable, off in the scope). The **citation report** marks each reference **Verified** (a published record's title is at least 90% similar, and the year within one and the first author match when the reference gives them), **Not verified** (differs, with the fields, or not found), **Retracted**, or **Not checked** with the reason. Retracted and unverified references are listed first, with their reference number, and a retracted one is called out above the list. Nothing is called verified unless the checker said so. In a report, every link shows its real host after its text, and only https links are links.
+**The split reader.** In a window 1100px or wider, a research task shows the conversation on the left and the results on the right. Drag the divider, or use its arrow keys, to resize them; double-click it to reset.
+- **Report.** `report.md` at reading width.
+  - Each `[n]` links to its reference, and each reference shows the citation checker's verdict: Verified, Retracted, Not verified, Not checked, or Not found by the agents (possibly cited from memory).
+  - **Check claims** splits the report into cited sentences and asks the Orchestrator for an independent checker on the other provider. The checker judges each sentence against the cited paper's abstract and, when an open-access copy exists, its most relevant passages: Supported, Partly, Not supported or Can't tell.
+  - Each verdict carries a reason and a quote, and the quote must appear in the source. Citations take their verdict's colour, and **Claims to look at** lists the problems first.
+- **Corpus.** Every paper the agents and subagents found, with duplicates merged, and each one's verdict and where it was found. It has search, filters (Checked, Not checked, Open access) and sorting. Agents can read the corpus too.
+- **Evidence.** Choose columns, from presets or your own, and rows: the cited papers, or every checked paper.
+  - **Fill table** asks for two extractors, one on Claude and one on Codex. Each fills the table alone, with a quote for every value.
+  - Cells say **Agree**, **Agree, check the number**, **Disagree** (both values side by side, with **Use Claude's**, **Use Codex's** or **Type my own**) or **Not reported**. **Needs you** filters to what needs a decision.
+  - **Export CSV** saves `evidence.csv`.
+- **Scope and outputs.** Status, scope and outputs.
 
-**Outputs.** A finished research answer is saved as `report.md`, plus `references.bib` when the citation checker ran: it holds the verified references, mismatched ones marked in a comment, and leaves not-found and retracted ones out. **Outputs** on the task shows them; **Save** copies a file to a place you choose. Project tasks still use Review and Merge for code.
+In a narrower window the same parts are tabs: **Conversation**, **Report**, **Corpus**, **Evidence** and **Details**.
 
-When the citation checker runs as a subagent, its citation report also appears on that subagent's card in the task, so you do not need to open the subagent to see it. A subagent that has answered its brief shows **Finished**.
+**Reports.** `report.md` changes only when the Orchestrator saves a finished report with `save_report`. The app refuses anything without a title heading and a numbered References list, so a status reply can never replace your report. `references.bib` holds the references the checker verified, marks mismatched ones in a comment, and leaves out not-found and retracted ones.
 
-**Browser end-to-end.** `tests/research-e2e-ui.mjs` drives the real backend (`tests/e2e/research_backend.py`) over JSON lines with fake agent runtimes, research HTTP answered from `tests/research/fixtures/`, and a fake Swift side (an in-memory Keychain and save panel). It covers Settings → Research sources, a Literature review with a researcher and a citation checker, Verify my references, and a project task's Review changes. It writes screenshots to `workspace-data/research-e2e/` (or `INTERSPACE_SHOTS`). Run it with `node tests/run-ui.cjs research-e2e-ui`.
+**Full text.**
+- **arXiv papers** are read from arXiv's own pages, under the arXiv permission.
+- **Any other open-access copy** is downloaded only with the full-text permission, and only:
+  - over https;
+  - from public addresses, checked on every redirect;
+  - up to 10 MB.
+
+  PDF text is read by macOS PDFKit, and the downloaded file is deleted after reading.
+
+**What is shown.** Research text is always shown as plain text, links appear only for https addresses, and a link's real host is shown after its text.
+
+**Browser end-to-end.** `tests/research-e2e-ui.mjs` drives the real backend (`tests/e2e/research_backend.py`) over JSON lines with fake agent runtimes, research HTTP answered from `tests/research/fixtures/`, and a fake Swift side (an in-memory Keychain and save panel). Run it with `node tests/run-ui.cjs research-e2e-ui`. Screenshots go to `workspace-data/research-e2e/`, or `INTERSPACE_SHOTS`.
 
 ## Connection
 
 The app finds `codex` on PATH or inside the official ChatGPT/Codex Mac app, and checks its sign-in. Claude Code uses your own `claude` sign-in. Credentials stay in each provider's own store; Interspace never reads or copies them.
 
-Model use counts against your own accounts. Returned token counts are displayed. Money and remaining subscription allowance are never inferred.
+Model use counts against your own accounts. Returned token counts are displayed. Usage limits are shown only as each provider reports them; money is never shown, and no limit is ever estimated.
 
 ## Token usage
 
@@ -64,11 +100,11 @@ New tasks have **no token limit**; you are never asked for one. Each task shows 
 - **Claude:** `input + cache creation + cache read + output`.
 - **A call that reports no counts** is charged its estimate and labelled as estimated.
 
-Tasks saved by earlier versions keep the limit they were created with: a turn that cannot fit is refused, and a run that hits it stops as **Budget exhausted**. Usage is tokens only; money and remaining subscription allowance are never shown.
+Tasks saved by earlier versions keep the limit they were created with: a turn that cannot fit is refused, and a run that hits it stops as **Budget exhausted**. Usage is tokens only, and money is never shown.
 
 ## Data and project protection
 
-Tasks, events, usage records, audit logs, research outputs and the research response cache live in `~/Library/Application Support/Interspace`. Research keys and emails live only in the macOS Keychain.
+Tasks, events, usage records, audit logs, research outputs (`report.md`, `references.bib`, `evidence.csv`), each research task's corpus, claim check, evidence table and full-text cache, and the research response cache live in `~/Library/Application Support/Interspace`. Research keys and emails live only in the macOS Keychain.
 
 Always refused:
 - credential files;

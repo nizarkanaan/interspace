@@ -2,13 +2,34 @@
 
 A personal observatory for projects, research, knowledge, and specialist AI agents.
 
-**Status: native Mac development app. Claude Code and Codex run as agents under one Orchestrator; Gemini comes later.** Launch `dist/Interspace.app` after [building](app/README.md). Every task is a conversation with the Orchestrator, which can propose a team of subagents on mixed providers. You approve each team before it runs. Each writing subagent works in its own copy of the project and commits to its own `interspace/task-…` branch, which you review and merge. It is also becoming a research environment that still codes: research questions need no project, agents search scholarly sources with keys you enter yourself, and a citation checker marks each reference verified or not before you rely on it. Tasks from the earlier Read-only review and Fix & test modes stay readable but no longer run. The design preview and earlier offline pilot remain separate.
+**Status: native Mac development app.** Launch `dist/Interspace.app` after [building](app/README.md).
+- **Agents.** Claude Code and Codex run as agents under one Orchestrator; Gemini comes later. Every task is a conversation with the Orchestrator, which can propose a team of subagents on mixed providers. You approve each team before it runs.
+- **Code.** Each writing subagent works in its own copy of the project and commits to its own `interspace/task-…` branch, which you review and merge.
+- **Research.** Research questions need no project. Agents search scholarly sources with keys you enter yourself, and every saved report can be checked claim by claim against its sources.
+- **Earlier work.** Tasks from the earlier Read-only review and Fix & test modes stay readable but no longer run. The design preview and earlier offline pilot remain separate.
 
 ## Mac app
 
-Double-click `dist/Interspace.app`. Add or select a Git project and sign in to your providers under **Settings → Providers**. Then choose **New task**: approve the task scope, describe the outcome, approve the team the Orchestrator proposes, follow the subagents as they work, and use **Review changes → Merge**. See [app setup and limits](app/README.md).
+Double-click `dist/Interspace.app` and sign in to your providers under **Settings → Providers**. The sidebar switches between **Research** and **Code**:
+- **New research question** or **New code task** starts a task.
+- Your tasks are listed under **Needs you**, **Working** and **Done**, each with its state in words.
+- **Right-click** a task, or press Shift+F10 on it, to open, stop, archive, restore or delete it.
 
-**Research (being built).** Under **Settings → Research sources**, add your own free keys or contact email for Semantic Scholar, OpenAlex, Crossref and Unpaywall (arXiv needs none); they stay in your Mac's Keychain and never reach agents. **New task → Research question** needs no project and offers Literature review, Related work and Verify my references. The task shows the papers agents found, a citation report (verified, mismatch, not found, retracted or not checked), and a report with a BibTeX file of the checked references you can save. Research requests are counted per source, never priced. Tested with recorded source replies and fake agents only; nothing live has run inside the app yet. See [Research](app/README.md#research).
+**Usage** at the bottom of the sidebar shows Claude Code's and Codex's usage limits as each provider reports them, with the time of the reading.
+
+For code, add a Git project folder. Approve the task scope, describe the outcome, approve the team the Orchestrator proposes, follow the subagents as they work, and use **Review changes → Merge**. Deleting a code task tells you whether its branch has unmerged commits, and offers to review and merge first.
+
+**Research.** Under **Settings → Research sources**, add your own free keys or contact email for Semantic Scholar, OpenAlex, Crossref and Unpaywall; arXiv needs none. They stay in your Mac's Keychain and never reach agents.
+
+In a wide window a research task opens as a split reader: the conversation on the left, and resizable tabs on the right.
+- **Report.** The saved report, with each `[n]` linked to its reference and each reference marked with the citation checker's verdict. **Check claims** has an independent model, on the other provider, judge whether each cited source supports its sentence. It reads the abstract and, when an open-access copy exists, the most relevant passages of the full paper.
+- **Corpus.** Every paper the agents found, with duplicates merged and each one's verdict.
+- **Evidence.** A table that Claude and Codex fill in separately. Cells show where they agree and where they disagree, and numbers are flagged to check. You decide the disagreements and export the result as CSV.
+- **Scope and outputs.** The task's scope, `report.md`, `references.bib` and `evidence.csv`.
+
+Only a finished report, with a title and a numbered References list, can become `report.md`. Research requests are counted per source, never priced.
+
+Everything above is tested with recorded source replies and fake agents. Live runs inside the app have only just started. See [Research](app/README.md#research).
 
 ## Design preview
 
@@ -47,6 +68,10 @@ Each person installs Interspace on their own machine and uses their own files, p
 - [Template research and design](docs/research/agent-template-design.md)
 - [Role library validation](docs/role-library-validation.md)
 - [Engineering and debugging conventions](docs/engineering.md)
+- [Split reader](docs/superpowers/specs/2026-11-20-split-reader-design.md), [sidebar modes](docs/superpowers/specs/2026-11-20-sidebar-modes-design.md) and [archive and delete](docs/superpowers/specs/2026-11-20-archive-delete-design.md)
+- [Task corpus](docs/superpowers/specs/2026-11-20-task-corpus-design.md), [report reader](docs/superpowers/specs/2026-11-20-report-reader-design.md) and [saving only finished reports](docs/superpowers/specs/2026-11-20-save-report-design.md)
+- [Claim check](docs/superpowers/specs/2026-11-20-claim-check-design.md), [full text for it](docs/superpowers/specs/2026-11-20-claim-fulltext-design.md) and [two-agent evidence table](docs/superpowers/specs/2026-11-20-evidence-table-design.md)
+- [Provider usage limits](docs/superpowers/specs/2026-11-20-usage-limits-design.md)
 - [Standalone prototype](design/index.html)
 
 The Mac app runs Orchestrator tasks with approved teams of Claude Code and Codex subagents, and reviews and merges their branches. Research questions without a project, research sources and the citation checker are being built. Gemini, notarized distribution and additional-platform packaging remain future work.
