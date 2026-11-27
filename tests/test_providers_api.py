@@ -159,6 +159,33 @@ class ProvidersApiTests(unittest.TestCase):
         self.assertNotIn('auth.json', result['error'])
         self.assertTrue(result['error'])
 
+    def test_transient_model_failures_are_never_cached(self):
+        good = [{'id': 'gpt-x', 'is_default': True, 'default_effort': None, 'efforts': []}]
+        for failure in (ValueError('Codex did not list its models in time. Try again.'),
+                        ValueError('Codex did not start. Check its installation and try again.'),
+                        ValueError('Install Codex CLI or the ChatGPT Mac app to see its models.'),
+                        RuntimeError('boom')):
+            runtime = self.models_runtime([failure, good])
+            providers_api.clear_models_cache()
+            self.assertEqual(self.call('provider_models', {'provider': 'codex'})['models'], [])
+            self.assertEqual(len(self.call('provider_models', {'provider': 'codex'})['models']), 1)
+            self.assertEqual(runtime.calls, 2)
+
+    def test_provider_status_change_clears_the_models_cache(self):
+        good = [{'id': 'gpt-x', 'is_default': True, 'default_effort': None, 'efforts': []}]
+        runtime = self.models_runtime([good, good, good])
+        states = iter(['signed_in', 'signed_in', 'signed_out'])
+        runtime.auth_status = classmethod(lambda cls, app: {'provider': 'codex', 'state': next(states),
+                                                            'account': None, 'detail': ''})
+        self.call('provider_status', {'provider': 'codex'})
+        self.call('provider_models', {'provider': 'codex'})
+        self.call('provider_status', {'provider': 'codex'})
+        self.call('provider_models', {'provider': 'codex'})
+        self.assertEqual(runtime.calls, 1)  # Same state: still cached.
+        self.call('provider_status', {'provider': 'codex'})
+        self.call('provider_models', {'provider': 'codex'})
+        self.assertEqual(runtime.calls, 2)
+
     def test_sign_out_and_finished_sign_in_clear_the_models_cache(self):
         good = [{'id': 'gpt-x', 'is_default': True, 'default_effort': None, 'efforts': []}]
         runtime = self.models_runtime([ValueError('Sign in to Codex to see its models.'), good, good, good])

@@ -398,6 +398,11 @@ class TurnTests(CodexCase):
             'message': 'Invalid value: x. Supported values are: y', 'codexErrorInfo': 'other'}}]]})
         self.assertEqual(session.run_turn('Hi', ctx)['error']['message'], 'The Codex turn failed. Try again.')
 
+    def test_failed_turn_mentioning_effort_without_one_sent_is_not_the_effort_message(self):
+        session, ctx = self.open({'turns': [[{'complete': 'failed', 'error': {
+            'message': 'The reasoning effort service is busy.', 'codexErrorInfo': 'other'}}]]})
+        self.assertEqual(session.run_turn('Hi', ctx)['error']['message'], 'The Codex turn failed. Try again.')
+
     def test_command_approval_runs_through_authorize(self):
         ws = str(self.workspace)
         session, ctx = self.open({'turns': [[

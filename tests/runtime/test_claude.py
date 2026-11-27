@@ -409,6 +409,22 @@ class LaunchTests(ClaudeCase):
                 args = self.main_launches()[-1]['launch']
                 self.assertEqual(args[args.index('--effort') + 1], wanted)
 
+    def test_effort_change_restarts_the_process(self):
+        ctx = FakeContext(self.root)
+        ctx.effort = 'low'
+        runtime = self.runtime({'turns': [simple_turn(), simple_turn(), simple_turn()]})
+        session = runtime.open(ctx)
+        self.addCleanup(session.close)
+        self.assertEqual(session.run_turn('one', ctx)['status'], 'completed')
+        self.assertEqual(session.run_turn('same', ctx)['status'], 'completed')
+        self.assertEqual(len(self.main_launches()), 1)  # Same effort keeps the process.
+        ctx.effort = 'max'
+        self.assertEqual(session.run_turn('two', ctx)['status'], 'completed')
+        launches = self.main_launches()
+        self.assertEqual(len(launches), 2)
+        args = launches[1]['launch']
+        self.assertEqual(args[args.index('--effort') + 1], 'max')
+
     def test_unknown_model_fails_before_launch(self):
         for model in ('sonnet', 'claude-sonnet-4-5', 'gpt-6'):
             self.log.unlink(missing_ok=True)

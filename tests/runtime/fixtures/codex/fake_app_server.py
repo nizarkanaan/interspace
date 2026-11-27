@@ -20,6 +20,7 @@ Scenario keys:
   models        the `model/list` models (objects as Codex sends them); answered under `data`, or under the key
                 `models_key`, `models_page` at a time (default all) with `nextCursor` while more remain
   models_hang   true: `model/list` is never answered
+  initialize_hang  true: `initialize` is never answered
   exit_on       a request method after which the process exits at once
   turns         a list, one entry per `turn/start`, each a list of steps:
   by_input      [{"contains": "<text>", "turns": [...]}, ...]: the first entry whose text is in the first
@@ -221,6 +222,8 @@ def handle(message):
     if request_id is None:
         return
     if method == 'initialize':
+        if scenario.get('initialize_hang'):
+            return
         send({'id': request_id, 'result': {'userAgent': 'fake/0.167.0', 'codexHome': os.environ.get('CODEX_HOME'),
                                            'platformFamily': 'unix', 'platformOs': 'macos'}})
         for note in scenario.get('after_initialize', []):

@@ -114,10 +114,12 @@ def _effort_refused(detail, effort_sent):
     the value and the supported list but not the word "effort", so when an effort was sent a 400 "Invalid value"
     counts too. A JSON-RPC error on `turn/start` (what the fake server sends) is matched on "effort".
     """
+    if not effort_sent:
+        return False
     text = str(detail).lower()
     if 'effort' in text:
         return True
-    return effort_sent and 'invalid value' in text and 'supported values' in text
+    return 'invalid value' in text and 'supported values' in text
 
 
 class _Refused(RuntimeFailure):

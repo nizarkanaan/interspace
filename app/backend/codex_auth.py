@@ -25,6 +25,13 @@ class AuthError(ValueError):
     """A sign-in failure whose message is safe to show."""
 
 
+class AuthTimeout(AuthError):
+    """Codex did not answer in time."""
+
+
+SIGNED_OUT_MODELS = 'Sign in to Codex to see its models.'
+
+
 CREDENTIAL_OVERRIDES = (('cli_auth_credentials_store', 'file'), ('forced_login_method', 'chatgpt'))
 CLIENT_INFO = {'name': 'interspace', 'title': 'Interspace', 'version': '1'}
 REQUEST_TIMEOUT_S = 15
@@ -156,7 +163,7 @@ class AppServer:
             while request_id not in self._replies:
                 left = deadline - time.monotonic()
                 if self._dead or left <= 0:
-                    raise AuthError('Codex stopped answering. Check its installation and try again.')
+                    raise AuthTimeout('Codex stopped answering. Check its installation and try again.')
                 self._cond.wait(min(left, 0.1))
             reply = self._replies.pop(request_id)
         if 'error' in reply or not isinstance(reply.get('result'), dict):
@@ -169,9 +176,9 @@ class AppServer:
             message['params'] = params
         self._send(message)
 
-    def initialize(self):
+    def initialize(self, timeout=REQUEST_TIMEOUT_S):
         self.request('initialize', {'clientInfo': CLIENT_INFO,
-                                    'capabilities': {'experimentalApi': True, 'requestAttestation': False}})
+                                    'capabilities': {'experimentalApi': True, 'requestAttestation': False}}, timeout)
         self.notify('initialized')
 
     def wait_for(self, method, match, deadline, stop):
@@ -332,13 +339,13 @@ class CodexAuth:
             env['CODEX_HOME'] = str(self.codex_home)
         return env
 
-    def _server(self):
+    def _server(self, timeout=REQUEST_TIMEOUT_S):
         if self.codex_home is None:
             raise AuthError('Interspace has no data folder for Codex.')
         self.codex_home.mkdir(parents=True, exist_ok=True)
         server = AppServer(self.command + ['app-server'] + config_args(), self._env(), str(self.codex_home))
         try:
-            server.initialize()
+            server.initialize(timeout)
         except AuthError:
             server.close()
             raise AuthError('Codex did not start. Check its installation and try again.') from None
@@ -393,10 +400,10 @@ class CodexAuth:
 
         def left():
             return max(deadline - time.monotonic(), 0.1)
-        server = self._server()
+        server = self._server(left())
         try:
             if self._read_account_within(server, left()) is None:
-                raise AuthError('Sign in to Codex to see its models.')
+                raise AuthError(SIGNED_OUT_MODELS)
             found, cursor = [], None
             for _ in range(MAX_MODEL_PAGES):
                 if time.monotonic() >= deadline:
@@ -410,10 +417,8 @@ class CodexAuth:
                 if not isinstance(cursor, str) or not cursor:
                     break
             return found
-        except AuthError as error:
-            if str(error).startswith('Codex stopped answering'):
-                raise AuthError('Codex did not list its models in time. Try again.') from None
-            raise
+        except AuthTimeout:
+            raise AuthError('Codex did not list its models in time. Try again.') from None
         finally:
             server.close()
 

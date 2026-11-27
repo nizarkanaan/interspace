@@ -238,6 +238,18 @@ class ModelListTests(CodexAuthCase):
             self.list_models()
         self.assertEqual(self.sent('model/list'), [])
 
+    def test_hung_initialize_stays_within_the_model_deadline(self):
+        self.scenario({'initialize_hang': True})
+        started = time.monotonic()
+        with self.assertRaises(codex_auth.AuthError):
+            self.list_models()
+        self.assertLess(time.monotonic() - started, 11)
+        pid = self.launches()[0]['pid']
+        self.assertTrue(self.wait_until(lambda: not _alive(pid)))
+
+    def test_timeouts_are_auth_timeouts(self):
+        self.assertTrue(issubclass(codex_auth.AuthTimeout, codex_auth.AuthError))
+
     def test_hung_model_list_times_out_and_the_process_is_gone(self):
         self.scenario({'models_hang': True})
         started = time.monotonic()

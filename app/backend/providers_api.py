@@ -9,8 +9,10 @@ import copy
 import re
 import threading
 
+import codex_auth
 import routing
 from runtime import registry
+from runtime.claude import DEFAULT_EFFORT
 
 STATES = ('signed_in', 'signed_out', 'missing_cli', 'error')
 URL_RE = re.compile(r'https://[A-Za-z0-9.-]+(/[A-Za-z0-9._~/%?=&-]*)?\Z')
@@ -60,12 +62,22 @@ def providers_list(app, params):
     return {'providers': registry.public(), 'status': status, 'routing': current}
 
 
+_last_state = {}  # provider name -> the sign-in state its last status reported.
+
+
 def provider_status(app, params):
-    return _status(app, _provider(params))
+    name = _provider(params)
+    status = _status(app, name)
+    with _models_lock:
+        previous = _last_state.get(name)
+        _last_state[name] = status['state']
+        if previous is not None and previous != status['state']:
+            _models_cache.pop(name, None)
+    return status
 
 
 _models_lock = threading.Lock()
-_models_cache = {}  # provider name -> the answer, failures included, until sign-in or sign-out clears it.
+_models_cache = {}  # provider name -> a success or the signed-out answer, until sign-in or sign-out clears it.
 
 
 def clear_models_cache(name=None):
@@ -77,7 +89,7 @@ def clear_models_cache(name=None):
 
 
 def _claude_models(record):
-    return [{'id': model, 'is_default': model == record['default_model'], 'default_effort': 'low',
+    return [{'id': model, 'is_default': model == record['default_model'], 'default_effort': DEFAULT_EFFORT,
              'efforts': list(record['efforts'])} for model in record['models']]
 
 
@@ -90,6 +102,7 @@ def provider_models(app, params):
     with _models_lock:  # Held while Codex answers (at most 10 s), so renders share one process.
         cached = _models_cache.get(name)
         if cached is None:
+            keep = True  # Timeouts and start failures are never kept; the next render asks again.
             try:
                 models = registry.runtime_class(name).models(app)
                 cached = {'provider': name, 'error': '', 'models': [
@@ -97,10 +110,13 @@ def provider_models(app, params):
                      'efforts': list(m['efforts'])} for m in models]}
             except ValueError as error:
                 cached = {'provider': name, 'models': [], 'error': _text(str(error))}
+                keep = str(error) == codex_auth.SIGNED_OUT_MODELS
             except Exception:
                 cached = {'provider': name, 'models': [],
                           'error': record['title'] + ' could not list its models. Check its installation.'}
-            _models_cache[name] = cached
+                keep = False
+            if keep:
+                _models_cache[name] = cached
         return copy.deepcopy(cached)
 
 
