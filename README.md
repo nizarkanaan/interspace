@@ -8,6 +8,8 @@ A personal observatory for projects, research, knowledge, and specialist AI agen
 - **Research.** Research questions need no project. Agents search scholarly sources with keys you enter yourself, and every saved report can be checked claim by claim against its sources.
 - **Earlier work.** Tasks from the earlier Read-only review and Fix & test modes stay readable but no longer run. The design preview and earlier offline pilot remain separate.
 
+Suggestions and contributions are welcome: open an issue to discuss an idea first.
+
 ## Mac app
 
 Double-click `dist/Interspace.app` and sign in to your providers under **Settings → Providers**. The sidebar switches between **Research** and **Code**:
@@ -74,7 +76,7 @@ Each person installs Interspace on their own machine and uses their own files, p
 - [Provider usage limits](docs/superpowers/specs/2026-11-20-usage-limits-design.md)
 - [Standalone prototype](design/index.html)
 
-The Mac app runs Orchestrator tasks with approved teams of Claude Code and Codex subagents, and reviews and merges their branches. Research questions without a project, research sources and the citation checker are being built. Gemini, notarized distribution and additional-platform packaging remain future work.
+The Mac app runs Orchestrator tasks with approved teams of Claude Code and Codex subagents, reviews and merges their branches, and answers research questions with scholarly sources, a claim check and an evidence table. Gemini, notarized distribution and additional-platform packaging remain future work.
 
 ## Maintaining the preview
 
