@@ -119,6 +119,7 @@ function renderAgent(){
  // Coming back from a child (Back, Part of, the sidebar row): its place is restored once, instead of the bottom.
  const left=returns.get(id);returns.delete(id);
  S.render(stream,id);
+ detailNote(id,talk);
  if(!stream.children.length&&!stream.querySelector('.empty'))el('p','empty muted','No activity yet. Describe what the agent should do.',stream);
  if(left&&talk)restore(stream,chat,left);
  else if(stick&&talk&&document.activeElement!==$('agent-message')){if(chat)chat.scrollTop=chat.scrollHeight;else scrollTo(0,document.documentElement.scrollHeight);}
@@ -224,8 +225,8 @@ function place(split){
  const parts=['agent-scope-editor','agent-report','agent-corpus','agent-evidence','agent-details'].map(x=>$(x));
  $('agent-view').classList.toggle('split',split);results.hidden=!split;$('agent-topbar').hidden=!split;$('split-handle').hidden=!split;if(split)splitWidth(null);
  // The tab row shares one sticky header with Focus's banner, so neither covers the other when the pane scrolls.
- if(split){$('agent-topbar').prepend($('agent-back'));$('agent-topbar-status').after($('agent-detail-toggle'));$('agent-results-head').append($('agent-tabs'));results.append(...parts);}
- else{main.prepend($('agent-back'));$('agent-back').after($('agent-tabs'));$('agent-scope-note').after($('agent-scope-editor'));$('agent-stream').before($('agent-report'),$('agent-corpus'),$('agent-evidence'),$('agent-detail-toggle'));layout.append($('agent-details'));}
+ if(split){$('agent-topbar').prepend($('agent-back'));$('agent-topbar-status').after($('agent-detail-toggle'),$('agent-detail-note'));$('agent-results-head').append($('agent-tabs'));results.append(...parts);}
+ else{main.prepend($('agent-back'));$('agent-back').after($('agent-tabs'));$('agent-scope-note').after($('agent-scope-editor'));$('agent-stream').before($('agent-report'),$('agent-corpus'),$('agent-evidence'),$('agent-detail-toggle'),$('agent-detail-note'));layout.append($('agent-details'));}
  focusControls();
 }
 // Focus mode (2026-11-27-readable-workspace-design.md): in the split reader the results pane takes the whole window.
@@ -278,6 +279,12 @@ function topbar(id,split){
 function detailToggle(talk){
  const box=$('agent-detail-toggle'),now=window.interspaceDisplay?.get?.()?.detail==='detailed'?'detailed':'simple';
  box.hidden=!talk;for(const b of box.querySelectorAll('button[data-detail]'))b.setAttribute('aria-pressed',String(b.dataset.detail===now));
+}
+// Beside the switch, how many steps Simple folded in the conversation just rendered (2026-11-27-simple-chat-view-design.md).
+// The switch group is described by it, so a hidden note keeps no text. Hidden in Detailed and at 0; CSS hides it in Focus.
+function detailNote(id,talk){
+ const n=S.folded(id),note=$('agent-detail-note'),detailed=window.interspaceDisplay?.get?.()?.detail==='detailed';
+ note.hidden=!talk||detailed||!n;note.textContent=note.hidden?'':n+' step'+(n===1?'':'s')+' folded';
 }
 function scopeNote(id,talk){
  const info=scopeInfo(id),waiting=!!info.scope&&!Scope.approved(info)&&!info.editing;

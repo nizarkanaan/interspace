@@ -90,7 +90,7 @@ export default async function check(page,url){
  await page.locator('[data-view=settings]').click();
  const detail=page.locator('#display-settings fieldset',{hasText:'Conversation detail'});
  assert(await detail.count()===1&&(await detail.getByLabel('Simple').isChecked())&&!(await detail.getByLabel('Detailed').isChecked()),'Simple checked by default');
- assert((await text(detail)).includes('Simple folds team and subagent details into one line you can open. Detailed shows everything.'),'Detail help text');
+ assert((await text(detail)).includes('Simple shows your messages, the replies and anything that needs you; each turn\'s agent work folds into one line you can open. Detailed shows every step.'),'Detail help text');
  await detail.getByLabel('Detailed').check();
  await page.waitForFunction(()=>window.rFixture.requests.some(r=>r.method==='display_update'&&r.params.display.detail==='detailed'));
  assert((await requests(page,'display_update')).at(-1).display.detail==='detailed','Detailed sent');

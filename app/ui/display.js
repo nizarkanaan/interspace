@@ -41,7 +41,7 @@ function renderSettings(container){
    const l=el('label','display-option',null,row),input=el('input',null,null,l);input.type='radio';input.name='display-detail';input.value=value;input.id='display-detail-'+value;
    input.checked=current.detail===value;input.onchange=()=>save({detail:value},container);l.append(' '+text);
   }
-  el('p','footnote','Simple folds team and subagent details into one line you can open. Detailed shows everything.',fs);
+  el('p','footnote','Simple shows your messages, the replies and anything that needs you; each turn\'s agent work folds into one line you can open. Detailed shows every step.',fs);
  }
  for(const [key,label,help] of LEVELS){
   const fs=el('fieldset','display-choice',null,form);el('legend','',label,fs);

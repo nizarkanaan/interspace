@@ -82,6 +82,17 @@ export default async function check(page,url){
   const t=await text(line(k));assert(t.startsWith(want),'Work line '+k+': '+t);
  }
  assert(await page.evaluate(()=>window.interspaceStream.folded('R'))===16,'Folded steps: '+await page.evaluate(()=>window.interspaceStream.folded('R')));
+ // The note beside the switch says how many steps Simple folded, and the switch group points to it. In the split
+ // reader both sit in the top bar; in a narrow window the note moves with the switch, above the stream.
+ const note=page.locator('#agent-detail-note');
+ const noteAt=()=>page.evaluate(()=>{const t=document.getElementById('agent-detail-toggle'),p=t.parentElement;return {describedby:t.getAttribute('aria-describedby'),next:t.nextElementSibling?.id||null,parent:p.id||p.className};});
+ assert(await note.isVisible()&&(await text(note))==='16 steps folded','Folded note: '+await text(note));
+ assert(same(await noteAt(),{describedby:'agent-detail-note',next:'agent-detail-note',parent:'agent-topbar'}),'Note in the top bar: '+JSON.stringify(await noteAt()));
+ await page.setViewportSize({width:800,height:1000});
+ await page.waitForFunction(()=>!document.querySelector('#agent-view.split'));
+ assert(same(await noteAt(),{describedby:'agent-detail-note',next:'agent-detail-note',parent:'agent-main'})&&await note.isVisible()&&(await text(note))==='16 steps folded','Note in the narrow layout: '+JSON.stringify(await noteAt()));
+ await page.setViewportSize({width:1280,height:1000});
+ await page.waitForFunction(()=>document.querySelector('#agent-view.split'));
  const shape=await line('user_u1').evaluate(n=>({tag:n.tagName,card:n.classList.contains('card'),role:n.getAttribute('role'),label:n.getAttribute('aria-label'),buttons:[...n.querySelectorAll('button')].every(b=>b.type==='button')}));
  assert(shape.tag==='DIV'&&shape.card&&shape.role==='group'&&shape.label==='Agent work'&&shape.buttons,'Work line markup: '+JSON.stringify(shape));
  const opens=await line('user_u3').locator('.work-open').evaluateAll(b=>b.map(x=>({text:x.textContent,id:x.id,child:x.dataset.child,type:x.type})));
@@ -238,6 +249,8 @@ export default async function check(page,url){
  await page.waitForFunction(()=>document.querySelector('#agent-stream>[data-item=cite_c].citation-pointer'));
  {const c=stream.locator('[data-item=cite_c]');
   assert((await text(c.locator('.pointer-text')))==='Citations: 2 of 3 verified · 1 not found'&&await c.getByRole('button',{name:'Open Corpus tab'}).count()===0&&await c.getByRole('button',{name:'Show citation report'}).count()===1,'Subagent pointer: '+await c.innerHTML());}
+ // A subagent's own view counts its own folded step (v1).
+ assert(await note.isVisible()&&(await text(note))==='1 step folded','Subagent note: '+await text(note));
  await page.locator('#agent-back').click();
  await shows(R_TITLE);
  assert(await active()==='work-open-C','Back focus: '+await active());
@@ -259,6 +272,7 @@ export default async function check(page,url){
  await openTask('X',X_TITLE);
  await page.waitForFunction(()=>document.querySelector('#agent-stream>[data-item="msg_1@u4"]'));
  assert(same(await keys(),['user_u1','msg_1','user_u4','msg_1@u4'])&&await stream.locator('.work-line').count()===0,'Collision in Simple: '+JSON.stringify(await keys()));
+ assert(await note.isHidden(),'Note shown with nothing folded: '+await text(note));
  // A reply of exactly 600 characters is not long, and a pending or failed message is never cut.
  assert((await whole('msg_1'))?.more===0,'A 600-character reply was cut');
  await page.evaluate(t=>window.interspaceStream.optimistic('X',t,'c1'),'y'.repeat(700));
@@ -277,6 +291,7 @@ export default async function check(page,url){
  await page.evaluate(()=>window.interspaceDisplay.setDetail('detailed'));
  await page.waitForFunction(()=>!document.querySelector('#agent-stream .work-line'));
  assert(await page.locator('#agent-stream .in-work').count()===0,'Stale in-work in Detailed');
+ assert(await note.isHidden(),'Note shown in Detailed: '+await text(note));
  assert(same(await keys(),DETAILED_R),'Detailed items: '+JSON.stringify(await keys()));
  {const c=await cite.evaluate(n=>({report:n.classList.contains('citation-report'),pointer:n.classList.contains('citation-pointer'),rows:n.querySelectorAll('.reference').length}));
   assert(c.report&&!c.pointer&&c.rows===3&&await stream.locator('.citation-pointer').count()===0,'Detailed citation report: '+JSON.stringify(c));}
@@ -284,6 +299,7 @@ export default async function check(page,url){
  await page.evaluate(()=>window.interspaceDisplay.setDetail('simple'));
  await page.waitForFunction(()=>document.querySelector('#agent-stream .work-line'));
  assert(await details.getAttribute('aria-expanded')==='true','Opened line not kept across Detailed');
+ assert(await note.isVisible()&&(await text(note))==='16 steps folded','Note back in Simple: '+await text(note));
  assert(await whole('msg_b')&&await page.locator('#more-R-msg_b').getAttribute('aria-expanded')==='true','Whole reply not kept across Detailed');
  assert(same(await cutOf('user_u1'),[B(false,false),B(false,true)]),'Earlier message not cut again in Simple');
 
@@ -298,6 +314,36 @@ export default async function check(page,url){
  // Previews: clamped blocks and the Show whole toggles never overflow either.
  const fitsR=await fit(page,'simple-view-previews',async()=>{if(await heading()!==R_TITLE)await openTask('R',R_TITLE);},false,[320,390,600]);
 
+ // Focus hides the note with the switch, and Exit focus brings both back.
+ if(await heading()!==R_TITLE)await openTask('R',R_TITLE);
+ await page.waitForFunction(()=>document.querySelector('#agent-view.split'));
+ await page.locator('#agent-focus').click();
+ await page.waitForFunction(()=>document.querySelector('#agent-view.focus'));
+ assert(await note.isHidden()&&await page.locator('#agent-detail-toggle').isHidden(),'Note shown in Focus');
+ await page.locator('#agent-focus').click();
+ await page.waitForFunction(()=>!document.querySelector('#agent-view.focus'));
+ assert(await note.isVisible()&&(await text(note))==='16 steps folded','Note after Focus: '+await text(note));
+
+ // The display switches still decide what is counted: with Thinking hidden, R's reasoning step is not folded or counted.
+ const thinking=async value=>{
+  await page.locator('[data-view=settings]').click();await page.locator('#display-thinking-'+value).check();
+  await page.waitForFunction(v=>window.rFixture.requests.filter(r=>r.method==='display_update').at(-1)?.params.display.thinking===v&&window.interspaceDisplay.get().thinking===v,value);
+  await openTask('R',R_TITLE);
+ };
+ await thinking('hidden');
+ await page.waitForFunction(()=>document.getElementById('agent-detail-note').textContent==='15 steps folded');
+ assert((await text(line('user_u1').locator('.work-text'))).endsWith('· 7 steps'),'Turn 1 without Thinking: '+await text(line('user_u1')));
+ await thinking('summary');
+ await page.waitForFunction(()=>document.getElementById('agent-detail-note').textContent==='16 steps folded');
+
+ // R with turn 1's line, the whole msg_b and cite_2's brief card open, and the note, fits 320/390/600 in light and dark.
+ const fitsNote=await fit(page,'simple-view-note',async()=>{
+  if(await heading()!==R_TITLE)await openTask('R',R_TITLE);
+  const conv=page.locator('[data-agent-tab=conversation]');if(await conv.isVisible()&&await conv.getAttribute('aria-pressed')!=='true')await conv.click();
+  for(const id of ['work-R-user_u1','more-R-msg_b','cite-R-cite_2']){const b=page.locator('#'+id);if(await b.getAttribute('aria-expanded')!=='true')await b.click();assert(await b.getAttribute('aria-expanded')==='true',id+' not open');}
+  assert(await note.isVisible()&&await citeBox.isVisible(),'Note or brief card not shown');
+ },false,[320,390,600]);
+
  // Open Corpus from R's pointer switches the results tab to Corpus, puts focus on that tab and fetches R's corpus again.
  if(await heading()!==R_TITLE)await openTask('R',R_TITLE);
  {const tab=page.locator('[data-agent-tab=corpus]'),loads=async()=>(await requests(page,'task_corpus')).filter(p=>p.task_id==='R').length,before=await loads();
@@ -309,5 +355,5 @@ export default async function check(page,url){
 
  assert(!(await page.evaluate(()=>window.pwned)),'Script ran');
  assert(!errors.length,'Page errors: '+errors.join(' | '));
- return {checks:'research turns as your message, one work line and the reply; work-line counts (sources, papers, look-ups, report, team, subagents, all-verified citations, values, steps); folded count; at most 2 Open buttons; Details and Hide details by keyboard with focus kept; opened items in order with their own controls; open lines kept per task; asks, errors, failed calls, open teams, running and paused subagents, status rows and an edited scope never fold; Approve team sends team_answer; settled scope rows fold; a live line stays open with the new step last and focus kept; Working with the running search; Open from the line and Back to it with focus and position; compact and nested copies untouched; collision in Simple; earlier long messages and replies cut to their first lines (crossing block clamped, a list cut per item, later blocks hidden, links past the cut unreachable) with Show whole message, Show whole reply and Show less by keyboard with focus kept; the newest turn, a 600-character reply, pending, failed and streaming messages never cut; whole replies kept for the session and across Detailed; Detailed parity without stale in-work and the line kept open across it; a citation report with problems as one warn line (counts, mismatch, not found, retracted: do not cite) with Show citation report opening the brief card of problem rows and Show all by keyboard with focus kept, Open Corpus only on a root research task switching to the Corpus tab with focus and a fresh task_corpus, and the full report in Detailed; long query, previews and the citation pointer fit 320/390/600',responsiveStates:fits.length+fitsR.length};
+ return {checks:'research turns as your message, one work line and the reply; work-line counts (sources, papers, look-ups, report, team, subagents, all-verified citations, values, steps); folded count; at most 2 Open buttons; Details and Hide details by keyboard with focus kept; opened items in order with their own controls; open lines kept per task; asks, errors, failed calls, open teams, running and paused subagents, status rows and an edited scope never fold; Approve team sends team_answer; settled scope rows fold; a live line stays open with the new step last and focus kept; Working with the running search; Open from the line and Back to it with focus and position; compact and nested copies untouched; collision in Simple; earlier long messages and replies cut to their first lines (crossing block clamped, a list cut per item, later blocks hidden, links past the cut unreachable) with Show whole message, Show whole reply and Show less by keyboard with focus kept; the newest turn, a 600-character reply, pending, failed and streaming messages never cut; whole replies kept for the session and across Detailed; Detailed parity without stale in-work and the line kept open across it; a citation report with problems as one warn line (counts, mismatch, not found, retracted: do not cite) with Show citation report opening the brief card of problem rows and Show all by keyboard with focus kept, Open Corpus only on a root research task switching to the Corpus tab with focus and a fresh task_corpus, and the full report in Detailed; the N steps folded note beside the switch (described by it, in the top bar and the narrow layout, 1 step folded on a subagent, hidden in Detailed, at 0 and in Focus, and counting only what the display switches show); long query, previews, the citation pointer and the note with an open line, whole reply and brief card fit 320/390/600',responsiveStates:fits.length+fitsR.length+fitsNote.length};
 }

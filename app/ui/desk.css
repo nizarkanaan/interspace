@@ -545,6 +545,10 @@ html:has(#agent-view.split:not([hidden])){overflow:hidden;height:100%;overscroll
 .view-switch button[aria-pressed=true]{background:var(--accent);color:var(--on-accent);font-weight:600}
 .agent-topbar .view-switch{margin:0}
 .agent-topbar .view-switch button{font-size:13px;padding:5px 12px}
+/* "N steps folded" beside the switch: in the top bar it follows the switch on the row; above the stream it sits right
+   under the right-aligned switch. */
+.view-note{font-size:12.5px;color:var(--muted);white-space:nowrap}
+.agent-main>.view-note{display:block;text-align:right;margin:-6px 0 10px}
 /* Simple as a chat (2026-11-27-simple-chat-view-design.md): one quiet work line per turn of a research task. Opened,
    its folded items follow it, indented, in their original order, then the closing Hide details. */
 .card.work-line{display:block;border:0;border-left:2px solid var(--line);border-radius:0;padding:2px 0 2px 12px;background:transparent;font-size:13.5px;color:var(--muted);overflow-wrap:anywhere}
@@ -585,7 +589,7 @@ html:has(#agent-view.split:not([hidden])){overflow:hidden;height:100%;overscroll
 .detail-tabs .focus-toggle:hover{background:var(--surface);border-color:var(--muted);color:var(--ink)}
 .detail-tabs .focus-toggle.is-on{background:var(--subtle);color:var(--accent);border-color:var(--accent)}
 #agent-view.split.focus .agent-layout{grid-template-columns:minmax(0,1fr)}
-#agent-view.split.focus .agent-main,#agent-view.split.focus .split-handle,#agent-view.focus #agent-detail-toggle{display:none}
+#agent-view.split.focus .agent-main,#agent-view.split.focus .split-handle,#agent-view.focus #agent-detail-toggle,#agent-view.focus #agent-detail-note{display:none}
 body:has(#agent-view.focus:not([hidden])) .shell{grid-template-columns:minmax(0,1fr)}
 body:has(#agent-view.focus:not([hidden])) .shell>aside{display:none}
 /* What needs the user while in Focus stays in view at the top of the pane. The banner and the tab row share one sticky

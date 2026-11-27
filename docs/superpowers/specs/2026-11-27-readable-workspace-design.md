@@ -38,6 +38,7 @@ The user asked for these to be built now. They also asked for further ideas; the
      - **Orchestration tool cards** (`category === 'orchestrate'`) are not shown, unless they failed (a failed call always shows, as today).
    - **Detailed** shows everything as it is today.
    - The existing switches (thinking, searches, commands, citations, plans, notes) still apply in both modes.
+   - **Research tasks** go further in Simple (amended by `2026-11-27-simple-chat-view-design.md`): each turn reads as your message, one work line that folds and counts the agents' work, then the reply. An earlier message or reply over 600 characters shows its first lines with **Show whole message ▾** / **Show whole reply ▾**. A citation report with a problem becomes one warn line, **Citations: V of N verified · …**, that opens a brief card of the problem rows. Beside the switch, a note says how many steps are folded.
 5. **Small fix found in the rehearsal.** The Evidence tab's "Approve the team in the conversation" note shows only while the fill is waiting for a team approval, not after the table is filled.
 
 ## Non-goals
@@ -82,6 +83,12 @@ The user asked for these to be built now and left the "how" to me. Approach 1 is
 - **Evidence note.** "Asked the Orchestrator to fill the table…" clears as soon as any cell has a value, or the task is no longer running. Other notes ("Saved evidence.csv.", "Not saved.") behave as today.
 - **Drawer and live data.** The drawer follows its cell by row id and column id, and updates when the table re-renders. It closes if the row or column is gone. Esc closes the drawer first, then exits Focus on a second press.
 - **Shortcut.** Only the split handle has a keydown handler today (`agent.js`), so ⌘\ / Ctrl+\ is free. Ignore it while typing in an input, textarea or select.
+- **The research chat view** (`2026-11-27-simple-chat-view-design.md`):
+  - **Research tasks only.** Code tasks, the Running view's compact copy and a subagent's nested "Show activity" stream keep the Simple above.
+  - **What `stays()` keeps outside the work line, in full:** your messages, the reply, messages still streaming, asks, errors and blob errors, any call whose result status is present and not `ok`, open or unanswered teams, subagents that are not cleanly finished, every status, gap and unsupported row, the newest scope row while it is `edited`, plans, diffs, non-research calls, and a citation report with any problem (as its warn line).
+  - **Interim messages** (a final assistant message with a later one in the same turn) fold only once that later reply exists, so nothing disappears just as it finishes.
+  - **Long means over 600 characters.** Only earlier turns are cut: about 240 characters of your message, about 300 of a reply. The newest turn and pending, failed or streaming messages are never cut.
+  - **The display switches still decide what exists and is counted;** Simple decides only how it is folded. With Thinking hidden, reasoning is neither shown nor counted.
 
 ## Left to the builder
 
