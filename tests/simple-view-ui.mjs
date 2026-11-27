@@ -61,7 +61,7 @@ export default async function check(page,url){
     cEv('citation_report',report(ref('verified'),ref('verified'),ref('not_found')),'cite_c'),reply(cEv,'cm','Checked.')],
    L:[user(lEv,'user_u1','Find sources.'),status(lEv,'running'),call(lEv,'l1','research_search',{query:'O-RAN xApp slicing'})],
    X:[user(xEv,'user_u1','First question','u1'),reply(xEv,'msg_1',para(600,'First answer'),'u1'),
-    user(xEv,'user_u4','Fourth question','u4'),reply(xEv,'msg_1','Fourth answer','u4')]},
+    user(xEv,'user_u4','Fourth question','u4'),reply(xEv,'msg_1',para(1500,'Fourth answer'),'u4')]},
   corpora:{R:{v:1,updated_at:'2026-11-27T10:00:00Z',full:true,incomplete:0,papers:[]}}});
  const nav=page.locator('[data-view=research]'),stream=page.locator('#agent-stream');
  const keys=()=>page.evaluate(()=>[...document.querySelectorAll('#agent-stream>[data-item]')].map(n=>n.dataset.item));
@@ -256,6 +256,13 @@ export default async function check(page,url){
  assert(await active()==='work-open-C','Back focus: '+await active());
  const after=await lineTop();
  assert(Math.abs(after-before)<=4,'Work line moved from '+before+' to '+after);
+ // The work line also holds Details: with focus left on it, a mouse click on Open (which never focuses in WKWebView)
+ // still brings focus back to Open, not to Details.
+ await page.evaluate(()=>{document.getElementById('work-R-user_u2').focus();document.getElementById('work-open-C').click();});
+ await shows(C_TITLE);
+ await page.locator('#agent-back').click();
+ await shows(R_TITLE);
+ assert(await active()==='work-open-C','Back focus with Details focused: '+await active());
 
  // Untouched copies: the Running view's compact copy and a subagent's nested activity keep today's Simple.
  await page.locator('[data-view=running]').click();
@@ -275,13 +282,22 @@ export default async function check(page,url){
  assert(await note.isHidden(),'Note shown with nothing folded: '+await text(note));
  // A reply of exactly 600 characters is not long, and a pending or failed message is never cut.
  assert((await whole('msg_1'))?.more===0,'A 600-character reply was cut');
+ assert((await whole('msg_1@u4'))?.more===0,'The newest long reply was cut');
  await page.evaluate(t=>window.interspaceStream.optimistic('X',t,'c1'),'y'.repeat(700));
  await page.waitForFunction(()=>document.querySelector('#agent-stream>[data-item="client:c1"]'));
  assert((await whole('client:c1'))?.more===0,'A pending message was cut');
- assert((await whole('msg_1@u4'))?.more===0,'A short earlier reply was cut');
+ // A message still sending, or not sent, starts no newer turn: the reply just read stays whole until the server takes
+ // the next message.
+ assert((await whole('msg_1@u4'))?.more===0,'The newest reply was cut while a message was sending');
  await page.evaluate(()=>window.interspaceStream.failed('X','c1','Offline'));
  await page.waitForFunction(()=>/Not sent: Offline/.test(document.querySelector('#agent-stream>[data-item="client:c1"]').textContent));
  assert((await whole('client:c1'))?.more===0,'A failed message was cut');
+ assert((await whole('msg_1@u4'))?.more===0,'The newest reply was cut beside a message not sent');
+ // A message the server took makes that reply earlier, so it shows its first lines; the failed one stays whole.
+ await push(page,[user(xEv,'user_u5','Fifth question','u5')]);
+ await page.waitForFunction(()=>document.querySelector('#agent-stream>[data-item="msg_1@u4"] .more'));
+ assert(same(await keys(),['user_u1','msg_1','user_u4','msg_1@u4','client:c1','user_u5'])&&(await whole('client:c1'))?.more===0,'After a later turn: '+JSON.stringify(await keys()));
+ assert((await text(top('msg_1@u4').locator('.more')))==='Show whole reply ▾','Earlier reply not cut after a later turn: '+await text(top('msg_1@u4')));
 
  // T9 and Review Focus 5: Detailed shows every step with no work line and no stale in-work class, and every message
  // whole; Simple comes back with the opened line and the whole reply still open.
@@ -355,5 +371,5 @@ export default async function check(page,url){
 
  assert(!(await page.evaluate(()=>window.pwned)),'Script ran');
  assert(!errors.length,'Page errors: '+errors.join(' | '));
- return {checks:'research turns as your message, one work line and the reply; work-line counts (sources, papers, look-ups, report, team, subagents, all-verified citations, values, steps); folded count; at most 2 Open buttons; Details and Hide details by keyboard with focus kept; opened items in order with their own controls; open lines kept per task; asks, errors, failed calls, open teams, running and paused subagents, status rows and an edited scope never fold; Approve team sends team_answer; settled scope rows fold; a live line stays open with the new step last and focus kept; Working with the running search; Open from the line and Back to it with focus and position; compact and nested copies untouched; collision in Simple; earlier long messages and replies cut to their first lines (crossing block clamped, a list cut per item, later blocks hidden, links past the cut unreachable) with Show whole message, Show whole reply and Show less by keyboard with focus kept; the newest turn, a 600-character reply, pending, failed and streaming messages never cut; whole replies kept for the session and across Detailed; Detailed parity without stale in-work and the line kept open across it; a citation report with problems as one warn line (counts, mismatch, not found, retracted: do not cite) with Show citation report opening the brief card of problem rows and Show all by keyboard with focus kept, Open Corpus only on a root research task switching to the Corpus tab with focus and a fresh task_corpus, and the full report in Detailed; the N steps folded note beside the switch (described by it, in the top bar and the narrow layout, 1 step folded on a subagent, hidden in Detailed, at 0 and in Focus, and counting only what the display switches show); long query, previews, the citation pointer and the note with an open line, whole reply and brief card fit 320/390/600',responsiveStates:fits.length+fitsR.length+fitsNote.length};
+ return {checks:'research turns as your message, one work line and the reply; work-line counts (sources, papers, look-ups, report, team, subagents, all-verified citations, values, steps); folded count; at most 2 Open buttons; Details and Hide details by keyboard with focus kept; opened items in order with their own controls; open lines kept per task; asks, errors, failed calls, open teams, running and paused subagents, status rows and an edited scope never fold; Approve team sends team_answer; settled scope rows fold; a live line stays open with the new step last and focus kept; Working with the running search; Open from the line and Back to it with focus and position, also with Details left focused; compact and nested copies untouched; collision in Simple; earlier long messages and replies cut to their first lines (crossing block clamped, a list cut per item, later blocks hidden, links past the cut unreachable) with Show whole message, Show whole reply and Show less by keyboard with focus kept; the newest turn, a 600-character reply, pending, failed and streaming messages never cut; the newest reply whole while a message is sending or not sent, and cut once the server takes a later one; whole replies kept for the session and across Detailed; Detailed parity without stale in-work and the line kept open across it; a citation report with problems as one warn line (counts, mismatch, not found, retracted: do not cite) with Show citation report opening the brief card of problem rows and Show all by keyboard with focus kept, Open Corpus only on a root research task switching to the Corpus tab with focus and a fresh task_corpus, and the full report in Detailed; the N steps folded note beside the switch (described by it, in the top bar and the narrow layout, 1 step folded on a subagent, hidden in Detailed, at 0 and in Focus, and counting only what the display switches show); long query, previews, the citation pointer and the note with an open line, whole reply and brief card fit 320/390/600',responsiveStates:fits.length+fitsR.length+fitsNote.length};
 }

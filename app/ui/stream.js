@@ -244,13 +244,16 @@ function digest(m,list){
   if(user&&!turn.lead)turn.lead=it;else if(user)turns.push({lead:it,items:[]});else turn.items.push(it);
  }
  const entries=[];let folded=0;
+ // A message of yours still sending or not sent (`client:`, pending or failed) starts no newer turn for the previews:
+ // the reply just read stays whole until the server takes the next message.
+ let newest=turns.length-1;while(newest>0&&turns[newest].lead?.message?.pending)newest--;
  turns.forEach((turn,i)=>{
   const lead=turn.lead?turn.lead.key:'start',interim=new Set();let later=false;
   for(let j=turn.items.length-1;j>=0;j--){const msg=turn.items[j].message;if(msg?.role!=='assistant')continue;if(later&&msg.final)interim.add(turn.items[j]);later=true;}
   const work=[],kept=[];for(const it of turn.items)(stays(m,it,{interim,newestScope})?kept:work).push(it);
   // An earlier turn's long message and reply show their first lines (preview); the newest turn is always whole.
   let reply=null;for(const it of turn.items)if(it.message?.role==='assistant')reply=it;
-  const earlier=i<turns.length-1,long=msg=>earlier&&msg.final&&!msg.pending&&!msg.failed&&String(msg.text).length>LONG;
+  const earlier=i<newest,long=msg=>earlier&&msg.final&&!msg.pending&&!msg.failed&&String(msg.text).length>LONG;
   if(turn.lead)entries.push({key:turn.lead.key,it:turn.lead,preview:long(turn.lead.message)?'message':null});
   if(work.length){
    folded+=work.length;

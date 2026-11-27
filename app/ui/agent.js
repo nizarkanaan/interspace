@@ -24,7 +24,8 @@ const safe=s=>String(s).replace(/[^A-Za-z0-9_-]/g,'_');
 // The parent's place for a child: its subagent card, or the work line whose Open button names the child.
 const anchorOf=(stream,child)=>stream.querySelector('[data-child="'+CSS.escape(child)+'"]')?.closest('.card')||null;
 // Where the user left a parent to open one of its children: the child card's offset from the top of the scrolling
-// column, the raw scroll position for when the card is gone, and the focused control when it was in that card.
+// column, the raw scroll position for when the card is gone, and the focused control when it was that child's own Open
+// button (a work line also holds Details, which a mouse click on Open in WKWebView leaves focused).
 const returns=new Map();
 const subOf=id=>{const p=parentOf(id);return p?S.children(p).find(c=>c.task_id===id)||null:null;};
 const providerOf=id=>row(id)?.provider||scheduled(id)?.provider||subOf(id)?.provider||null;
@@ -135,7 +136,7 @@ function renderAgent(){
 function leave(parent,child){
  const chat=placed?document.querySelector('#agent-view .agent-main'):null,anchor=anchorOf($('agent-stream'),child),active=document.activeElement;
  const top=chat?chat.getBoundingClientRect().top:0,laid=!!anchor&&anchor.getClientRects().length>0;
- returns.set(parent,{child,offset:laid?anchor.getBoundingClientRect().top-top:null,scroll:chat?chat.scrollTop:scrollY,focusId:anchor&&active?.id&&anchor.contains(active)?active.id:''});
+ returns.set(parent,{child,offset:laid?anchor.getBoundingClientRect().top-top:null,scroll:chat?chat.scrollTop:scrollY,focusId:anchor&&active?.id&&anchor.contains(active)&&(active.dataset.child===child||active.id==='sub-open-'+safe(child))?active.id:''});
 }
 // Puts the child's card back where it was, then focuses the control that opened the child without scrolling again. A
 // mouse click in WKWebView never focuses the button, so the Open button is also found from the child's id.
