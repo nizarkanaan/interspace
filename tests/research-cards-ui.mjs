@@ -118,12 +118,23 @@ export default async function check(page,url){
  same(await counts(report),{total:12,counts:{verified:7,mismatch:1,not_found:1,retracted:1,unchecked:1},other:1,cut:0,problems:5},'citationCounts');
  same(await pointer(report),'Citations: 7 of 12 verified · 1 mismatch · 1 not found · 1 unchecked · 1 unknown · 1 retracted: do not cite','citationPointerText');
  // A cut report (scheduler.py `_cap`: the event keeps a prefix of the rows, `truncated` and the whole summary): the rows
- // it leaves out are problems, so a cut report whose kept rows are all verified is never taken as all verified.
+ // it leaves out are problems, so a cut report whose kept rows are all verified is never taken as all verified. A problem
+ // the summary counts past the cut (here a retracted reference) is still counted; `cut` is the rest.
  const vrow=i=>({index:i,input:{title:'Kept '+i},status:'verified',fields:[],match:null});
  const cutReport={v:1,checked_at:'2026-11-19T10:05:00Z',truncated:true,summary:{verified:150,...none,retracted:1},references:Array.from({length:120},(_,i)=>vrow(i))};
- same(await counts(cutReport),{total:151,counts:{verified:120,...none},other:0,cut:31,problems:31},'citationCounts of a cut report');
- same(await pointer(cutReport),'Citations: 120 of 151 verified · 31 not shown','Pointer of a cut report');
- same(await counts({truncated:true,references:[{status:'verified'}]}),{total:2,counts:{verified:1,...none},other:0,cut:1,problems:1},'A cut report with no summary');
+ same(await counts(cutReport),{total:151,counts:{verified:120,...none,retracted:1},other:0,cut:30,problems:31},'citationCounts of a cut report');
+ same(await pointer(cutReport),'Citations: 120 of 151 verified · 30 not shown · 1 retracted: do not cite','Pointer of a cut report');
+ const cutClean={...cutReport,summary:{verified:150,...none}};
+ same(await counts(cutClean),{total:150,counts:{verified:120,...none},other:0,cut:30,problems:30},'citationCounts of a cut report with no problem in its summary');
+ same(await pointer(cutClean),'Citations: 120 of 150 verified · 30 not shown','Pointer of a cut report with no problem in its summary');
+ // Every row past the cut is a problem: nothing is left as `cut`.
+ const cutBad={truncated:true,summary:{verified:2,...none,not_found:3},references:[vrow(0),vrow(1)]};
+ same(await counts(cutBad),{total:5,counts:{verified:2,...none,not_found:3},other:0,cut:0,problems:3},'citationCounts of a cut report whose cut rows are all problems');
+ same(await pointer(cutBad),'Citations: 2 of 5 verified · 3 not found','Pointer of a cut report whose cut rows are all problems');
+ // A cut report whose summary cannot be read: how many rows are not shown is unknown, so no number is made up for it.
+ const cutBlind={truncated:true,references:[{status:'verified'}]};
+ same(await counts(cutBlind),{total:null,counts:{verified:1,...none},other:0,cut:null,problems:1},'A cut report with no summary');
+ same(await pointer(cutBlind),'Citations: 1 verified · some not shown','Pointer of a cut report with no summary');
  // Compacted but whole (`truncated` with every row kept): nothing is cut.
  same(await counts({truncated:true,summary:{verified:2,...none},references:[vrow(0),vrow(1)]}),{total:2,counts:{verified:2,...none},other:0,cut:0,problems:0},'A compacted whole report');
  const ok=(tool,input,data,extra={})=>({call:{tool,category:'research',input:{tool,...input}},result:{status:'ok',output:{text:JSON.stringify(data),truncated:false,blob_id:null,...extra}}});
@@ -149,6 +160,8 @@ export default async function check(page,url){
  same(await parts([bare('m'),bare('n')]),['Searched 2 times','2 papers','2 steps'],'workParts with searches that name no source');
  // Papers from Follow citations count with the searches', by DOI, arXiv ID or title.
  same(await parts([s1,ok('research_citations',{id:'doi:10.1/a'},{papers:[{doi:'10.1/A'},{title:' New Paper '},{title:'new paper'}]})]),['Searched 2 sources once','3 papers','2 steps'],'workParts with Follow citations');
+ // A papers entry that is not an object is not a paper.
+ same(await parts([ok('research_search',{query:'z'},{searched:['arxiv'],papers:[null,5,'x',{title:'Only'}]})]),['Searched 1 source once','1 paper','1 step'],'workParts with papers that are not objects');
  same(await parts([{team:{answered:{decision:'decline'}}}]),['Team declined','1 step'],'workParts with a declined team');
  same(await parts([ok('record_claim_support',{},{recorded:4}),ok('record_table_cells',{},{recorded:12})]),['recorded 4 claim verdicts','recorded 12 evidence values','2 steps'],'workParts with records');
  // A citation report with any problem, a cut one included, never reads as all verified.
@@ -175,16 +188,47 @@ export default async function check(page,url){
  await cardBox('brief-many',{v:1,references:[vrow(0),...Array.from({length:12},(_,i)=>({index:1+i,input:{title:'Missing '+i},status:'not_found',fields:[],match:null}))]});
  assert(await page.locator('#brief-many .reference').count()===10&&await page.locator('#brief-many').getByRole('button',{name:'Show all 13 references',exact:true}).count()===1,'Brief cap: '+await text(page.locator('#brief-many')));
  same(await page.locator('#brief-many > p.footnote').allTextContents(),['12 references are not verified.'],'Brief cap footnote');
+ // Ten or fewer references: Show all lists every row and the toggle stays as Show fewer with focus, and Show fewer brings
+ // back the problem rows only.
+ await cardBox('brief-few',{v:1,checked_at:'2026-11-19T10:05:00Z',references:[vrow(0),{index:1,input:{title:'Mismatched'},status:'mismatch',fields:['year'],match:null},vrow(2)]});
+ const few=page.locator('#brief-few');
+ assert(await few.locator('.reference').count()===1&&(await text(few.locator('.reference'))).includes('Not verified: differs from the published record in year'),'Brief few rows: '+await text(few));
+ same(await few.locator(':scope > p.footnote').allTextContents(),['1 reference is not verified.'],'Brief few footnote');
+ const fewAll=few.getByRole('button',{name:'Show all 3 references',exact:true});
+ assert(await fewAll.getAttribute('aria-expanded')==='false','Brief few aria-expanded');
+ await fewAll.focus();await page.keyboard.press('Enter');
+ await page.waitForFunction(()=>document.querySelectorAll('#brief-few .reference').length===3);
+ same(await page.evaluate(()=>[document.activeElement?.id,document.activeElement?.textContent,document.activeElement?.getAttribute('aria-expanded')]),['brief-few-all','Show fewer','true'],'Focus after Show all with few references');
+ assert((await text(few)).includes('Checked at'),'Checked at after Show all');
+ await page.keyboard.press('Enter');
+ await page.waitForFunction(()=>document.querySelectorAll('#brief-few .reference').length===1);
+ same(await page.evaluate(()=>[document.activeElement?.id,document.activeElement?.textContent]),['brief-few-all','Show all 3 references'],'Focus after Show fewer');
  // A status named like an Object.prototype key is an unknown problem, sorted and counted as one.
  await cardBox('brief-proto',{v:1,references:[vrow(0),{index:1,input:{title:'Odd status'},status:'toString',fields:[],match:null}]});
  assert(await page.locator('#brief-proto .reference').count()===1&&(await text(page.locator('#brief-proto .reference'))).includes('Unknown result (toString): not verified'),'Brief prototype status: '+await text(page.locator('#brief-proto')));
- // A cut report: the brief card says what is not shown and claims nothing about it; the full card adds what Verified means.
+ // A cut report: the brief card says what is not shown and claims nothing about it, and a retracted reference past the
+ // cut still gets its alert. With no problem row to list, the empty list is hidden and only Show all stays.
  await cardBox('brief-cut',cutReport);
  const briefCut=page.locator('#brief-cut');
- same(await briefCut.locator(':scope > p.footnote').allTextContents(),['Every reference shown is verified. The report was cut short to fit, so 31 references are not shown.'],'Cut brief footnote');
- assert(await briefCut.locator('.reference').count()===0&&(await text(briefCut.locator('.card-head'))).includes('151 references')&&(await text(briefCut.locator('.citation-summary'))).includes('31 not shown')&&await briefCut.getByRole('button',{name:'Show all 120 references',exact:true}).count()===1,'Cut brief card: '+await text(briefCut));
+ same(await briefCut.locator(':scope > p.footnote').allTextContents(),['1 reference is not verified. The report was cut short to fit, so 31 references are not shown, and 1 of them is not verified.'],'Cut brief footnote');
+ assert((await text(briefCut.locator('.retracted-alert'))).includes('1 reference is retracted. Do not cite it.'),'Cut brief retracted alert: '+await text(briefCut));
+ const cutSum=await text(briefCut.locator('.citation-summary'));
+ assert(cutSum.includes('120 verified')&&cutSum.includes('1 retracted')&&cutSum.includes('30 not shown'),'Cut brief summary: '+cutSum);
+ assert(await briefCut.locator('.reference').count()===0&&await briefCut.locator('.reference-list').evaluate(l=>l.hidden)&&(await text(briefCut.locator('.card-head'))).includes('151 references')&&await briefCut.getByRole('button',{name:'Show all 120 references',exact:true}).count()===1,'Cut brief card: '+await text(briefCut));
+ await cardBox('brief-cut-clean',cutClean);
+ same(await page.locator('#brief-cut-clean > p.footnote').allTextContents(),['Every reference shown is verified. The report was cut short to fit, so 30 references are not shown.'],'Cut brief footnote with no problem in its summary');
+ await cardBox('brief-cut-bad',cutBad);
+ same(await page.locator('#brief-cut-bad > p.footnote').allTextContents(),['3 references are not verified. The report was cut short to fit, so 3 references are not shown, and none of them is verified.'],'Cut brief footnote whose cut rows are all problems');
+ // A cut report whose summary cannot be read says some are not shown, never a number.
+ await cardBox('brief-blind',cutBlind);
+ const blind=page.locator('#brief-blind');
+ same(await blind.locator(':scope > p.footnote').allTextContents(),['Every reference shown is verified. The report was cut short to fit, so some references are not shown.'],'Blind brief footnote');
+ assert((await text(blind.locator('.card-head'))).includes('1 reference shown')&&(await text(blind.locator('.citation-summary'))).includes('Some not shown')&&!/\b2\b/.test(await text(blind)),'Blind brief card: '+await text(blind));
+ // The full card adds what Verified means.
  await cardBox('full-cut',cutReport,false);
- assert((await page.locator('#full-cut > p.footnote').first().textContent()).startsWith('Every reference shown is verified. The report was cut short to fit, so 31 references are not shown. Verified means a published record matched')&&await page.locator('#full-cut .reference').count()===10,'Cut full card: '+await text(page.locator('#full-cut')));
+ assert((await page.locator('#full-cut > p.footnote').first().textContent()).startsWith('1 reference is not verified. The report was cut short to fit, so 31 references are not shown, and 1 of them is not verified. Verified means a published record matched')&&await page.locator('#full-cut .reference').count()===10,'Cut full card: '+await text(page.locator('#full-cut')));
+ // The brief cards fit at narrow widths, in light and dark.
+ await fit(page,'research-cards-brief',async()=>assert(await page.evaluate(()=>[...document.querySelectorAll('.test-card')].every(c=>c.scrollWidth<=c.clientWidth)),'Brief card overflows'),false,[320,390,600]);
  await page.evaluate(()=>document.querySelectorAll('.test-card').forEach(x=>x.remove()));
 
  // Research requests per source (Wave 2A: requests sent, and answers from the cache), never money.
@@ -233,5 +277,5 @@ export default async function check(page,url){
  const fits=await fit(page,'research-cards',null,true);
  assert(!(await page.evaluate(()=>window.pwned)),'Script ran');
  assert(!errors.length,'Page errors: '+errors.join(' | '));
- return {checks:'research tool cards (search with title/authors/year/venue/source badges/citations/retracted flag, searched and skipped, paper with abstract, BibTeX, open copy, denied call, cut result then full blob), https-only links, collapsible long lists by keyboard, citation report counts from rows with verified/mismatch fields/not found/retracted/unchecked reason/unknown, problem rows first with reference numbers, retracted callout, honest Verified meaning, nothing else looks verified, per-source requests sent and cache answers without money, link host shown after markdown links, BibTeX output note, work-line helpers (summaryText, workParts with distinct papers from searches and Follow citations, a cut search with and without its full output, an unreadable search, searches that name no source, a declined team, cut citation reports never all verified, workerName), citationCounts and the citation pointer text for whole, compacted and cut reports, brief citation card with problem rows only (at most 10, an Object.prototype status counted and sorted as a problem, the rows a cut report leaves out said) then Show all keeping focus by id, no every-citation claim, no Review for research tasks, outputs panel with text-safe Markdown report and plain BibTeX, task_output_read per file, Save and cancelled save, live update keeps open view, literal text everywhere, light/dark 320-1280 fit',responsiveStates:fits.length};
+ return {checks:'research tool cards (search with title/authors/year/venue/source badges/citations/retracted flag, searched and skipped, paper with abstract, BibTeX, open copy, denied call, cut result then full blob), https-only links, collapsible long lists by keyboard, citation report counts from rows with verified/mismatch fields/not found/retracted/unchecked reason/unknown, problem rows first with reference numbers, retracted callout, honest Verified meaning, nothing else looks verified, per-source requests sent and cache answers without money, link host shown after markdown links, BibTeX output note, work-line helpers (summaryText, workParts with distinct papers from searches and Follow citations, a cut search with and without its full output, an unreadable search, searches that name no source, a declined team, cut citation reports never all verified, workerName), citationCounts and the citation pointer text for whole, compacted and cut reports (a problem past the cut still counted, a cut with no readable summary given no number), papers entries that are not objects skipped, brief citation card with problem rows only (at most 10, an Object.prototype status counted and sorted as a problem, the rows a cut report leaves out said, a retracted reference past the cut alerted, an empty list hidden) then Show all keeping focus by id, Show all and Show fewer with ten or fewer references, brief cards fitting at 320/390/600, no every-citation claim, no Review for research tasks, outputs panel with text-safe Markdown report and plain BibTeX, task_output_read per file, Save and cancelled save, live update keeps open view, literal text everywhere, light/dark 320-1280 fit',responsiveStates:fits.length};
 }

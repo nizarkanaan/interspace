@@ -50,10 +50,12 @@ function paper(p,parent,{abstract=false}={}){
  return li;
 }
 // A long list shows its first rows and a toggle; `state` keeps the choice across re-renders of the card. `label.id`
-// names the toggle, so a re-render that restores focus by id keeps it on the toggle.
+// names the toggle, so a re-render that restores focus by id keeps it on the toggle. A list with no rows shown is
+// hidden, so a screen reader does not announce an empty list above the toggle.
 function collapsible(parent,items,shown,state,key,bump,label,draw){
  const all=!!state[key],list=el('ol',label.cls,null,parent);
  items.slice(0,all?items.length:shown).forEach(x=>draw(x,list));
+ if(!list.childElementCount)list.hidden=true;
  if(items.length>shown){const b=el('button','link-button',all?'Show fewer':'Show all '+count(items.length)+' '+label.noun,parent);b.type='button';if(label.id)b.id=label.id;b.setAttribute('aria-expanded',String(all));b.onclick=()=>{state[key]=!all;bump();};}
  return list;
 }
@@ -121,45 +123,60 @@ function referenceRow(ref,list){
  if(facts.length)el('p','footnote',facts.join(' · '),li);
 }
 // One count of a report's rows, shared by the card and Simple's citation pointer. `other` is any status the card does
-// not know. `cut` is the references a cut report leaves out: a citation_report event holds at most about 60 KB, so the
-// scheduler (`_cap`) keeps a prefix of the rows, sets `truncated` and keeps the summary of every reference. Nothing says
-// a row that is not shown is verified, so `problems` (every row that is not verified) counts the cut ones too. A cut
-// report whose summary cannot be read counts one cut row, so it is never taken as all verified.
+// not know. A cut report: a citation_report event holds at most about 60 KB, so the scheduler (`_cap`) keeps a prefix of
+// the rows, sets `truncated` and keeps the summary of every reference. `verified` counts only the rows, since nothing
+// says a row that is not shown is verified. Each problem status takes the larger of its row count and the summary's,
+// so a retracted or unverified reference past the cut is still counted. `cut` is the rest of the rows not shown, whose
+// result is not counted anywhere; `problems` (every reference that is not verified) includes them. When a cut report's
+// summary cannot be read, how many rows are not shown is unknown: `total` and `cut` are null, and `problems` counts
+// the rows that are not verified plus one, so the report is never taken as all verified.
+const PROBLEMS=['retracted','mismatch','not_found','unchecked'];
 function citationCounts(report){
  const refs=Array.isArray(report?.references)?report.references:[];
  const counts=Object.fromEntries(ORDER.map(k=>[k,0]));let other=0;for(const r of refs)if(r&&Object.hasOwn(counts,r.status))counts[r.status]++;else other++;
- let cut=0;
- if(report?.truncated===true){const n=report.summary&&typeof report.summary==='object'?Object.values(report.summary):[];cut=n.length&&n.every(x=>Number.isSafeInteger(x)&&x>=0)?Math.max(0,n.reduce((a,b)=>a+b,0)-refs.length):1;}
- return {total:refs.length+cut,counts,other,cut,problems:refs.length+cut-counts.verified};
+ const rows=refs.length-counts.verified;
+ if(report?.truncated!==true)return {total:refs.length,counts,other,cut:0,problems:rows};
+ const s=report.summary&&typeof report.summary==='object'?report.summary:null,n=s?Object.values(s):[];
+ if(!n.length||!n.every(x=>Number.isSafeInteger(x)&&x>=0))return {total:null,counts,other,cut:null,problems:rows+1};
+ const missing=Math.max(0,n.reduce((a,b)=>a+b,0)-refs.length);let cut=missing;
+ for(const k of PROBLEMS){const more=Math.min(cut,Math.max(0,(Number.isSafeInteger(s[k])?s[k]:0)-counts[k]));counts[k]+=more;cut-=more;}
+ return {total:refs.length+missing,counts,other,cut,problems:rows+missing};
 }
 // Simple's one warn line for a report with problems: `Citations: 7 of 12 verified · 1 mismatch · … · 1 retracted: do
-// not cite`. A count of zero is left out; retracted always comes last.
+// not cite`. A count of zero is left out; retracted always comes last. A cut report adds ` · N not shown` (` · some not
+// shown`, and no `of <total>`, when its summary cannot be read).
 function citationPointerText(report){
  const {total,counts,other,cut}=citationCounts(report);
- const extra=[[counts.mismatch,'mismatch'],[counts.not_found,'not found'],[counts.unchecked,'unchecked'],[other,'unknown'],[cut,'not shown'],[counts.retracted,'retracted: do not cite']];
- return 'Citations: '+count(counts.verified)+' of '+count(total)+' verified'+extra.filter(x=>x[0]).map(([n,what])=>' · '+count(n)+' '+what).join('');
+ const extra=[[counts.mismatch,'mismatch'],[counts.not_found,'not found'],[counts.unchecked,'unchecked'],[other,'unknown'],[cut===null?'some':cut,'not shown'],[counts.retracted,'retracted: do not cite']];
+ return 'Citations: '+count(counts.verified)+(total===null?'':' of '+count(total))+' verified'+extra.filter(x=>x[0]).map(([n,what])=>' · '+(typeof n==='number'?count(n):n)+' '+what).join('');
 }
-// `brief` is the card Simple opens from the citation pointer: until Show all, the footnote keeps its first sentence
-// (and says when the report was cut short), only the problem rows show (at most 10, problems first) and Checked at is
-// left out. `id` (the card's own id by default) names the Show all toggle `<id>-all`.
+// `brief` is the card Simple opens from the citation pointer: it lists only the problem rows (at most 10, problems
+// first) until Show all, and Show fewer brings that back. Until Show all, the footnote keeps its first sentence (and
+// says when the report was cut short) and Checked at is left out. `id` (the card's own id by default) names the Show
+// all toggle `<id>-all`.
 function citationCard(card,report,{state,bump,brief=false,id=card.id}){
  card.classList.add('citation-report');card.setAttribute('role','group');card.setAttribute('aria-label','Citation report');
  const refs=Array.isArray(report?.references)?report.references:[];
- const {total,counts,other,cut,problems}=citationCounts(report),unverified=problems-cut,short=brief&&!state.refs;
+ const {total,counts,other,cut}=citationCounts(report),short=brief&&!state.refs;
+ // Not verified: every reference counted under a problem status, the ones past a cut included. `missing` is every row
+ // a cut report leaves out (null when unknown); `hidden` is how many of them are counted as not verified.
+ const unverified=PROBLEMS.reduce((a,k)=>a+counts[k],other),missing=total===null?null:total-refs.length,hidden=missing===null?0:missing-cut;
  const head=el('div','card-head',null,card);el('span','badge','Citations',head);el('strong','','Citation report',head);
- el('span','state',plural(total,'reference'),head);
+ el('span','state',total===null?plural(refs.length,'reference')+' shown':plural(total,'reference'),head);
  const sum=el('ul','citation-summary',null,card);sum.setAttribute('aria-label','Citation summary');
  for(const k of ORDER){const li=el('li',STATUS[k].cls,null,sum);el('strong','',count(counts[k]),li);li.append(' '+SUMMARY[k]);}
  if(other){const li=el('li','unknown',null,sum);el('strong','',count(other),li);li.append(' unknown');}
- if(cut){const li=el('li','not-shown',null,sum);el('strong','',count(cut),li);li.append(' not shown');}
+ if(cut!==0){const li=el('li','not-shown',null,sum);el('strong','',cut===null?'Some':count(cut),li);li.append(' not shown');}
  if(counts.retracted)el('p','retracted-alert',plural(counts.retracted,'reference')+(counts.retracted===1?' is retracted. Do not cite it.':' are retracted. Do not cite them.'),card);
  const meaning='Verified means a published record matched: title at least 90% similar, plus the year (within one) and the first author when the reference gives them.';
- const first=unverified?plural(unverified,'reference')+(unverified===1?' is':' are')+' not verified.':cut?(refs.length?'Every reference shown is verified.':''):refs.length?'Every reference is verified.':'No references were checked.';
- const gone=cut?'The report was cut short to fit, so '+plural(cut,'reference')+(cut===1?' is':' are')+' not shown.':'';
+ const first=unverified?plural(unverified,'reference')+(unverified===1?' is':' are')+' not verified.':missing!==0?(refs.length?'Every reference shown is verified.':''):refs.length?'Every reference is verified.':'No references were checked.';
+ const which=!hidden?'':hidden===missing?(missing===1?', and it is not verified':', and none of them is verified'):', and '+count(hidden)+' of them '+(hidden===1?'is':'are')+' not verified';
+ const gone=missing===null?'The report was cut short to fit, so some references are not shown.':missing?'The report was cut short to fit, so '+plural(missing,'reference')+(missing===1?' is':' are')+' not shown'+which+'.':'';
  el('p','footnote',[first,gone,short||!refs.length?'':meaning].filter(Boolean).join(' '),card);
  const rank=r=>r&&Object.hasOwn(RANK,r.status)?RANK[r.status]:3;
  const sorted=refs.map((r,i)=>[r,i]).sort((a,b)=>rank(a[0])-rank(b[0])||a[1]-b[1]).map(x=>x[0]);
- if(refs.length)collapsible(card,sorted,short?Math.min(unverified,ROWS_SHOWN):ROWS_SHOWN,state,'refs',bump,{cls:'reference-list',noun:'references',id:id?id+'-all':''},referenceRow);
+ // The brief card's row count does not change on Show all, so the toggle stays (as Show fewer) and keeps focus.
+ if(refs.length)collapsible(card,sorted,brief?Math.min(refs.length-counts.verified,ROWS_SHOWN):ROWS_SHOWN,state,'refs',bump,{cls:'reference-list',noun:'references',id:id?id+'-all':''},referenceRow);
  if(report?.checked_at&&!short)el('p','footnote','Checked at '+str(report.checked_at),card);
 }
 
@@ -304,7 +321,7 @@ function workParts(items){
   if(PAPER_TOOLS.has(tool)){
    listed++;
    if(!whole||!Array.isArray(data?.papers))readable=false;
-   else for(const p of data.papers){const k=paperKey(p);if(k)papers.add(k);else unnamed++;}
+   else for(const p of data.papers){if(!p||typeof p!=='object')continue;const k=paperKey(p);if(k)papers.add(k);else unnamed++;}
   }
   else if(tool==='research_paper')lookups++;
   else if(tool==='save_report')saved=true;
