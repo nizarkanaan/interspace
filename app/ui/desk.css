@@ -515,3 +515,16 @@ html:has(#agent-view.split:not([hidden])){overflow:hidden;height:100%;overscroll
 .detail-toggle{display:block;margin:0 0 10px auto;font-size:13px;padding:5px 10px}
 .detail-toggle[aria-pressed=true]{background:var(--subtle);color:var(--accent);border-color:var(--accent)}
 .agent-topbar .detail-toggle{margin:0;font-size:13px;padding:5px 10px}
+
+/* Collapsible sidebar: a 44px rail with only the show button. Not applied when the layout stacks (600px and below). */
+.side-top{display:flex;align-items:center;justify-content:space-between;gap:6px;min-width:0}
+.sidebar-collapse,.sidebar-expand{padding:5px 9px;color:var(--muted);flex-shrink:0}
+.sidebar-collapse:hover,.sidebar-expand:hover{color:var(--ink)}
+.sidebar-expand{display:none}
+@media(min-width:601px){
+ body.sidebar-collapsed .shell{grid-template-columns:44px minmax(0,1fr)}
+ body.sidebar-collapsed aside{padding:14px 5px;align-items:center;overflow:hidden}
+ body.sidebar-collapsed aside>*:not(#sidebar-expand){display:none}
+ body.sidebar-collapsed .sidebar-expand{display:block}
+}
+@media(max-width:600px){.sidebar-collapse{display:none}}

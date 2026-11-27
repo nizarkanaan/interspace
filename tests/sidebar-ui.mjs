@@ -56,6 +56,50 @@ export default async function check(page,url){
  assert(claude.includes('Claude Code')&&claude.includes('5-hour limit · Near the limit'),'Claude usage: '+claude);
  assert(await usage.locator('.usage-window.high').count()===2&&await usage.locator('.usage-bar').count()===2,'Warnings and bars');
  assert(!/\$|€|£|cost|price/i.test(await text(usage)),'No money in usage');
+ // Collapsible sidebar: a thin rail, remembered, with a shortcut that ignores typing.
+ {
+  const KEY='interspace.sidebarCollapsed',body=page.locator('body'),aside=page.locator('aside'),main=page.locator('main');
+  const collapsed=()=>page.evaluate(()=>document.body.classList.contains('sidebar-collapsed'));
+  const wide=async loc=>(await loc.boundingBox()).width;
+  assert(!(await collapsed())&&await page.locator('#sidebar-expand').isHidden(),'Starts expanded, no rail button');
+  assert((await page.locator('#sidebar-collapse').getAttribute('aria-label'))==='Hide sidebar'&&(await text(page.locator('#sidebar-collapse')))==='\u25C0','Collapse button');
+  const w0=await wide(main);
+  await page.locator('#sidebar-collapse').click();
+  assert(await collapsed(),'Click collapses');
+  assert(await wide(aside)<=48,'Rail width '+await wide(aside));
+  assert(await wide(main)-w0>=150,'Main grows '+(await wide(main)-w0));
+  assert((await page.evaluate(k=>localStorage.getItem(k),KEY))==='1','Saved as 1');
+  const ex=page.locator('#sidebar-expand');
+  assert(await ex.isVisible()&&(await ex.getAttribute('aria-label'))==='Show sidebar'&&(await text(ex))==='\u2630','Expand button');
+  assert(await page.locator('.mode-switch').isHidden()&&await page.locator('#sidebar-collapse').isHidden(),'Rail hides the rest');
+  await page.reload();
+  assert(await collapsed(),'Still collapsed after reload');
+  await ex.click();
+  assert(!(await collapsed())&&(await page.evaluate(k=>localStorage.getItem(k),KEY))==='0','Expand restores and saves 0');
+  assert(await page.locator('.mode-switch').isVisible(),'Sidebar back');
+  await page.evaluate(()=>document.activeElement?.blur());
+  await page.keyboard.press('ControlOrMeta+Backslash');
+  assert(await collapsed(),'Shortcut collapses');
+  await page.keyboard.press('ControlOrMeta+Backslash');
+  assert(!(await collapsed()),'Shortcut expands');
+  // Typing: the shortcut is ignored in a text field.
+  await page.evaluate(()=>{const t=document.createElement('textarea');t.id='agent-message';document.body.append(t);t.focus();});
+  await page.keyboard.press('ControlOrMeta+Backslash');
+  assert(!(await collapsed()),'Shortcut ignored while typing');
+  await page.evaluate(()=>document.getElementById('agent-message').remove());
+  // Focus mode hides it without saving.
+  await page.evaluate(()=>window.interspaceSidebar.set(true,{persist:false}));
+  assert(await collapsed()&&(await page.evaluate(k=>localStorage.getItem(k),KEY))==='0'&&await page.evaluate(()=>window.interspaceSidebar.collapsed()),'set(true,{persist:false}) leaves the saved choice');
+  await page.evaluate(()=>window.interspaceSidebar.set(false,{persist:false}));
+  assert(!(await collapsed()),'Restored');
+  // Narrow layout: no rail controls, sidebar stacks as before even if saved collapsed.
+  await page.evaluate(()=>window.interspaceSidebar.set(true));
+  await page.setViewportSize({width:390,height:800});
+  assert(await page.locator('#sidebar-collapse').isHidden()&&await ex.isHidden(),'No buttons at 390px');
+  assert(await page.locator('.mode-switch').isVisible(),'Narrow sidebar content stays');
+  await page.setViewportSize({width:1280,height:1000});
+  await page.evaluate(()=>window.interspaceSidebar.set(false));
+ }
  assert(!errors.length,'Page errors: '+errors.join('; '));
  assert(!(await page.evaluate(()=>window.pwned)),'Script ran');
  return {checks:'Research | Code switch with aria-pressed, mode New button and kind, project picker only in Code, groups Needs you/Working/Done with words, approved draft, children left out, literal titles, Report ready, Show all by keyboard, open task marked'};

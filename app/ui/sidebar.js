@@ -87,5 +87,17 @@ function renderUsage(container,readings){
  }
 }
 
-window.interspaceSidebar={render,place,renderUsage};
+// Collapse to a thin rail. The choice is remembered; Focus mode passes {persist:false} to hide it without saving.
+const SIDEBAR_KEY='interspace.sidebarCollapsed';
+const read=()=>{try{return localStorage.getItem(SIDEBAR_KEY)==='1';}catch{return false;}};
+function collapsed(){return document.body.classList.contains('sidebar-collapsed');}
+function set(value,{persist=true}={}){
+ const next=!!value,changed=next!==collapsed();
+ document.body.classList.toggle('sidebar-collapsed',next);
+ if(persist){try{localStorage.setItem(SIDEBAR_KEY,next?'1':'0');}catch{}}
+ // The split reader measures its layout on resize.
+ if(changed)window.dispatchEvent(new Event('resize'));
+}
+set(read(),{persist:false});
+window.interspaceSidebar={render,place,renderUsage,collapsed,set};
 })();

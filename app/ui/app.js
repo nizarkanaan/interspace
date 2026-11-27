@@ -113,6 +113,16 @@ function tokens(n){return Number(n).toLocaleString('en-US');}
 function tokenLine(t){if(!t)return '';const head=t.budget==null?'Tokens '+tokens(t.used)+' used':'Tokens '+tokens(t.used)+' / '+tokens(t.budget);const extra=[];if(t.estimated)extra.push(tokens(t.estimated)+' estimated');if(t.unknown)extra.push(t.unknown+' older call'+(t.unknown===1?'':'s')+' without counts');if(t.overshoot)extra.push('over budget by '+tokens(t.overshoot));return head+(extra.length?' · '+extra.join(' · '):'');}
 
 document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>navigate(b.dataset.view));
+$('sidebar-collapse').onclick=()=>window.interspaceSidebar.set(true);
+$('sidebar-expand').onclick=()=>window.interspaceSidebar.set(false);
+// Cmd+\ on macOS, Ctrl+\ elsewhere; ignored while typing in a field.
+document.addEventListener('keydown',e=>{
+ const mac=/Mac|iPhone|iPad/.test(navigator.platform||'');
+ if(e.key!=='\\'||e.altKey||e.shiftKey||(mac?!e.metaKey||e.ctrlKey:!e.ctrlKey||e.metaKey))return;
+ const t=e.target;if(t&&(/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)||t.isContentEditable))return;
+ if(matchMedia('(max-width:600px)').matches)return;
+ e.preventDefault();window.interspaceSidebar.set(!window.interspaceSidebar.collapsed());
+});
 $('sidebar-new').onclick=()=>navigate('new',mode==='research'?'research':'project');
 document.querySelectorAll('[data-task-tab]').forEach(b=>b.onclick=()=>{taskTab=b.dataset.taskTab;render();});
 $('new-task').onclick=()=>navigate('new');$('back-tasks').onclick=()=>navigate('tasks');
