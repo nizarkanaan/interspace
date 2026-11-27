@@ -113,8 +113,19 @@ export default async function check(page,url){
  const sq={tool:'research_search',category:'research',input:{tool:'research_search',query:'x'}};
  same(await page.evaluate(c=>window.interspaceResearchCards.summaryText({call:c}),sq),'Searching “x”','Running summary');
  same(await page.evaluate(c=>window.interspaceResearchCards.summaryText({call:c,result:{status:'ok'},output:JSON.stringify({searched:['semantic_scholar'],papers:[{title:'A'},{title:'B'}]})}),sq),'Searched “x” in Semantic Scholar: 2 papers','Done summary');
- same(await page.evaluate(r=>window.interspaceResearchCards.citationCounts(r),report),{total:12,counts:{verified:7,mismatch:1,not_found:1,retracted:1,unchecked:1},other:1,problems:5},'citationCounts');
- same(await page.evaluate(r=>window.interspaceResearchCards.citationPointerText(r),report),'Citations: 7 of 12 verified · 1 mismatch · 1 not found · 1 unchecked · 1 unknown · 1 retracted: do not cite','citationPointerText');
+ const counts=r=>page.evaluate(r=>window.interspaceResearchCards.citationCounts(r),r),pointer=r=>page.evaluate(r=>window.interspaceResearchCards.citationPointerText(r),r);
+ const none={mismatch:0,not_found:0,retracted:0,unchecked:0};
+ same(await counts(report),{total:12,counts:{verified:7,mismatch:1,not_found:1,retracted:1,unchecked:1},other:1,cut:0,problems:5},'citationCounts');
+ same(await pointer(report),'Citations: 7 of 12 verified · 1 mismatch · 1 not found · 1 unchecked · 1 unknown · 1 retracted: do not cite','citationPointerText');
+ // A cut report (scheduler.py `_cap`: the event keeps a prefix of the rows, `truncated` and the whole summary): the rows
+ // it leaves out are problems, so a cut report whose kept rows are all verified is never taken as all verified.
+ const vrow=i=>({index:i,input:{title:'Kept '+i},status:'verified',fields:[],match:null});
+ const cutReport={v:1,checked_at:'2026-11-19T10:05:00Z',truncated:true,summary:{verified:150,...none,retracted:1},references:Array.from({length:120},(_,i)=>vrow(i))};
+ same(await counts(cutReport),{total:151,counts:{verified:120,...none},other:0,cut:31,problems:31},'citationCounts of a cut report');
+ same(await pointer(cutReport),'Citations: 120 of 151 verified · 31 not shown','Pointer of a cut report');
+ same(await counts({truncated:true,references:[{status:'verified'}]}),{total:2,counts:{verified:1,...none},other:0,cut:1,problems:1},'A cut report with no summary');
+ // Compacted but whole (`truncated` with every row kept): nothing is cut.
+ same(await counts({truncated:true,summary:{verified:2,...none},references:[vrow(0),vrow(1)]}),{total:2,counts:{verified:2,...none},other:0,cut:0,problems:0},'A compacted whole report');
  const ok=(tool,input,data,extra={})=>({call:{tool,category:'research',input:{tool,...input}},result:{status:'ok',output:{text:JSON.stringify(data),truncated:false,blob_id:null,...extra}}});
  const s1=ok('research_search',{query:'a'},{searched:['semantic_scholar','arxiv'],papers:[{doi:'10.1/A',title:'A'},{doi:'10.1/b',title:'B'}]});
  const s2=extra=>ok('research_search',{query:'b'},{searched:['arxiv','openalex'],papers:[{doi:'10.1/a',title:'A again'},{arxiv_id:'2401.1',title:'C'}]},extra);
@@ -123,21 +134,58 @@ export default async function check(page,url){
   {citation:{references:[{status:'verified'},{status:'verified'},{status:'verified'}]}},{reasoning:'x'},{row:'budget',text:'t'}];
  const parts=items=>page.evaluate(list=>window.interspaceResearchCards.workParts(list),items);
  same(await parts([s1,s2(),...rest]),['Team approved','Codex citation checker finished','Searched 3 sources 2 times','3 papers','looked up 1','saved report.md','3 references checked: all verified','9 steps'],'workParts');
- same(await parts([s1,s2({truncated:true}),...rest]),['Team approved','Codex citation checker finished','Searched 3 sources 2 times','looked up 1','saved report.md','3 references checked: all verified','9 steps'],'workParts with a cut search');
+ // A cut search's sources and papers are unknown, so the line says only how many times it searched.
+ same(await parts([s1,s2({truncated:true}),...rest]),['Team approved','Codex citation checker finished','Searched 2 times','looked up 1','saved report.md','3 references checked: all verified','9 steps'],'workParts with a cut search');
+ // Once its full output is loaded, the cut search counts again.
+ const full=JSON.stringify({searched:['arxiv','openalex'],papers:[{doi:'10.1/a',title:'A again'},{arxiv_id:'2401.1',title:'C'}]});
+ same(await parts([s1,{...s2({truncated:true}),fullOutput:full},...rest]),['Team approved','Codex citation checker finished','Searched 3 sources 2 times','3 papers','looked up 1','saved report.md','3 references checked: all verified','9 steps'],'workParts with a cut search loaded in full');
+ // An output that is not cut but cannot be read drops the sources and the papers.
+ const raw={call:s1.call,result:{status:'ok',output:{text:'not json',truncated:false,blob_id:null}}};
+ same(await parts([s1,raw]),['Searched 2 times','2 steps'],'workParts with an unreadable search');
+ same(await parts([raw]),['Searched once','1 step'],'workParts with one unreadable search');
  same(await parts([s1]),['Searched 2 sources once','2 papers','1 step'],'workParts with one search');
+ // A search that names no source: the no-source form.
+ const bare=q=>ok('research_search',{query:q},{searched:[],papers:[{title:'Paper '+q}]});
+ same(await parts([bare('m'),bare('n')]),['Searched 2 times','2 papers','2 steps'],'workParts with searches that name no source');
+ // Papers from Follow citations count with the searches', by DOI, arXiv ID or title.
+ same(await parts([s1,ok('research_citations',{id:'doi:10.1/a'},{papers:[{doi:'10.1/A'},{title:' New Paper '},{title:'new paper'}]})]),['Searched 2 sources once','3 papers','2 steps'],'workParts with Follow citations');
+ same(await parts([{team:{answered:{decision:'decline'}}}]),['Team declined','1 step'],'workParts with a declined team');
  same(await parts([ok('record_claim_support',{},{recorded:4}),ok('record_table_cells',{},{recorded:12})]),['recorded 4 claim verdicts','recorded 12 evidence values','2 steps'],'workParts with records');
+ // A citation report with any problem, a cut one included, never reads as all verified.
+ same(await parts([{citation:cutReport}]),['1 step'],'workParts with a cut report');
+ same(await parts([{citation:{truncated:true,references:[{status:'verified'}]}}]),['1 step'],'workParts with a cut report and no summary');
+ same(await parts([{citation:{truncated:true,summary:{verified:2,...none},references:[vrow(0),vrow(1)]}}]),['2 references checked: all verified','1 step'],'workParts with a compacted whole report');
  same(await page.evaluate(()=>window.interspaceResearchCards.workerName({provider:'codex',role:'citation_checker'})),'Codex citation checker','workerName');
  // The brief card (Simple's Show citation report): counts, the retracted alert and only the problem rows, problems first.
- await page.evaluate(r=>{const box=document.createElement('div');box.id='brief-card';box.className='card';document.body.append(box);const state={};
-  const draw=()=>{box.replaceChildren();window.interspaceResearchCards.citationCard(box,r,{state,bump:draw,brief:true});};draw();},report);
+ // `draw` restores focus by id as stream.js render does, so the Show all toggle keeps focus across a re-render.
+ const cardBox=(id,r,brief=true)=>page.evaluate(([id,r,brief])=>{const box=document.createElement('div');box.id=id;box.className='card test-card';document.body.append(box);const state={};
+  const draw=()=>{const f=document.activeElement?.id;box.replaceChildren();window.interspaceResearchCards.citationCard(box,r,{state,bump:draw,brief});if(f&&document.activeElement?.id!==f)document.getElementById(f)?.focus();};draw();},[id,r,brief]);
+ await cardBox('brief-card',report);
  const brief=page.locator('#brief-card');
  assert(await brief.locator('.reference').count()===5,'Brief rows: '+await brief.locator('.reference').count());
  assert((await text(brief.locator('.reference').first())).includes('Retracted: do not cite'),'Brief retracted row first');
  same(await brief.locator(':scope > p.footnote').allTextContents(),['5 references are not verified.'],'Brief footnote');
  assert(!(await text(brief)).includes('Checked at')&&(await text(brief.locator('.retracted-alert'))).includes('1 reference is retracted. Do not cite it.'),'Brief card text: '+await text(brief));
- await brief.getByRole('button',{name:'Show all 12 references',exact:true}).click();
+ const all=brief.getByRole('button',{name:'Show all 12 references',exact:true});
+ assert(await all.getAttribute('id')==='brief-card-all','Show all id: '+await all.getAttribute('id'));
+ await all.focus();await page.keyboard.press('Enter');
  await page.waitForFunction(()=>document.querySelectorAll('#brief-card .reference').length===12);
- await page.evaluate(()=>document.getElementById('brief-card').remove());
+ same(await page.evaluate(()=>[document.activeElement?.id,document.activeElement?.textContent]),['brief-card-all','Show fewer'],'Focus after Show all');
+ // More than 10 problem rows: the brief card shows 10, then Show all.
+ await cardBox('brief-many',{v:1,references:[vrow(0),...Array.from({length:12},(_,i)=>({index:1+i,input:{title:'Missing '+i},status:'not_found',fields:[],match:null}))]});
+ assert(await page.locator('#brief-many .reference').count()===10&&await page.locator('#brief-many').getByRole('button',{name:'Show all 13 references',exact:true}).count()===1,'Brief cap: '+await text(page.locator('#brief-many')));
+ same(await page.locator('#brief-many > p.footnote').allTextContents(),['12 references are not verified.'],'Brief cap footnote');
+ // A status named like an Object.prototype key is an unknown problem, sorted and counted as one.
+ await cardBox('brief-proto',{v:1,references:[vrow(0),{index:1,input:{title:'Odd status'},status:'toString',fields:[],match:null}]});
+ assert(await page.locator('#brief-proto .reference').count()===1&&(await text(page.locator('#brief-proto .reference'))).includes('Unknown result (toString): not verified'),'Brief prototype status: '+await text(page.locator('#brief-proto')));
+ // A cut report: the brief card says what is not shown and claims nothing about it; the full card adds what Verified means.
+ await cardBox('brief-cut',cutReport);
+ const briefCut=page.locator('#brief-cut');
+ same(await briefCut.locator(':scope > p.footnote').allTextContents(),['Every reference shown is verified. The report was cut short to fit, so 31 references are not shown.'],'Cut brief footnote');
+ assert(await briefCut.locator('.reference').count()===0&&(await text(briefCut.locator('.card-head'))).includes('151 references')&&(await text(briefCut.locator('.citation-summary'))).includes('31 not shown')&&await briefCut.getByRole('button',{name:'Show all 120 references',exact:true}).count()===1,'Cut brief card: '+await text(briefCut));
+ await cardBox('full-cut',cutReport,false);
+ assert((await page.locator('#full-cut > p.footnote').first().textContent()).startsWith('Every reference shown is verified. The report was cut short to fit, so 31 references are not shown. Verified means a published record matched')&&await page.locator('#full-cut .reference').count()===10,'Cut full card: '+await text(page.locator('#full-cut')));
+ await page.evaluate(()=>document.querySelectorAll('.test-card').forEach(x=>x.remove()));
 
  // Research requests per source (Wave 2A: requests sent, and answers from the cache), never money.
  const head=await text(page.locator('#agent-head'));
@@ -185,5 +233,5 @@ export default async function check(page,url){
  const fits=await fit(page,'research-cards',null,true);
  assert(!(await page.evaluate(()=>window.pwned)),'Script ran');
  assert(!errors.length,'Page errors: '+errors.join(' | '));
- return {checks:'research tool cards (search with title/authors/year/venue/source badges/citations/retracted flag, searched and skipped, paper with abstract, BibTeX, open copy, denied call, cut result then full blob), https-only links, collapsible long lists by keyboard, citation report counts from rows with verified/mismatch fields/not found/retracted/unchecked reason/unknown, problem rows first with reference numbers, retracted callout, honest Verified meaning, nothing else looks verified, per-source requests sent and cache answers without money, link host shown after markdown links, BibTeX output note, work-line helpers (summaryText, workParts with distinct papers and a cut search, workerName), citationCounts and the citation pointer text, brief citation card with problem rows only then Show all, no every-citation claim, no Review for research tasks, outputs panel with text-safe Markdown report and plain BibTeX, task_output_read per file, Save and cancelled save, live update keeps open view, literal text everywhere, light/dark 320-1280 fit',responsiveStates:fits.length};
+ return {checks:'research tool cards (search with title/authors/year/venue/source badges/citations/retracted flag, searched and skipped, paper with abstract, BibTeX, open copy, denied call, cut result then full blob), https-only links, collapsible long lists by keyboard, citation report counts from rows with verified/mismatch fields/not found/retracted/unchecked reason/unknown, problem rows first with reference numbers, retracted callout, honest Verified meaning, nothing else looks verified, per-source requests sent and cache answers without money, link host shown after markdown links, BibTeX output note, work-line helpers (summaryText, workParts with distinct papers from searches and Follow citations, a cut search with and without its full output, an unreadable search, searches that name no source, a declined team, cut citation reports never all verified, workerName), citationCounts and the citation pointer text for whole, compacted and cut reports, brief citation card with problem rows only (at most 10, an Object.prototype status counted and sorted as a problem, the rows a cut report leaves out said) then Show all keeping focus by id, no every-citation claim, no Review for research tasks, outputs panel with text-safe Markdown report and plain BibTeX, task_output_read per file, Save and cancelled save, live update keeps open view, literal text everywhere, light/dark 320-1280 fit',responsiveStates:fits.length};
 }

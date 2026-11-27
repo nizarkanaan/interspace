@@ -49,11 +49,12 @@ function paper(p,parent,{abstract=false}={}){
  if(abstract&&p.abstract){const d=el('details','paper-abstract',null,li);el('summary','','Abstract',d);el('p','',str(p.abstract),d);}
  return li;
 }
-// A long list shows its first rows and a toggle; `state` keeps the choice across re-renders of the card.
+// A long list shows its first rows and a toggle; `state` keeps the choice across re-renders of the card. `label.id`
+// names the toggle, so a re-render that restores focus by id keeps it on the toggle.
 function collapsible(parent,items,shown,state,key,bump,label,draw){
  const all=!!state[key],list=el('ol',label.cls,null,parent);
  items.slice(0,all?items.length:shown).forEach(x=>draw(x,list));
- if(items.length>shown){const b=el('button','link-button',all?'Show fewer':'Show all '+count(items.length)+' '+label.noun,parent);b.type='button';b.setAttribute('aria-expanded',String(all));b.onclick=()=>{state[key]=!all;bump();};}
+ if(items.length>shown){const b=el('button','link-button',all?'Show fewer':'Show all '+count(items.length)+' '+label.noun,parent);b.type='button';if(label.id)b.id=label.id;b.setAttribute('aria-expanded',String(all));b.onclick=()=>{state[key]=!all;bump();};}
  return list;
 }
 function paperList(parent,papers,state,bump,key='papers'){
@@ -102,7 +103,7 @@ function inputText(input){
  return bits.join(' ')||'Reference';
 }
 function referenceRow(ref,list){
- const s=STATUS[ref?.status],li=el('li','reference '+(s?s.cls:'unknown'),null,list);
+ const s=Object.hasOwn(STATUS,ref?.status)?STATUS[ref.status]:null,li=el('li','reference '+(s?s.cls:'unknown'),null,list);
  if(Number.isSafeInteger(ref?.index)&&ref.index>=0){const n=el('p','reference-number',null,li);el('span','visually-hidden','Reference ',n);n.append(count(ref.index+1));}
  const label=s?s.label:'Unknown result ('+str(ref?.status)+'): not verified';
  const head=el('p','reference-status',null,li);el('strong','',label,head);
@@ -120,37 +121,45 @@ function referenceRow(ref,list){
  if(facts.length)el('p','footnote',facts.join(' · '),li);
 }
 // One count of a report's rows, shared by the card and Simple's citation pointer. `other` is any status the card does
-// not know, and `problems` is every row that is not verified, unknown ones included.
+// not know. `cut` is the references a cut report leaves out: a citation_report event holds at most about 60 KB, so the
+// scheduler (`_cap`) keeps a prefix of the rows, sets `truncated` and keeps the summary of every reference. Nothing says
+// a row that is not shown is verified, so `problems` (every row that is not verified) counts the cut ones too. A cut
+// report whose summary cannot be read counts one cut row, so it is never taken as all verified.
 function citationCounts(report){
  const refs=Array.isArray(report?.references)?report.references:[];
  const counts=Object.fromEntries(ORDER.map(k=>[k,0]));let other=0;for(const r of refs)if(r&&Object.hasOwn(counts,r.status))counts[r.status]++;else other++;
- return {total:refs.length,counts,other,problems:refs.length-counts.verified};
+ let cut=0;
+ if(report?.truncated===true){const n=report.summary&&typeof report.summary==='object'?Object.values(report.summary):[];cut=n.length&&n.every(x=>Number.isSafeInteger(x)&&x>=0)?Math.max(0,n.reduce((a,b)=>a+b,0)-refs.length):1;}
+ return {total:refs.length+cut,counts,other,cut,problems:refs.length+cut-counts.verified};
 }
 // Simple's one warn line for a report with problems: `Citations: 7 of 12 verified · 1 mismatch · … · 1 retracted: do
 // not cite`. A count of zero is left out; retracted always comes last.
 function citationPointerText(report){
- const {total,counts,other}=citationCounts(report);
- const extra=[[counts.mismatch,'mismatch'],[counts.not_found,'not found'],[counts.unchecked,'unchecked'],[other,'unknown'],[counts.retracted,'retracted: do not cite']];
+ const {total,counts,other,cut}=citationCounts(report);
+ const extra=[[counts.mismatch,'mismatch'],[counts.not_found,'not found'],[counts.unchecked,'unchecked'],[other,'unknown'],[cut,'not shown'],[counts.retracted,'retracted: do not cite']];
  return 'Citations: '+count(counts.verified)+' of '+count(total)+' verified'+extra.filter(x=>x[0]).map(([n,what])=>' · '+count(n)+' '+what).join('');
 }
-// `brief` is the card Simple opens from the citation pointer: until Show all, the footnote keeps its first sentence,
-// only the problem rows show (at most 10, problems first) and Checked at is left out.
-function citationCard(card,report,{state,bump,brief=false}){
+// `brief` is the card Simple opens from the citation pointer: until Show all, the footnote keeps its first sentence
+// (and says when the report was cut short), only the problem rows show (at most 10, problems first) and Checked at is
+// left out. `id` (the card's own id by default) names the Show all toggle `<id>-all`.
+function citationCard(card,report,{state,bump,brief=false,id=card.id}){
  card.classList.add('citation-report');card.setAttribute('role','group');card.setAttribute('aria-label','Citation report');
  const refs=Array.isArray(report?.references)?report.references:[];
- const {counts,other,problems:unverified}=citationCounts(report),short=brief&&!state.refs;
+ const {total,counts,other,cut,problems}=citationCounts(report),unverified=problems-cut,short=brief&&!state.refs;
  const head=el('div','card-head',null,card);el('span','badge','Citations',head);el('strong','','Citation report',head);
- el('span','state',plural(refs.length,'reference'),head);
+ el('span','state',plural(total,'reference'),head);
  const sum=el('ul','citation-summary',null,card);sum.setAttribute('aria-label','Citation summary');
  for(const k of ORDER){const li=el('li',STATUS[k].cls,null,sum);el('strong','',count(counts[k]),li);li.append(' '+SUMMARY[k]);}
  if(other){const li=el('li','unknown',null,sum);el('strong','',count(other),li);li.append(' unknown');}
+ if(cut){const li=el('li','not-shown',null,sum);el('strong','',count(cut),li);li.append(' not shown');}
  if(counts.retracted)el('p','retracted-alert',plural(counts.retracted,'reference')+(counts.retracted===1?' is retracted. Do not cite it.':' are retracted. Do not cite them.'),card);
  const meaning='Verified means a published record matched: title at least 90% similar, plus the year (within one) and the first author when the reference gives them.';
- const first=unverified?plural(unverified,'reference')+(unverified===1?' is':' are')+' not verified.':refs.length?'Every reference is verified.':'No references were checked.';
- el('p','footnote',short?first:first+' '+(refs.length?meaning:''),card);
- const rank=r=>r&&r.status in RANK?RANK[r.status]:3;
+ const first=unverified?plural(unverified,'reference')+(unverified===1?' is':' are')+' not verified.':cut?(refs.length?'Every reference shown is verified.':''):refs.length?'Every reference is verified.':'No references were checked.';
+ const gone=cut?'The report was cut short to fit, so '+plural(cut,'reference')+(cut===1?' is':' are')+' not shown.':'';
+ el('p','footnote',[first,gone,short||!refs.length?'':meaning].filter(Boolean).join(' '),card);
+ const rank=r=>r&&Object.hasOwn(RANK,r.status)?RANK[r.status]:3;
  const sorted=refs.map((r,i)=>[r,i]).sort((a,b)=>rank(a[0])-rank(b[0])||a[1]-b[1]).map(x=>x[0]);
- if(refs.length)collapsible(card,sorted,short?Math.min(unverified,ROWS_SHOWN):ROWS_SHOWN,state,'refs',bump,{cls:'reference-list',noun:'references'},referenceRow);
+ if(refs.length)collapsible(card,sorted,short?Math.min(unverified,ROWS_SHOWN):ROWS_SHOWN,state,'refs',bump,{cls:'reference-list',noun:'references',id:id?id+'-all':''},referenceRow);
  if(report?.checked_at&&!short)el('p','footnote','Checked at '+str(report.checked_at),card);
 }
 
@@ -283,17 +292,18 @@ function workParts(items){
  const team=list.filter(it=>it.team?.answered).at(-1),subs=list.filter(it=>it.sub),cite=list.filter(it=>it.citation).at(-1);
  if(team)parts.push(team.team.answered.decision==='approve'?'Team approved':'Team declined');
  if(subs.length)parts.push(subs.map(it=>workerName(it.sub)).join(', ')+' finished');
- let searches=0,lookups=0,saved=false,verdicts=0,values=0,listed=0,readable=true,unnamed=0;
+ let searches=0,lookups=0,saved=false,verdicts=0,values=0,listed=0,readable=true,unnamed=0,named=true;
  const sources=new Set(),papers=new Set();
  for(const it of list){
   if(!it.call||it.result?.status!=='ok')continue;
   const c=it.call,input=c.input&&typeof c.input==='object'?c.input:{},tool=str(input.tool||c.tool);
-  const data=parse(it.fullOutput??it.result?.output?.text??'');
+  const data=parse(it.fullOutput??it.result?.output?.text??''),whole=!(it.result.output?.truncated&&it.fullOutput==null);
   const recorded=Number.isSafeInteger(data?.recorded)&&data.recorded>0?data.recorded:0;
-  if(tool==='research_search'){searches++;if(Array.isArray(data?.searched))for(const s of data.searched)if(typeof s==='string'&&s)sources.add(s);}
+  // A search whose sources cannot be read leaves the source count out (`Searched T times`), never under-counted.
+  if(tool==='research_search'){searches++;if(whole&&Array.isArray(data?.searched)){for(const s of data.searched)if(typeof s==='string'&&s)sources.add(s);}else named=false;}
   if(PAPER_TOOLS.has(tool)){
    listed++;
-   if((it.result.output?.truncated&&it.fullOutput==null)||!Array.isArray(data?.papers))readable=false;
+   if(!whole||!Array.isArray(data?.papers))readable=false;
    else for(const p of data.papers){const k=paperKey(p);if(k)papers.add(k);else unnamed++;}
   }
   else if(tool==='research_paper')lookups++;
@@ -301,14 +311,15 @@ function workParts(items){
   else if(tool==='record_claim_support')verdicts+=recorded;
   else if(tool==='record_table_cells')values+=recorded;
  }
- if(searches)parts.push('Searched '+(sources.size?plural(sources.size,'source')+' ':'')+(searches===1?'once':count(searches)+' times'));
+ if(searches)parts.push('Searched '+(named&&sources.size?plural(sources.size,'source')+' ':'')+(searches===1?'once':count(searches)+' times'));
  if(listed&&readable)parts.push(plural(papers.size+unnamed,'paper'));
  if(lookups)parts.push('looked up '+count(lookups));
  if(saved)parts.push('saved report.md');
  if(verdicts)parts.push('recorded '+plural(verdicts,'claim verdict'));
  if(values)parts.push('recorded '+plural(values,'evidence value'));
- const checked=cite?citationCounts(cite.citation).total:0;
- if(checked)parts.push(plural(checked,'reference')+' checked: all verified');
+ // Said only when the counts agree, so a report with any problem (a cut one included) never reads as all verified.
+ const checked=cite?citationCounts(cite.citation):null;
+ if(checked?.total&&!checked.problems)parts.push(plural(checked.total,'reference')+' checked: all verified');
  parts.push(plural(list.length,'step'));
  return parts;
 }
