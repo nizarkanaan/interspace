@@ -176,7 +176,7 @@ class ProvidersApiTests(unittest.TestCase):
         value = routing.default()
         value['roles']['reviewer'] = {'provider': 'claude', 'model': 'claude-opus-5-5'}
         result = self.call('routing_update', {'routing': value})
-        self.assertEqual(result['roles']['reviewer'], {'provider': 'claude', 'model': 'claude-opus-5-5'})
+        self.assertEqual(result['roles']['reviewer'], {'provider': 'claude', 'model': 'claude-opus-5-5', 'effort': None})
         self.assertEqual(self.app.state['routing'], result)
         self.assertIsNot(self.app.state['routing'], result)
         self.assertEqual(self.app.published, 1)
@@ -217,7 +217,7 @@ class ServiceIntegrationTests(unittest.TestCase):
                 value['roles']['writer'] = {'provider': 'codex', 'model': 'gpt-5.5'}
                 app.handle('routing_update', {'routing': value})
                 saved = json.loads((Path(folder) / 'state.json').read_text())
-                self.assertEqual(saved['routing']['roles']['writer'], {'provider': 'codex', 'model': 'gpt-5.5'})
+                self.assertEqual(saved['routing']['roles']['writer'], {'provider': 'codex', 'model': 'gpt-5.5', 'effort': None})
             finally:
                 app.scheduler.shutdown(timeout_s=5)
 

@@ -99,6 +99,17 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(registry.charge_rule('codex'), 'codex.input+output')
         self.assertEqual(registry.charge_rule('claude'), 'claude.input+cache_creation+cache_read+output')
 
+    def test_check_effort(self):
+        self.assertEqual(registry.PROVIDERS['claude']['efforts'], ('low', 'medium', 'high', 'xhigh', 'max'))
+        self.assertEqual(registry.PROVIDERS['codex']['efforts'], ())
+        self.assertEqual(registry.check_effort('claude', 'max'), 'max')
+        self.assertIsNone(registry.check_effort('claude', None))
+        self.assertEqual(registry.check_effort('codex', 'minimal'), 'minimal')
+        with self.assertRaises(ValueError):
+            registry.check_effort('codex', 'High!')
+        with self.assertRaises(ValueError):
+            registry.check_effort('claude', 'minimal')
+
 
 if __name__ == '__main__':
     unittest.main()

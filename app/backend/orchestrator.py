@@ -34,13 +34,13 @@ TOOLS = ('propose_team', 'team_status', 'wait_for', 'message_member')
 OVERRIDE_RULE = 'Suggest a different provider only with a one-line reason; the user approves the team.'
 MEMBER_ID = re.compile(r'^m[0-9]{1,2}$')
 DEFAULT_ROUTING = {
-    'v': 1, 'orchestrator': {'provider': 'claude', 'model': None},
-    'roles': {'researcher': {'provider': 'codex', 'model': None},
-              'implementer': {'provider': 'claude', 'model': None},
-              'reviewer': {'provider': 'codex', 'model': None},
-              'tester': {'provider': 'claude', 'model': None},
-              'writer': {'provider': 'claude', 'model': None},
-              'citation_checker': {'provider': 'codex', 'model': None}}}
+    'v': 1, 'orchestrator': {'provider': 'claude', 'model': None, 'effort': None},
+    'roles': {'researcher': {'provider': 'codex', 'model': None, 'effort': None},
+              'implementer': {'provider': 'claude', 'model': None, 'effort': None},
+              'reviewer': {'provider': 'codex', 'model': None, 'effort': None},
+              'tester': {'provider': 'claude', 'model': None, 'effort': None},
+              'writer': {'provider': 'claude', 'model': None, 'effort': None},
+              'citation_checker': {'provider': 'codex', 'model': None, 'effort': None}}}
 # research/tasks.md "Roles": the Orchestrator's research workflow and citation rule, added when research is on.
 RESEARCH_WORKFLOW = ('Research workflow: research_search -> research_paper and research_fulltext to read -> snowball '
                      'with research_citations -> synthesize -> verify_citations -> final answer. Fetch BibTeX with '
@@ -78,7 +78,8 @@ def registry():
     try:
         from runtime import registry as module
         import routing
-        return {'providers': module.PROVIDERS, 'check_model': module.check_model, 'validate_routing': routing.validate}
+        return {'providers': module.PROVIDERS, 'check_model': module.check_model,
+                'check_effort': module.check_effort, 'validate_routing': routing.validate}
     except ImportError:
         pass
     providers = {
@@ -98,7 +99,20 @@ def registry():
                                           else not re.match(r'[A-Za-z0-9._:-]{1,64}\Z', model)):
             raise ValueError('Unknown model for ' + record['title'] + '.')
         return model
-    return {'providers': providers, 'check_model': check_model, 'validate_routing': None}
+
+    def check_effort(name, effort):
+        if name not in providers:
+            raise ValueError('Unknown provider.')
+        if effort is None:
+            return None
+        if name == 'claude':
+            if effort not in ('low', 'medium', 'high', 'xhigh', 'max'):
+                raise ValueError('Choose one of the Claude effort levels.')
+        elif not isinstance(effort, str) or not re.match(r'[a-z]{1,16}\Z', effort):
+            raise ValueError('The effort must be a short lowercase word.')
+        return effort
+    return {'providers': providers, 'check_model': check_model, 'check_effort': check_effort,
+            'validate_routing': None}
 
 
 def routing_defaults(state, table=None):
@@ -111,6 +125,7 @@ def routing_defaults(state, table=None):
                 return table['validate_routing'](copy.deepcopy(value))
             for entry in [value['orchestrator']] + [value['roles'][r] for r in tasks.TEAM_ROLES]:
                 table['check_model'](entry['provider'], entry.get('model'))
+                table['check_effort'](entry['provider'], entry.get('effort'))
             return copy.deepcopy(value)
         except (KeyError, TypeError, ValueError):
             pass

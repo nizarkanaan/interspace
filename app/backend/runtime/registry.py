@@ -10,6 +10,7 @@ import re
 import threading
 
 MODEL_RE = r'[A-Za-z0-9._:-]{1,64}\Z'
+EFFORT_RE = r'[a-z]{1,16}\Z'
 NAME_RE = r'[a-z][a-z0-9_]{0,31}\Z'
 CAPABILITIES = ('write', 'web_search', 'approvals')
 
@@ -18,6 +19,7 @@ PROVIDERS = {
         'name': 'claude', 'title': 'Claude',
         'models': ('claude-sonnet-5-5', 'claude-opus-5-5', 'claude-haiku-5-5'),  # Full IDs only, never aliases.
         'default_model': 'claude-sonnet-5-5',
+        'efforts': ('low', 'medium', 'high', 'xhigh', 'max'),
         'capabilities': {'write': True, 'web_search': True, 'approvals': True},
         # Anthropic's input_tokens excludes cache writes and reads, so the four counts are disjoint.
         'charge_fields': ('input_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens', 'output_tokens'),
@@ -27,6 +29,7 @@ PROVIDERS = {
         'name': 'codex', 'title': 'Codex',
         'models': (),          # Empty: a free-text model name, checked by MODEL_RE.
         'default_model': None,  # None: the CLI's own default.
+        'efforts': (),          # Empty: a free-text effort word, checked by EFFORT_RE.
         'capabilities': {'write': True, 'web_search': True, 'approvals': True},
         # Codex TokenUsage: cached input is part of input_tokens and reasoning is part of output_tokens.
         'charge_fields': ('input_tokens', 'output_tokens'),
@@ -40,6 +43,10 @@ _lock = threading.Lock()
 
 def _model_ok(model):
     return isinstance(model, str) and re.match(MODEL_RE, model) is not None
+
+
+def _effort_ok(effort):
+    return isinstance(effort, str) and re.match(EFFORT_RE, effort) is not None
 
 
 def _check_record(record):
@@ -58,6 +65,9 @@ def _check_record(record):
     default = record.get('default_model')
     if default is not None and (not _model_ok(default) or (models and default not in models)):
         raise ValueError('The default model must be one of the provider models.')
+    efforts = record.get('efforts', ())
+    if not isinstance(efforts, (tuple, list)) or not all(_effort_ok(e) for e in efforts) or len(set(efforts)) != len(efforts):
+        raise ValueError('Provider efforts must be distinct short lowercase words.')
     capabilities = record.get('capabilities')
     if not isinstance(capabilities, dict) or set(capabilities) != set(CAPABILITIES) \
             or not all(type(v) is bool for v in capabilities.values()):
@@ -69,7 +79,7 @@ def _check_record(record):
     if not isinstance(runtime, str) or runtime.count(':') != 1 or not all(runtime.split(':')):
         raise ValueError("A provider runtime must be 'module:Class'.")
     return {'name': name, 'title': title, 'models': tuple(models), 'default_model': default,
-            'capabilities': dict(capabilities), 'charge_fields': tuple(fields), 'runtime': runtime}
+            'efforts': tuple(efforts), 'capabilities': dict(capabilities), 'charge_fields': tuple(fields), 'runtime': runtime}
 
 
 for _record in PROVIDERS.values():
@@ -129,6 +139,20 @@ def check_model(name, model):
     if not _model_ok(model):
         raise ValueError('The model must be a name of at most 64 letters, digits and . _ : -.')
     return model
+
+
+def check_effort(name, effort):
+    """The effort to run: None passes through; otherwise one of the provider's levels, or a short word if it lists none."""
+    record = get(name)
+    if effort is None:
+        return None
+    if record['efforts']:
+        if effort not in record['efforts']:
+            raise ValueError('Choose one of the ' + record['title'] + ' effort levels.')
+        return effort
+    if not _effort_ok(effort):
+        raise ValueError('The effort must be a short lowercase word.')
+    return effort
 
 
 def charge_rule(name):

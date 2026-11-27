@@ -18,13 +18,13 @@ class RoutingTests(unittest.TestCase):
         self.assertEqual(routing.ROLES, ('researcher', 'implementer', 'reviewer', 'tester', 'writer', 'citation_checker'))
         self.assertEqual(routing.WRITE_ROLES, ('implementer', 'tester'))
         self.assertEqual(routing.DEFAULT_ROUTING, {
-            'v': 1, 'orchestrator': {'provider': 'claude', 'model': None},
-            'roles': {'researcher': {'provider': 'codex', 'model': None},
-                      'implementer': {'provider': 'claude', 'model': None},
-                      'reviewer': {'provider': 'codex', 'model': None},
-                      'tester': {'provider': 'claude', 'model': None},
-                      'writer': {'provider': 'claude', 'model': None},
-                      'citation_checker': {'provider': 'codex', 'model': None}}})
+            'v': 1, 'orchestrator': {'provider': 'claude', 'model': None, 'effort': None},
+            'roles': {'researcher': {'provider': 'codex', 'model': None, 'effort': None},
+                      'implementer': {'provider': 'claude', 'model': None, 'effort': None},
+                      'reviewer': {'provider': 'codex', 'model': None, 'effort': None},
+                      'tester': {'provider': 'claude', 'model': None, 'effort': None},
+                      'writer': {'provider': 'claude', 'model': None, 'effort': None},
+                      'citation_checker': {'provider': 'codex', 'model': None, 'effort': None}}})
         self.assertEqual(routing.validate(routing.DEFAULT_ROUTING), routing.DEFAULT_ROUTING)
 
     def test_missing_roles_are_completed_from_the_defaults(self):
@@ -32,8 +32,8 @@ class RoutingTests(unittest.TestCase):
         del saved['roles']['citation_checker']
         saved['roles']['writer'] = {'provider': 'codex', 'model': None}
         checked = routing.validate(saved)
-        self.assertEqual(checked['roles']['citation_checker'], {'provider': 'codex', 'model': None})
-        self.assertEqual(checked['roles']['writer'], {'provider': 'codex', 'model': None})
+        self.assertEqual(checked['roles']['citation_checker'], {'provider': 'codex', 'model': None, 'effort': None})
+        self.assertEqual(checked['roles']['writer'], {'provider': 'codex', 'model': None, 'effort': None})
         self.assertEqual(routing.current({'routing': saved})['roles']['writer']['provider'], 'codex')
         self.assertEqual(list(checked['roles']), list(routing.ROLES))
 
@@ -42,7 +42,7 @@ class RoutingTests(unittest.TestCase):
         self.assertEqual(routing.current({'routing': 'damaged'}), routing.DEFAULT_ROUTING)
         saved = routing.default()
         saved['roles']['writer'] = {'provider': 'codex', 'model': 'gpt-5.5'}
-        self.assertEqual(routing.current({'routing': saved})['roles']['writer'], {'provider': 'codex', 'model': 'gpt-5.5'})
+        self.assertEqual(routing.current({'routing': saved})['roles']['writer'], {'provider': 'codex', 'model': 'gpt-5.5', 'effort': None})
         result = routing.current({})
         result['roles']['writer']['provider'] = 'codex'
         self.assertEqual(routing.DEFAULT_ROUTING['roles']['writer']['provider'], 'claude')  # Never shared.
@@ -51,7 +51,7 @@ class RoutingTests(unittest.TestCase):
         value = routing.default()
         value['roles']['implementer']['model'] = 'claude-opus-5-5'
         checked = routing.validate(value)
-        self.assertEqual(checked['roles']['implementer'], {'provider': 'claude', 'model': 'claude-opus-5-5'})
+        self.assertEqual(checked['roles']['implementer'], {'provider': 'claude', 'model': 'claude-opus-5-5', 'effort': None})
         self.assertIsNot(checked, value)
         json.dumps(checked)
         # v may be omitted; it is always written.
@@ -94,6 +94,26 @@ class RoutingTests(unittest.TestCase):
             refused['roles'][role] = {'provider': 'readonly', 'model': None}
             with self.subTest(role=role), self.assertRaisesRegex(ValueError, 'cannot write'):
                 routing.validate(refused)
+
+    def test_routing_without_effort_loads_with_none(self):
+        old = {'v': 1, 'orchestrator': {'provider': 'claude', 'model': 'claude-opus-5-5'},
+               'roles': {r: {'provider': 'codex', 'model': 'gpt-6-sol'} for r in routing.ROLES if r not in routing.WRITE_ROLES}
+                        | {r: {'provider': 'claude', 'model': None} for r in routing.WRITE_ROLES}}
+        clean = routing.validate(old)
+        self.assertIsNone(clean['orchestrator']['effort'])
+        self.assertEqual(clean['roles']['researcher'], {'provider': 'codex', 'model': 'gpt-6-sol', 'effort': None})
+
+    def test_effort_is_kept_and_checked(self):
+        value = routing.default(); value['orchestrator']['effort'] = 'high'; value['roles']['researcher']['effort'] = 'xhigh'
+        self.assertEqual(routing.validate(value)['orchestrator']['effort'], 'high')
+        value['orchestrator']['effort'] = 'turbo'
+        with self.assertRaisesRegex(ValueError, 'Claude effort'):
+            routing.validate(value)
+
+    def test_unknown_entry_keys_are_refused(self):
+        value = routing.default(); value['orchestrator']['temperature'] = 1
+        with self.assertRaises(ValueError):
+            routing.validate(value)
 
 
 if __name__ == '__main__':

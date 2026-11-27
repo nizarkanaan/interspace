@@ -10,13 +10,13 @@ ROLES = ('researcher', 'implementer', 'reviewer', 'tester', 'writer', 'citation_
 WRITE_ROLES = ('implementer', 'tester')  # These need a provider with `capabilities.write`.
 
 DEFAULT_ROUTING = {
-    'v': 1, 'orchestrator': {'provider': 'claude', 'model': None},
-    'roles': {'researcher': {'provider': 'codex', 'model': None},
-              'implementer': {'provider': 'claude', 'model': None},
-              'reviewer': {'provider': 'codex', 'model': None},
-              'tester': {'provider': 'claude', 'model': None},
-              'writer': {'provider': 'claude', 'model': None},
-              'citation_checker': {'provider': 'codex', 'model': None}},
+    'v': 1, 'orchestrator': {'provider': 'claude', 'model': None, 'effort': None},
+    'roles': {'researcher': {'provider': 'codex', 'model': None, 'effort': None},
+              'implementer': {'provider': 'claude', 'model': None, 'effort': None},
+              'reviewer': {'provider': 'codex', 'model': None, 'effort': None},
+              'tester': {'provider': 'claude', 'model': None, 'effort': None},
+              'writer': {'provider': 'claude', 'model': None, 'effort': None},
+              'citation_checker': {'provider': 'codex', 'model': None, 'effort': None}},
 }
 
 
@@ -25,15 +25,16 @@ def default():
 
 
 def _choice(value, label, write=False):
-    if not isinstance(value, dict) or set(value) != {'provider', 'model'}:
+    if not isinstance(value, dict) or set(value) not in ({'provider', 'model'}, {'provider', 'model', 'effort'}):
         raise ValueError('Routing for ' + label + ' needs a provider and a model.')
-    provider, model = value['provider'], value['model']
+    provider, model, effort = value['provider'], value['model'], value.get('effort')
     record = registry.get(provider)
     if model is not None:
         registry.check_model(provider, model)
+    registry.check_effort(provider, effort)
     if write and not record['capabilities']['write']:
         raise ValueError(record['title'] + ' cannot write files, so it cannot be the ' + label + '.')
-    return {'provider': provider, 'model': model}
+    return {'provider': provider, 'model': model, 'effort': effort}
 
 
 def validate(value):

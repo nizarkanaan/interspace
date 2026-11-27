@@ -297,7 +297,7 @@ class DefaultsTests(unittest.TestCase):
         saved['roles']['researcher'] = {'provider': 'claude', 'model': None}
         routing = orchestrator.routing_defaults({'routing': saved}, table)
         self.assertEqual(routing['roles']['researcher']['provider'], 'claude')
-        self.assertEqual(routing['roles']['citation_checker'], {'provider': 'codex', 'model': None})
+        self.assertEqual(routing['roles']['citation_checker'], {'provider': 'codex', 'model': None, 'effort': None})
 
     def test_user_routing_is_used_and_invalid_routing_falls_back(self):
         table = orchestrator.registry()
