@@ -188,6 +188,28 @@ export default async function check(page,url){
  assert((await text(c2)).includes('Merged into main · abcdef12'),'Merged state missing on the child card: '+await text(c2));
  assert(await page.evaluate(()=>document.activeElement?.getAttribute('aria-label'))==='Review Implementer changes','Focus not returned to Review changes');
 
+ // Back from a subagent names its parent and opens it, with focus on the Open button that led there. A click from a
+ // script never focuses the button (as a mouse click in WKWebView does not), and focus sat on another card's button.
+ const backButton=page.locator('#agent-back'),focusedId=()=>page.evaluate(()=>document.activeElement?.id||document.activeElement?.tagName);
+ const backNames=t=>page.waitForFunction(t=>document.querySelector('#agent-back').textContent===t,t);
+ await page.evaluate(()=>document.getElementById('sub-open-C1').click());
+ await backNames('← Add input validation');
+ await backButton.click();
+ assert((await text(page.locator('#heading'))).includes('Add input validation'),'Back did not open the parent: '+await text(page.locator('#heading')));
+ assert(await focusedId()==='sub-open-C1','Focus not on the child Open button after Back: '+await focusedId());
+ // The same round trip by keyboard.
+ await page.locator('#sub-open-C1').focus();await page.keyboard.press('Enter');
+ await backNames('← Add input validation');
+ await backButton.focus();await page.keyboard.press('Enter');
+ await backNames('← Tasks');
+ assert(await focusedId()==='sub-open-C1','Focus not on the child Open button after Back by keyboard: '+await focusedId());
+ // A child opened from the Running view also goes back to its parent.
+ await page.locator('[data-view=running]').click();
+ await page.locator('#running-view .child-row[data-child="C1"]').getByRole('button',{name:'Open Researcher subagent',exact:true}).click();
+ await backNames('← Add input validation');
+ await backButton.click();
+ assert((await text(page.locator('#heading'))).includes('Add input validation')&&await page.locator('#agent-view').isVisible(),'Back from a Running view child did not open the parent');
+
  // Restart: the app quit with a team proposal open and children mid-turn. Everything shows interrupted, nothing resumes.
  await page.evaluate(()=>{const f=window.subFixture;
   f.rows.push({id:'R',mode:'agent',title:'Restarted task',status:'interrupted',provider:'claude',model:null},
@@ -234,5 +256,5 @@ export default async function check(page,url){
  }}
  await page.emulateMedia({colorScheme:'light'});await page.setViewportSize({width:1280,height:1000});
  assert(!errors.length,'Page errors: '+errors.join(' | '));
- return {checks:'Simple by default: subagent as one line (badge, role, state, Details) that opens to the full card and stays open, Hide details folds it back with focus on Details, ok and waiting orchestration calls hidden, failed one shown, no overflow at 320; Simple | Detailed switch saves Detailed; suggested reason and missing-reason flag, your-change marker, unedited approve exact, two children streaming with state/tokens/latest activity without expanding, literal activity text, duplicate start/seq ignored, expanded child stream ordered under interleaving and gap recovery, unfillable gap noted, focus kept while a sibling streams, Review changes → Merge by keyboard with project and reviewed head, Back returns focus, merged state on the child card, restart: interrupted parent/child/proposal shown, no resume button, new turn keeps the old proposal closed, Running view child state, light/dark 320-1280 fit',responsiveStates:fits.length};
+ return {checks:'Simple by default: subagent as one line (badge, role, state, Details) that opens to the full card and stays open, Hide details folds it back with focus on Details, ok and waiting orchestration calls hidden, failed one shown, no overflow at 320; Simple | Detailed switch saves Detailed; suggested reason and missing-reason flag, your-change marker, unedited approve exact, two children streaming with state/tokens/latest activity without expanding, literal activity text, duplicate start/seq ignored, expanded child stream ordered under interleaving and gap recovery, unfillable gap noted, focus kept while a sibling streams, Review changes → Merge by keyboard with project and reviewed head, Back returns focus, merged state on the child card, a child\'s Back names its parent and returns to it with focus on its Open button (script click, keyboard, Running view), restart: interrupted parent/child/proposal shown, no resume button, new turn keeps the old proposal closed, Running view child state, light/dark 320-1280 fit',responsiveStates:fits.length};
 }

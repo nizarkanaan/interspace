@@ -16,6 +16,16 @@ const isAgent=id=>row(id)?.mode==='agent'||row(id)?.kind==='research'||!!schedul
 const title=id=>row(id)?.title||'Agent task '+String(id).slice(0,8);
 // A subagent is a child task: its parent comes from the task row, the scheduler entry or the parent's events.
 const parentOf=id=>row(id)?.parent_task_id||scheduled(id)?.parent_task_id||S.parentOf(id)||null;
+// Back from a child opens its parent, but only one whose row still exists and is usable: a parent that is gone (or
+// unavailable) would open an empty "Agent task …" view, so Back then goes to the list as it does for a root task.
+const backTo=id=>{const p=id&&parentOf(id),r=p&&row(p);return r&&r.status!=='unavailable'?p:null;};
+const rootOf=id=>{let t=id;for(let i=0;t&&i<8;i++){const p=parentOf(t);if(!p)break;t=p;}return t;};
+const safe=s=>String(s).replace(/[^A-Za-z0-9_-]/g,'_');
+// The parent's place for a child: its subagent card, or the work line whose Open button names the child.
+const anchorOf=(stream,child)=>stream.querySelector('[data-child="'+CSS.escape(child)+'"]')?.closest('.card')||null;
+// Where the user left a parent to open one of its children: the child card's offset from the top of the scrolling
+// column, the raw scroll position for when the card is gone, and the focused control when it was in that card.
+const returns=new Map();
 const subOf=id=>{const p=parentOf(id);return p?S.children(p).find(c=>c.task_id===id)||null:null;};
 const providerOf=id=>row(id)?.provider||scheduled(id)?.provider||subOf(id)?.provider||null;
 const roleOf=id=>row(id)?.role||scheduled(id)?.role||subOf(id)?.role||(parentOf(id)?'subagent':'orchestrator');
@@ -67,7 +77,7 @@ function head(container,id,compact){
  if(provider)P.badge(provider,line);else line.append('your default provider');
  line.append(model?' · '+model:' · default model');
  if(isResearch(id))line.append(' · Research task: no project, so no files, commands or branch');
- if(parent&&!compact){const up=el('button','link-button','Part of “'+title(parent)+'”',container);up.type='button';up.onclick=()=>host.openAgent(parent);}
+ const home=backTo(id);if(home&&!compact){const up=el('button','link-button','Part of “'+title(home)+'”',container);up.type='button';up.onclick=()=>host.openAgent(home);}
  const w=S.workspace(id);if(w)el('p','footnote mono','Branch '+w.branch+' · base '+w.base_commit,container);
  if(w&&!compact&&window.interspaceReview&&!isResearch(id)){const r=el('button','','Review changes',container);r.type='button';r.id='review-head-'+String(id).replace(/[^A-Za-z0-9_-]/g,'_');r.onclick=()=>window.interspaceReview.open(id);}
 }
@@ -87,7 +97,10 @@ function renderAgent(){
  // Leaving the reader undoes the split: while `placed` stays true the page-level scroll guard keeps every other
  // page (Settings, the desks) pinned to the top. place(false) also leaves Focus, so leaving the task ends it.
  if($('agent-view').hidden){place(false);return;}
- head($('agent-head'),id);$('agent-stop').hidden=!stoppable(id);$('agent-back').textContent=isResearch(id)?'← Research':'← Tasks';
+ head($('agent-head'),id);$('agent-stop').hidden=!stoppable(id);
+ // A child's Back names its parent; the label is cut with an ellipsis, so the whole title is also its tooltip.
+ const up=backTo(id),backButton=$('agent-back');backButton.textContent=up?'← '+title(up):isResearch(id)?'← Research':'← Tasks';
+ if(up)backButton.title=title(up);else backButton.removeAttribute('title');
  scopeArea(id);
  outputsArea(id);
  const {tab,talk,split}=layoutTabs(id);
@@ -103,15 +116,36 @@ function renderAgent(){
  // In the split reader the conversation column scrolls on its own; elsewhere the window does.
  const stream=$('agent-stream'),chat=split?document.querySelector('#agent-view .agent-main'):null;
  const stick=chat?chat.scrollTop+chat.clientHeight>=chat.scrollHeight-80:innerHeight+scrollY>=document.documentElement.scrollHeight-80;
+ // Coming back from a child (Back, Part of, the sidebar row): its place is restored once, instead of the bottom.
+ const left=returns.get(id);returns.delete(id);
  S.render(stream,id);
  if(!stream.children.length&&!stream.querySelector('.empty'))el('p','empty muted','No activity yet. Describe what the agent should do.',stream);
- if(stick&&talk&&document.activeElement!==$('agent-message')){if(chat)chat.scrollTop=chat.scrollHeight;else scrollTo(0,document.documentElement.scrollHeight);}
+ if(left&&talk)restore(stream,chat,left);
+ else if(stick&&talk&&document.activeElement!==$('agent-message')){if(chat)chat.scrollTop=chat.scrollHeight;else scrollTo(0,document.documentElement.scrollHeight);}
  if(shownDraftFor!==id){shownDraftFor=id;$('agent-message').value=drafts.get(id)||'';}
  const reason=gate(id);$('agent-send').disabled=!!reason;
  $('agent-note').textContent=reason||'Enter sends · Shift+Enter adds a line · / for commands · @ to mention';
  if(tab==='corpus')corpusArea(id);
  if(tab==='report')reportArea(id);
  if(tab==='evidence')evidenceArea(id);
+}
+// Remembers where the user left a parent to open one of its children, anchored to the child's card: the stream above
+// the card can grow while the child is shown, so a saved pixel position alone would be wrong on return.
+function leave(parent,child){
+ const chat=placed?document.querySelector('#agent-view .agent-main'):null,anchor=anchorOf($('agent-stream'),child),active=document.activeElement;
+ const top=chat?chat.getBoundingClientRect().top:0,laid=!!anchor&&anchor.getClientRects().length>0;
+ returns.set(parent,{child,offset:laid?anchor.getBoundingClientRect().top-top:null,scroll:chat?chat.scrollTop:scrollY,focusId:anchor&&active?.id&&anchor.contains(active)?active.id:''});
+}
+// Puts the child's card back where it was, then focuses the control that opened the child without scrolling again. A
+// mouse click in WKWebView never focuses the button, so the Open button is also found from the child's id.
+function restore(stream,chat,left){
+ const anchor=anchorOf(stream,left.child),top=chat?chat.getBoundingClientRect().top:0;
+ if(anchor&&left.offset!=null&&anchor.getClientRects().length){const by=anchor.getBoundingClientRect().top-top-left.offset;if(chat)chat.scrollTop+=by;else scrollBy(0,by);}
+ else if(chat)chat.scrollTop=left.scroll;else scrollTo(0,left.scroll);
+ const key=safe(left.child),shown=n=>!!n&&stream.contains(n)&&n.getClientRects().length>0;
+ let target=[left.focusId&&$(left.focusId),$('work-open-'+key),$('sub-open-'+key),anchor?.querySelector('.sub-details')].find(shown);
+ if(!target&&shown(anchor)){anchor.tabIndex=-1;target=anchor;}
+ if(target)target.focus({preventScroll:true});
 }
 // A task's outputs (report and BibTeX), from its latest `outputs` event.
 function outputsArea(id){
@@ -381,12 +415,14 @@ window.interspaceAgent={
    if(focused){e.preventDefault();setFocus(false);}
   });
   $('agent-topbar-stop').onclick=()=>cancel(current);
-  $('agent-topbar-scope').onclick=()=>{if(!current)return;tabs.set(current,'details');refresh();$('agent-results').scrollTop=0;};$('agent-back').onclick=()=>host.navigate(current&&isResearch(current)?'research':'tasks');
+  $('agent-topbar-scope').onclick=()=>{if(!current)return;tabs.set(current,'details');refresh();$('agent-results').scrollTop=0;};
+  // Back from a child opens its parent; a root task, or a child whose parent is gone, goes back to its list.
+  $('agent-back').onclick=()=>{const up=current&&backTo(current);if(up)host.openAgent(up);else host.navigate(current&&isResearch(current)?'research':'tasks');};
  },
- isAgent,isResearch,stateOf:id=>S.status(id)?.state||null,researchRows:()=>(Array.isArray(state?.research?.tasks)?state.research.tasks:[]).filter(t=>t&&typeof t.id==='string'&&!t.parent_task_id&&!parentOf(t.id)),title:()=>title(current),current:()=>current,parentOf,
+ isAgent,isResearch,stateOf:id=>S.status(id)?.state||null,researchRows:()=>(Array.isArray(state?.research?.tasks)?state.research.tasks:[]).filter(t=>t&&typeof t.id==='string'&&!t.parent_task_id&&!parentOf(t.id)),title:()=>title(current),current:()=>current,parentOf,rootOf,
  setDraft(id,text){drafts.set(id,text);if(current===id)shownDraftFor=null;},
  focus(on){setFocus(on);},isFocused:()=>focused,
- open(id){current=id;S.sync(id);if(!scopes.has(id)||!scopeInfo(id).scope)loadScope(id);},
+ open(id){if(view==='agent'&&current&&current!==id&&parentOf(id)===current)leave(current,id);current=id;S.sync(id);if(!scopes.has(id)||!scopeInfo(id).scope)loadScope(id);},
  render(nextState,nextView){state=nextState;view=nextView;refresh();}
 };
 })();

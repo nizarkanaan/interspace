@@ -137,9 +137,13 @@ export default async function check(page,url){
   {id:'C',mode:'agent',kind:'research',project_id:null,parent_task_id:'R',role:'citation_checker',provider:'codex',model:null,title:'Citation checker: Call claims_pending, judge every claim only against its source abstract',status:'completed'},
   {id:'X',mode:'agent',kind:'research',project_id:null,title:'Restarted reply',status:'idle',provider:'claude',model:null}],
   history:{
+   // More than a screen of messages above the child's card, one of them still streaming, and some below it.
    R:[rEv('message',{role:'user',text:'R question'},'user_u1'),rEv('budget',spent(100)),
+    ...Array.from({length:30},(_,i)=>rEv('message',{role:'assistant',text:'Earlier step '+(i+1),final:true},'pre'+i)),
+    rEv('message_delta',{role:'assistant',text_delta:'Growing reply'},'grow'),
     rEv('subagent_started',{task_id:'C',role:'citation_checker',provider:'codex',model:null,access:'read',brief:'Check every claim.',state:'running'}),
-    rEv('subagent_finished',{task_id:'C',state:'completed'})],
+    rEv('subagent_finished',{task_id:'C',state:'completed'}),
+    ...Array.from({length:10},(_,i)=>rEv('message',{role:'assistant',text:'Later step '+(i+1),final:true},'post'+i))],
    C:[cEv('message',{role:'user',text:'CHILD BRIEF'},'user_u1'),cEv('budget',spent(999))],
    X:[xEv('message',{role:'user',text:'First question'},'user_u1','u1'),xEv('message',{role:'assistant',text:'First answer',final:true},'msg_1','u1'),
     xEv('message',{role:'user',text:'Fourth question'},'user_u4','u4'),xEv('message',{role:'assistant',text:'Fourth answer',final:true},'msg_1','u4')]}});
@@ -166,7 +170,67 @@ export default async function check(page,url){
  const rq=await text(page.locator('#agent-stream [data-item=user_u1]')),rb=await text(page.locator('#agent-stream [data-item="seq:2"]'));
  assert(rq.includes('R question')&&!rq.includes('CHILD BRIEF'),'Parent shows the child question: '+rq);
  assert(rb.includes('100')&&!rb.includes('999'),'Parent shows the child tokens: '+rb);
+
+ // Back returns to the parent, where you left it: Back names the parent, and Back, the "Part of" link and the parent's
+ // sidebar row each put the child's card back at its place in the column, with focus on its Open button. A click from
+ // a script never focuses the button, as a mouse click in WKWebView does not.
+ const C_TITLE='Citation checker: Call claims_pending, judge every claim only against its source abstract';
+ const heading=()=>text(page.locator('#heading'));
+ const shows=t=>page.waitForFunction(t=>document.querySelector('#heading').textContent===t,t);
+ const back=page.locator('#agent-back');
+ const offset=()=>page.evaluate(()=>{const main=document.querySelector('#agent-view .agent-main'),card=document.querySelector('#agent-stream [data-child=C]');return card.getBoundingClientRect().top-main.getBoundingClientRect().top;});
+ const park=()=>page.evaluate(()=>{const main=document.querySelector('#agent-view .agent-main'),card=document.querySelector('#agent-stream [data-child=C]');main.scrollTop+=card.getBoundingClientRect().top-main.getBoundingClientRect().top-300;});
+ const openChild=()=>page.evaluate(()=>document.getElementById('sub-open-C').click());
+ const returned=async(label,before)=>{
+  await page.waitForFunction(t=>document.querySelector('#heading').textContent===t&&document.querySelector('#agent-view.split'),R_TITLE);
+  assert(await page.locator('[data-agent-tab=details]').getAttribute('aria-pressed')==='true',label+': the results tab was not kept');
+  const after=await offset();
+  assert(Math.abs(after-before)<=4,label+': the card moved from '+before+' to '+after);
+  assert(await page.evaluate(()=>document.activeElement?.id)==='sub-open-C',label+': focus on '+await page.evaluate(()=>document.activeElement?.id||document.activeElement?.tagName));
+ };
+ await page.locator('[data-agent-tab=details]').click();
+ await park();let before=await offset();
+ assert(before>250&&before<350,'Card not parked mid-column: '+before);
+ await openChild();await shows(C_TITLE);
+ assert((await back.textContent())==='← '+R_TITLE&&await back.getAttribute('title')===R_TITLE,'Back does not name the parent: '+await back.textContent());
+ assert(await page.locator('[data-sidebar-task=R]').getAttribute('aria-current')==='page'&&await page.locator('[data-sidebar-task=C]').count()===0,'Sidebar does not mark the parent current');
+ await page.keyboard.press('Escape');
+ assert(await heading()===C_TITLE,'Esc left the child: '+await heading());
+ // The streaming message above the card grows while the child is shown: a saved pixel offset would be wrong.
+ await push(page,[rEv('message_delta',{role:'assistant',text_delta:Array.from({length:10},(_,i)=>'\n\nGrown line '+(i+1)).join('')},'grow')]);
+ await back.click();
+ await returned('Back',before);
+ await park();before=await offset();
+ await openChild();await shows(C_TITLE);
+ await page.getByRole('button',{name:'Part of “'+R_TITLE+'”',exact:true}).click();
+ await returned('Part of',before);
+ await park();before=await offset();
+ await openChild();await shows(C_TITLE);
+ await page.locator('[data-sidebar-task=R]').click();
+ await returned('Sidebar row',before);
+ // Narrow: the child has only Conversation and Details, and Back still names and opens the parent.
+ await page.setViewportSize({width:900,height:900});
+ await page.waitForFunction(()=>!document.querySelector('#agent-view.split'));
+ await page.locator('[data-agent-tab=conversation]').click();
+ await openChild();await shows(C_TITLE);
+ const narrowTabs=await page.locator('#agent-tabs [data-agent-tab]').evaluateAll(b=>b.filter(x=>!x.hidden).map(x=>x.textContent));
+ assert(JSON.stringify(narrowTabs)===JSON.stringify(['Conversation','Details']),'Child tabs at 900: '+JSON.stringify(narrowTabs));
+ assert((await back.textContent())==='← '+R_TITLE,'Back at 900: '+await back.textContent());
+ await back.click();await shows(R_TITLE);
+ assert(await page.evaluate(()=>document.activeElement?.id)==='sub-open-C','Focus at 900: '+await page.evaluate(()=>document.activeElement?.id));
+ // A long parent title is cut with an ellipsis, never overflowing, and the button keeps the whole title.
+ const backFits=await fit(page,'back-title',async()=>{if(await heading()!==C_TITLE){await openChild();await shows(C_TITLE);}},false,[320,390,600]);
+ await page.setViewportSize({width:320,height:900});
+ const cut=await back.evaluate(b=>({over:b.scrollWidth>b.clientWidth,text:b.textContent}));
+ assert(cut.over&&cut.text==='← '+R_TITLE,'Back at 320: '+JSON.stringify(cut));
+ await page.setViewportSize({width:1280,height:1000});
+ // The parent is gone: Back falls back to the Research list, and no "Part of" link is offered.
+ await page.evaluate(()=>{const f=window.rFixture;f.research.splice(f.research.findIndex(r=>r.id==='R'),1);f.setState();});
+ await page.waitForFunction(()=>document.querySelector('#agent-back').textContent==='← Research');
+ assert(await page.getByRole('button',{name:/^Part of/}).count()===0,'Part of offered for a parent that is gone');
+ await back.click();
+ assert(await heading()==='Research','Back with the parent gone: '+await heading());
  assert(!(await page.evaluate(()=>window.pwned)),'Script ran');
  assert(!errors.length,'Page errors: '+errors.join(' | '));
- return {checks:'Research sidebar entry from state.research.tasks with count, project desk without research rows, literal row text, New research question with research kind preselected, Literature review preset by keyboard and Verify my references, validation before scope_default, message preview, draft kept, scope_default {project_id:null,kind:research}, research scope editor without project/commands/network, source hints, exact agent_create with kind research and no project, no project switch, first message waiting in the composer, research chips, Back to Research, bibliography required and sent unchanged, project task unchanged with no kind and no research key, research key added by scope edit, research team read-only with citation checker and no Review, no-project install, light/dark 320-1280 fit, a restarted session\'s colliding msg_1 kept in turns 4 and 7 under turn-scoped keys, parent and child keep their own cached cards',responsiveStates:fits.length+fitsNew.length};
+ return {checks:'Research sidebar entry from state.research.tasks with count, project desk without research rows, literal row text, New research question with research kind preselected, Literature review preset by keyboard and Verify my references, validation before scope_default, message preview, draft kept, scope_default {project_id:null,kind:research}, research scope editor without project/commands/network, source hints, exact agent_create with kind research and no project, no project switch, first message waiting in the composer, research chips, Back to Research, bibliography required and sent unchanged, project task unchanged with no kind and no research key, research key added by scope edit, research team read-only with citation checker and no Review, no-project install, light/dark 320-1280 fit, a restarted session\'s colliding msg_1 kept in turns 4 and 7 under turn-scoped keys, parent and child keep their own cached cards, Back names the parent and returns to it (also through Part of and the sidebar row) with the child card where it was after the stream above it grew and focus on its Open button, sidebar marks the parent current, Esc stays, Conversation and Details only at 900, long parent title cut at 320/390/600, parent gone falls back to Research without Part of',responsiveStates:fits.length+fitsNew.length+backFits.length};
 }

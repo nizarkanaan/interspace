@@ -69,7 +69,8 @@ function renderSidebar(){
  $('sidebar-new').textContent=research?'New research question':'New code task';
  document.querySelector('.project-nav').hidden=research;
  const running=(state?.scheduler?.running||[]).filter(t=>!t.parent_task_id).length;$('running-count').textContent=running?String(running):'';
- const current=view==='agent'?A.current():view==='detail'?state.task_id:null;
+ // A subagent has no row of its own: while it is shown, its root task's row stays current.
+ const current=view==='agent'?A.rootOf(A.current()):view==='detail'?state.task_id:null;
  const rows=research?A.researchRows():(state.tasks||[]).filter(t=>t.kind!=='research');
  window.interspaceSidebar.renderUsage($('sidebar-usage'),state.provider_limits||{});
  window.interspaceSidebar.render($('sidebar-tasks'),{mode,rows,currentId:current,open:id=>openTask(id),stateOf:id=>A.stateOf(id),menu:(id,at)=>window.interspaceTaskMenu.open(id,at)});

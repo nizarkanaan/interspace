@@ -85,10 +85,10 @@ export const requests=(page,method)=>page.evaluate(m=>window.rFixture.requests.f
 export const push=(page,events)=>page.evaluate(list=>window.rFixture.push(list),events);
 export const assert=(v,m)=>{if(!v)throw Error(m);};
 export const text=async loc=>(await loc.textContent())||'';
-// Light/dark at 320–1280: no horizontal page scroll. `show` re-opens the surface after each resize.
-export async function fit(page,label,show,shots){
+// Light/dark at 320–1280 (or the given widths): no horizontal page scroll. `show` re-opens the surface after each resize.
+export async function fit(page,label,show,shots,widths=[320,390,760,1024,1280]){
  const out=[];
- for(const colorScheme of ['light','dark']){await page.emulateMedia({colorScheme});for(const width of [320,390,760,1024,1280]){
+ for(const colorScheme of ['light','dark']){await page.emulateMedia({colorScheme});for(const width of widths){
   await page.setViewportSize({width,height:900});await page.waitForFunction(()=>innerWidth>=1100||!document.querySelector('#agent-view.split'));if(show)await show();
   const f=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}));
   assert(f.scroll<=f.width,'Overflow '+label+' '+width+' '+colorScheme+': '+f.scroll);out.push(f);
