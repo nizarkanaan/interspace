@@ -18,9 +18,10 @@ for relative in ['app/backend', 'app/ui', 'pilot']:
     if destination.exists():
         shutil.rmtree(destination)
     shutil.copytree(root / relative, destination, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+shutil.copy2(root / 'app/macos/AppIcon.icns', resources / 'AppIcon.icns')
 with (contents / 'Info.plist').open('wb') as f:
     plistlib.dump({'CFBundleExecutable':'Interspace','CFBundleIdentifier':'local.interspace.desktop',
-                  'CFBundleName':'Interspace','CFBundleDisplayName':'Interspace','CFBundlePackageType':'APPL',
+                  'CFBundleName':'Interspace','CFBundleDisplayName':'Interspace','CFBundleIconFile':'AppIcon','CFBundlePackageType':'APPL',
                   'CFBundleShortVersionString':'0.1.0','CFBundleVersion':'1','LSMinimumSystemVersion':'13.0',
                   'NSHighResolutionCapable':True,'NSHumanReadableCopyright':'Interspace local development build'},f)
 cache = root / 'workspace-data/swift-module-cache'

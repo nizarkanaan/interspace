@@ -137,6 +137,8 @@ python3 scripts/build-macos-app.py
 
 This creates `dist/Interspace.app` from source. No personal state, credentials or prior reports are bundled.
 
+The app icon is `app/macos/AppIcon.icns`: the sidebar's orbit mark on an accent-green tile. To change it, edit `scripts/make-app-icon.swift`, then run `scripts/make-app-icon.sh` to rebuild the `.icns`.
+
 For isolated development state, the native executable supports `--data-root /absolute/test/directory`. Do not point that directory inside a source project.
 
 ## License
