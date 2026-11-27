@@ -51,6 +51,8 @@ def fake_runtime(status=None, sign_in=None, error=None, sign_out=None):
 class ProvidersApiTests(unittest.TestCase):
     def setUp(self):
         self.app = FakeApp()
+        providers_api.clear_models_cache()
+        self.addCleanup(providers_api.clear_models_cache)
         self.runtimes = {
             'claude': fake_runtime({'provider': 'claude', 'state': 'signed_in', 'account': 'Claude subscription',
                                     'detail': 'ok'},
@@ -69,7 +71,8 @@ class ProvidersApiTests(unittest.TestCase):
 
     def test_methods_are_the_contract(self):
         self.assertEqual(set(providers_api.METHODS),
-                         {'providers_list', 'provider_sign_in', 'provider_sign_out', 'provider_status', 'routing_update'})
+                         {'providers_list', 'provider_models', 'provider_sign_in', 'provider_sign_out', 'provider_status',
+                          'routing_update'})
 
     def test_sign_in_completion_updates_state_and_publishes(self):
         self.call('provider_sign_in', {'provider': 'codex'})
@@ -105,6 +108,78 @@ class ProvidersApiTests(unittest.TestCase):
         self.assertNotIn('auth.json', str(raised.exception))
         with self.assertRaisesRegex(ValueError, 'Unknown provider.'):
             self.call('provider_sign_out', {'provider': 'gemini'})
+
+    def models_runtime(self, answers):
+        """A Codex runtime whose `models` returns (or raises) the next of `answers`; counts its calls."""
+        class Runtime:
+            calls = 0
+
+            @classmethod
+            def models(cls, app):
+                cls.calls += 1
+                answer = answers[min(cls.calls, len(answers)) - 1]
+                if isinstance(answer, Exception):
+                    raise answer
+                return answer
+        self.runtimes['codex'] = Runtime
+        return Runtime
+
+    def test_provider_models_claude_comes_from_the_registry(self):
+        result = self.call('provider_models', {'provider': 'claude'})
+        self.assertEqual(set(result), {'provider', 'models', 'error'})
+        self.assertEqual(result['provider'], 'claude')
+        self.assertEqual(result['error'], '')
+        self.assertEqual([m['id'] for m in result['models']], ['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-haiku-5-5'])
+        for model in result['models']:
+            self.assertEqual(set(model), {'id', 'is_default', 'default_effort', 'efforts'})
+            self.assertEqual(model['default_effort'], 'low')
+            self.assertEqual(model['efforts'], ['low', 'medium', 'high', 'xhigh', 'max'])
+        self.assertEqual([m['id'] for m in result['models'] if m['is_default']], ['claude-sonnet-5-5'])
+
+    def test_provider_models_codex_is_cached_and_cut_to_the_contract(self):
+        runtime = self.models_runtime([[{'id': 'gpt-x', 'is_default': True, 'default_effort': 'medium',
+                                         'efforts': ['low', 'medium'], 'token': 'secret'}]])
+        first = self.call('provider_models', {'provider': 'codex'})
+        self.assertEqual(first, {'provider': 'codex', 'error': '', 'models': [
+            {'id': 'gpt-x', 'is_default': True, 'default_effort': 'medium', 'efforts': ['low', 'medium']}]})
+        first['models'].clear()  # A caller's edits never reach the cache.
+        self.assertEqual(len(self.call('provider_models', {'provider': 'codex'})['models']), 1)
+        self.assertEqual(runtime.calls, 1)
+
+    def test_provider_models_failure_is_a_sentence_and_cached(self):
+        runtime = self.models_runtime([ValueError('Sign in to Codex to see its models.')])
+        for _ in range(2):
+            self.assertEqual(self.call('provider_models', {'provider': 'codex'}),
+                             {'provider': 'codex', 'models': [], 'error': 'Sign in to Codex to see its models.'})
+        self.assertEqual(runtime.calls, 1)
+        self.models_runtime([RuntimeError('/x/auth.json')])
+        providers_api.clear_models_cache()
+        result = self.call('provider_models', {'provider': 'codex'})
+        self.assertEqual(result['models'], [])
+        self.assertNotIn('auth.json', result['error'])
+        self.assertTrue(result['error'])
+
+    def test_sign_out_and_finished_sign_in_clear_the_models_cache(self):
+        good = [{'id': 'gpt-x', 'is_default': True, 'default_effort': None, 'efforts': []}]
+        runtime = self.models_runtime([ValueError('Sign in to Codex to see its models.'), good, good, good])
+        self.assertEqual(self.call('provider_models', {'provider': 'codex'})['models'], [])
+        self.assertEqual(self.call('provider_models', {'provider': 'codex'})['models'], [])  # Still cached.
+        runtime.begin_sign_in = classmethod(lambda cls, app, on_finish=None: (
+            cls.finishers.append(on_finish) or {'provider': 'codex', 'kind': 'device',
+                                                'url': 'https://auth.openai.com/codex/device', 'code': 'A-1',
+                                                'detail': ''}))
+        runtime.auth_status = classmethod(lambda cls, app: {'provider': 'codex', 'state': 'signed_in',
+                                                            'account': 'x', 'detail': ''})
+        runtime.finishers = []
+        self.call('provider_sign_in', {'provider': 'codex'})
+        runtime.finishers[-1]('success')
+        self.assertEqual(len(self.call('provider_models', {'provider': 'codex'})['models']), 1)
+        self.assertEqual(runtime.calls, 2)
+        runtime.sign_out = classmethod(lambda cls, app: {'provider': 'codex', 'state': 'signed_out', 'account': None,
+                                                         'detail': ''})
+        self.call('provider_sign_out', {'provider': 'codex'})
+        self.call('provider_models', {'provider': 'codex'})
+        self.assertEqual(runtime.calls, 3)
 
     def test_providers_list(self):
         result = self.call('providers_list', {})

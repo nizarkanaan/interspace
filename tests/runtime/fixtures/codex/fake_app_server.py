@@ -17,6 +17,9 @@ Scenario keys:
   thread_start  fields merged into the `thread/start` result (to break the sandbox echo, for example)
   effort_refused  true: `turn/start` is answered with a JSON-RPC error naming the reasoning effort (every
                 `turn/start` params are in the log, as for any message)
+  models        the `model/list` models (objects as Codex sends them); answered under `data`, or under the key
+                `models_key`, `models_page` at a time (default all) with `nextCursor` while more remain
+  models_hang   true: `model/list` is never answered
   exit_on       a request method after which the process exits at once
   turns         a list, one entry per `turn/start`, each a list of steps:
   by_input      [{"contains": "<text>", "turns": [...]}, ...]: the first entry whose text is in the first
@@ -244,6 +247,15 @@ def handle(message):
         save_account(None)
         send({'id': request_id, 'result': {}})
         send({'method': 'account/updated', 'params': {'authMode': None, 'planType': None}})
+    elif method == 'model/list':
+        if scenario.get('models_hang'):
+            return
+        items = scenario.get('models', [])
+        size = scenario.get('models_page') or max(len(items), 1)
+        start = int(params.get('cursor') or 0)
+        result = {scenario.get('models_key', 'data'): items[start:start + size]}
+        result['nextCursor'] = str(start + size) if start + size < len(items) else None
+        send({'id': request_id, 'result': result})
     elif method == 'thread/start':
         mcp_config.update(((params.get('config') or {}).get('mcp_servers') or {}))
         result = {'thread': {'id': THREAD, 'ephemeral': True, 'status': {'type': 'idle'}},

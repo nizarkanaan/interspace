@@ -262,6 +262,11 @@ class CodexRuntime:
         return dict(cls.auth(app).begin_device_sign_in(on_finish), provider=cls.name)
 
     @classmethod
+    def models(cls, app):
+        """The signed-in account's models (codex_auth.CodexAuth.list_models); AuthError when it cannot say."""
+        return cls.auth(app).list_models()
+
+    @classmethod
     def sign_out(cls, app):
         return dict(cls.auth(app).sign_out(), provider=cls.name)
 

@@ -7,6 +7,7 @@ account detail beyond the display name can reach the UI.
 from concurrent.futures import ThreadPoolExecutor
 import copy
 import re
+import threading
 
 import routing
 from runtime import registry
@@ -63,6 +64,46 @@ def provider_status(app, params):
     return _status(app, _provider(params))
 
 
+_models_lock = threading.Lock()
+_models_cache = {}  # provider name -> the answer, failures included, until sign-in or sign-out clears it.
+
+
+def clear_models_cache(name=None):
+    with _models_lock:
+        if name is None:
+            _models_cache.clear()
+        else:
+            _models_cache.pop(name, None)
+
+
+def _claude_models(record):
+    return [{'id': model, 'is_default': model == record['default_model'], 'default_effort': 'low',
+             'efforts': list(record['efforts'])} for model in record['models']]
+
+
+def provider_models(app, params):
+    """The models and efforts a provider's pickers offer: Claude from the registry, Codex live and cached."""
+    name = _provider(params)
+    record = registry.get(name)
+    if record['models']:
+        return {'provider': name, 'models': _claude_models(record), 'error': ''}
+    with _models_lock:  # Held while Codex answers (at most 10 s), so renders share one process.
+        cached = _models_cache.get(name)
+        if cached is None:
+            try:
+                models = registry.runtime_class(name).models(app)
+                cached = {'provider': name, 'error': '', 'models': [
+                    {'id': m['id'], 'is_default': m['is_default'] is True, 'default_effort': m['default_effort'],
+                     'efforts': list(m['efforts'])} for m in models]}
+            except ValueError as error:
+                cached = {'provider': name, 'models': [], 'error': _text(str(error))}
+            except Exception:
+                cached = {'provider': name, 'models': [],
+                          'error': record['title'] + ' could not list its models. Check its installation.'}
+            _models_cache[name] = cached
+        return copy.deepcopy(cached)
+
+
 def _remember(app, status):
     """Put a provider's latest status in the published state (`provider_status`), so the UI learns it there."""
     with app.lock:
@@ -73,6 +114,7 @@ def _remember(app, status):
 def _finished(app, name):
     """A device sign-in ended (succeeded, failed or expired): read the status again and publish it."""
     def report(outcome):
+        clear_models_cache(name)
         _remember(app, _status(app, name))
     return report
 
@@ -118,6 +160,7 @@ def provider_sign_out(app, params):
         raise ValueError(_text(str(error)) or title + ' could not sign out.') from None
     except Exception:
         raise ValueError(title + ' could not sign out. Check its installation.') from None
+    clear_models_cache(name)
     status = _clean(name, result)
     if status is None:
         raise ValueError(title + ' sent a sign-in status Interspace does not understand.')
@@ -136,6 +179,7 @@ def routing_update(app, params):
 METHODS = {
     'providers_list': providers_list,
     'provider_sign_in': provider_sign_in,
+    'provider_models': provider_models,
     'provider_sign_out': provider_sign_out,
     'provider_status': provider_status,
     'routing_update': routing_update,

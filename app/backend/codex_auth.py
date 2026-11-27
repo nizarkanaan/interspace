@@ -28,6 +28,8 @@ class AuthError(ValueError):
 CREDENTIAL_OVERRIDES = (('cli_auth_credentials_store', 'file'), ('forced_login_method', 'chatgpt'))
 CLIENT_INFO = {'name': 'interspace', 'title': 'Interspace', 'version': '1'}
 REQUEST_TIMEOUT_S = 15
+MODELS_TIMEOUT_S = 10  # Total deadline for `list_models`, all pages and the account check included.
+MAX_MODEL_PAGES = 10
 SIGN_IN_TIMEOUT_S = 900  # Device codes expire well within this; the server is stopped after it.
 MAX_LINE_BYTES = 1024 * 1024
 URL_RE = re.compile(r'https://[A-Za-z0-9.-]+(/[A-Za-z0-9._~/%-]*)?\Z')
@@ -276,6 +278,32 @@ OUTCOME_DETAILS = {
 }
 
 
+def _model(item):
+    """One `model/list` entry cut to the contract, or None when it is not a usable model."""
+    from runtime import registry
+    if not isinstance(item, dict) or not isinstance(item.get('id'), str):
+        return None
+    try:
+        model = registry.check_model('codex', item['id'])
+    except ValueError:
+        return None
+    efforts = []
+    for entry in item.get('supportedReasoningEfforts') or []:
+        effort = entry.get('reasoningEffort') if isinstance(entry, dict) else entry
+        try:
+            ok = isinstance(effort, str) and registry.check_effort('codex', effort)
+        except ValueError:
+            continue
+        if ok and effort not in efforts:
+            efforts.append(effort)
+    default = item.get('defaultReasoningEffort')
+    try:
+        default = registry.check_effort('codex', default) if isinstance(default, str) else None
+    except ValueError:
+        default = None
+    return {'id': model, 'is_default': item.get('isDefault') is True, 'default_effort': default, 'efforts': efforts}
+
+
 class CodexAuth:
     """Codex sign-in helper. `command` is the codex argv prefix; `codex_home` and `environ` select the home."""
 
@@ -353,6 +381,48 @@ class CodexAuth:
         else:
             detail = OUTCOME_DETAILS.get(outcome, 'Sign in to Codex with your ChatGPT account.')
         return {'state': 'signed_out', 'account': None, 'detail': detail}
+
+    def list_models(self):
+        """The signed-in account's models: [{'id', 'is_default', 'default_effort', 'efforts'}], else AuthError.
+
+        Reads `account/read` first, since a signed-out account also answers `model/list` with another list.
+        """
+        if not self.command:
+            raise AuthError('Install Codex CLI or the ChatGPT Mac app to see its models.')
+        deadline = time.monotonic() + MODELS_TIMEOUT_S
+
+        def left():
+            return max(deadline - time.monotonic(), 0.1)
+        server = self._server()
+        try:
+            if self._read_account_within(server, left()) is None:
+                raise AuthError('Sign in to Codex to see its models.')
+            found, cursor = [], None
+            for _ in range(MAX_MODEL_PAGES):
+                if time.monotonic() >= deadline:
+                    raise AuthError('Codex took too long to list its models.')
+                result = server.request('model/list', {'cursor': cursor} if cursor else {}, left())
+                page = result.get('data', result.get('models'))
+                if not isinstance(page, list):
+                    raise AuthError('Codex sent a model list Interspace does not understand.')
+                found += [m for m in map(_model, page) if m]
+                cursor = result.get('nextCursor')
+                if not isinstance(cursor, str) or not cursor:
+                    break
+            return found
+        except AuthError as error:
+            if str(error).startswith('Codex stopped answering'):
+                raise AuthError('Codex did not list its models in time. Try again.') from None
+            raise
+        finally:
+            server.close()
+
+    def _read_account_within(self, server, timeout):
+        result = server.request('account/read', {'refreshToken': False}, timeout)
+        account = result.get('account')
+        if account is not None and not isinstance(account, dict):
+            raise AuthError('Codex sent an account Interspace does not understand.')
+        return account
 
     def begin_device_sign_in(self, on_finish=None):
         """Start a device sign-in; returns {'kind': 'device', 'url', 'code', 'detail'} and keeps waiting.

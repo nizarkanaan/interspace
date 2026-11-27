@@ -206,6 +206,58 @@ class SignInTests(CodexAuthCase):
         self.assertTrue(issubclass(codex_auth.AuthError, ValueError))
 
 
+class ModelListTests(CodexAuthCase):
+    MODELS = [
+        {'id': 'gpt-a', 'isDefault': True, 'defaultReasoningEffort': 'medium',
+         'supportedReasoningEfforts': [{'reasoningEffort': 'low', 'description': 'Fast'},
+                                       {'reasoningEffort': 'medium', 'description': 'Balanced'}, 'high',
+                                       {'reasoningEffort': 'Not Valid!'}]},
+        {'id': 'gpt-b', 'isDefault': False, 'defaultReasoningEffort': 'low', 'supportedReasoningEfforts': ['low']},
+        {'id': 'bad id with spaces', 'isDefault': False, 'supportedReasoningEfforts': []},
+    ]
+    EXPECTED = [{'id': 'gpt-a', 'is_default': True, 'default_effort': 'medium', 'efforts': ['low', 'medium', 'high']},
+                {'id': 'gpt-b', 'is_default': False, 'default_effort': 'low', 'efforts': ['low']}]
+
+    def list_models(self):
+        return codex.CodexRuntime.models(self.app)
+
+    def test_signed_in_lists_models_with_plain_efforts(self):
+        self.scenario({'models': self.MODELS})
+        self.assertEqual(self.list_models(), self.EXPECTED)
+        self.assertEqual(len(self.sent('account/read')), 1)
+        self.assertEqual(len(self.sent('model/list')), 1)
+
+    def test_models_key_and_pages_are_followed(self):
+        self.scenario({'models': self.MODELS, 'models_key': 'models', 'models_page': 1})
+        self.assertEqual(self.list_models(), self.EXPECTED)
+        self.assertEqual(len(self.sent('model/list')), 3)
+
+    def test_signed_out_is_refused_before_model_list(self):
+        self.scenario({'models': self.MODELS, 'account': None})
+        with self.assertRaisesRegex(codex_auth.AuthError, 'Sign in to Codex to see its models.'):
+            self.list_models()
+        self.assertEqual(self.sent('model/list'), [])
+
+    def test_hung_model_list_times_out_and_the_process_is_gone(self):
+        self.scenario({'models_hang': True})
+        started = time.monotonic()
+        with self.assertRaises(codex_auth.AuthError):
+            self.list_models()
+        self.assertLess(time.monotonic() - started, 11)
+        pid = self.launches()[0]['pid']
+        self.assertTrue(self.wait_until(lambda: not _alive(pid)))
+
+
+def _alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 class LegacyCodexAuthTests(CodexAuthCase):
     def test_legacy_status_uses_the_given_home(self):
         log = self.root / 'cli.log'

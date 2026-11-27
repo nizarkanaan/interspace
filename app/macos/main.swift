@@ -10,7 +10,7 @@ let allowedMethods: Set<String> = [
     "agent_create", "agent_message", "agent_answer", "agent_cancel", "task_events", "task_blob",
     "scope_get", "scope_update", "scope_approve", "scope_default", "scheduler_settings",
     // Multi-provider extensions (docs/superpowers/specs/multi-provider): providers, teams, review and merge
-    "providers_list", "provider_sign_in", "provider_sign_out", "provider_status", "routing_update", "team_answer",
+    "providers_list", "provider_models", "provider_sign_in", "provider_sign_out", "provider_status", "routing_update", "team_answer",
     "review_summary", "review_merge", "review_branches",
     // Research workspace (docs/superpowers/specs/research): sources settings and task outputs
     "research_sources", "research_credential_set", "research_credential_delete", "research_test", "research_usage",
