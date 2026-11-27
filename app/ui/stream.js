@@ -437,13 +437,21 @@ function answer(taskId,key,decision,text){
  it.sending=true;it.answerError='';it.version++;changed(taskId);
  request('agent_answer',params,{manual:true}).then(()=>{it.sent=decision;}).catch(error=>{it.answerError=error.message||'The answer was not accepted.';}).finally(()=>{it.sending=false;it.version++;changed(taskId);});
 }
+// A deleted task leaves with its subagents: their conversations, nodes and parent links are dropped, so nothing that
+// lists loaded tasks (Running now) shows them again as "Agent task …".
+function forget(id){
+ const gone=new Set([id]);
+ for(let grew=true;grew;){grew=false;for(const [child,parent] of parents)if(gone.has(parent)&&!gone.has(child)){gone.add(child);grew=true;}}
+ for(const t of gone){const m=tasks.get(t);if(m)for(const child of m.children.keys())gone.add(child);}
+ for(const t of gone){tasks.delete(t);parents.delete(t);}
+}
 function optimistic(taskId,text,clientId){const m=model(taskId);item(m,'client:'+clientId).message={role:'user',text,final:true,pending:true};changed(taskId);}
 function failed(taskId,clientId,reason){const it=model(taskId).items.get('client:'+clientId);if(!it)return;it.message.failed=reason;it.version++;changed(taskId);}
 
 window.interspaceStream={
  // showTab(tab) switches the task view's results tab; isRoot(id) says whether a task is a root research task.
  init(options){request=options.request;hostChanged=options.changed||hostChanged;open=options.open||open;rowStatus=options.rowStatus||rowStatus;stampOf=options.stamp||stampOf;showTab=options.showTab||showTab;isRoot=options.isRoot||isRoot;changed=id=>{hostChanged(id);childChanged(id);};},
- receive,sync:id=>sync(model(id)),render,activity,childStatus,optimistic,failed,statusText,budgetText,
+ receive,sync:id=>sync(model(id)),render,activity,childStatus,optimistic,failed,forget,statusText,budgetText,
  has:id=>tasks.has(id)&&tasks.get(id).lastSeq>0,ids:()=>[...tasks.keys()],
  // How many steps the task's last main-conversation render folded into work lines (0 outside Simple's chat view).
  folded:id=>tasks.get(id)?.folded||0,

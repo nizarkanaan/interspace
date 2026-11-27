@@ -143,7 +143,7 @@ window.interspaceTaskMenu.init({request,error,notice:text=>info(text),open:id=>o
  rowOf:id=>[...(state?.tasks||[]),...(state?.research?.tasks||[])].find(t=>t&&t.id===id)||null,
  stateOf:id=>window.interspaceAgent.stateOf(id),isResearch:id=>window.interspaceAgent.isResearch(id),
  review:window.interspaceReview?id=>{openTask(id).then(()=>window.interspaceReview.open(id));}:null,
- deleted:(id,research,note)=>{const showing=view==='agent'&&window.interspaceAgent.current()===id;if(showing)navigate(research?'research':'tasks',null,note);else{info(note);render();}}});
+ deleted:(id,research,note)=>{window.interspaceStream.forget(id);const showing=view==='agent'&&window.interspaceAgent.current()===id;if(showing)navigate(research?'research':'tasks',null,note);else{info(note);render();}}});
 P.init({request,changed:()=>{if(state)render();}});
 R.init({request,changed:()=>{if(state)render();}});
 window.interspaceDisplay.init({request,changed:()=>{if(state)window.interspaceAgent.render(state,view);}});

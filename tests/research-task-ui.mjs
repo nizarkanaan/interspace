@@ -231,7 +231,35 @@ export default async function check(page,url){
  assert(await page.getByRole('button',{name:/^Part of/}).count()===0,'Part of offered for a parent that is gone');
  await back.click();
  assert(await heading()==='Research','Back with the parent gone: '+await heading());
+ // Running now forgets a deleted task: its column and its subagents' rows leave with it, and nothing is left behind
+ // as "Agent task …" with the old conversation.
+ const dEv=evFor('D'),dcEv=evFor('DC');
+ await install(page,url,{rows:[],display:{detail:'detailed'},researchRows:[
+  {id:'D',mode:'agent',kind:'research',project_id:null,title:'Deleted question',status:'idle',provider:'claude',model:null},
+  {id:'DC',mode:'agent',kind:'research',project_id:null,parent_task_id:'D',role:'citation_checker',provider:'codex',model:null,title:'Citation checker',status:'completed'},
+  {id:'K',mode:'agent',kind:'research',project_id:null,title:'Kept question',status:'idle',provider:'claude',model:null}],
+  history:{D:[dEv('message',{role:'user',text:'D question'},'user_u1'),
+    dEv('subagent_started',{task_id:'DC',role:'citation_checker',provider:'codex',model:null,access:'read',brief:'Check.',state:'running'}),
+    dEv('subagent_finished',{task_id:'DC',state:'completed'}),dEv('message',{role:'assistant',text:'D answer',final:true},'msg_1')],
+   DC:[dcEv('message',{role:'user',text:'DC brief'},'user_u1')],K:[]}});
+ await nav.click();await page.locator('[data-open-task=D]').click();
+ await page.waitForFunction(()=>document.querySelector('#sub-open-DC'));
+ await page.locator('#sub-open-DC').click();
+ await page.waitForFunction(()=>document.querySelector('#agent-stream').textContent.includes('DC brief'));
+ await page.locator('[data-view=running]').click();
+ await page.waitForFunction(()=>document.querySelector('#running-grid [data-task=D]'));
+ await nav.click();
+ await page.locator('[data-sidebar-task=D]').click({button:'right'});await page.locator('.task-menu [data-action=delete]').click();
+ await page.locator('#delete-confirm').click();
+ await page.waitForFunction(()=>(document.getElementById('info').textContent||'').includes('Deleted'));
+ await page.locator('[data-view=running]').click();
+ await page.evaluate(()=>new Promise(r=>setTimeout(r,50)));
+ const columns=await page.evaluate(()=>[...document.querySelectorAll('#running-grid [data-task]')].map(c=>c.dataset.task));
+ assert(JSON.stringify(columns)===JSON.stringify(['K']),'Running after delete: '+JSON.stringify(columns));
+ assert(!(await page.evaluate(()=>window.interspaceStream.ids())).some(id=>id==='D'||id==='DC'),'Deleted conversations kept: '+JSON.stringify(await page.evaluate(()=>window.interspaceStream.ids())));
+ const runningText=await text(page.locator('#running-view'));
+ assert(!runningText.includes('Agent task')&&!runningText.includes('Deleted question')&&!runningText.includes('Citation checker'),'Deleted task left in Running: '+runningText);
  assert(!(await page.evaluate(()=>window.pwned)),'Script ran');
  assert(!errors.length,'Page errors: '+errors.join(' | '));
- return {checks:'Research sidebar entry from state.research.tasks with count, project desk without research rows, literal row text, New research question with research kind preselected, Literature review preset by keyboard and Verify my references, validation before scope_default, message preview, draft kept, scope_default {project_id:null,kind:research}, research scope editor without project/commands/network, source hints, exact agent_create with kind research and no project, no project switch, first message waiting in the composer, research chips, Back to Research, bibliography required and sent unchanged, project task unchanged with no kind and no research key, research key added by scope edit, research team read-only with citation checker and no Review, no-project install, light/dark 320-1280 fit, a restarted session\'s colliding msg_1 kept in turns 4 and 7 and its colliding rs_2 in turn 4 under turn-scoped keys, parent and child keep their own cached cards, Back names the parent and returns to it (also through Part of and the sidebar row) with the child card where it was after the stream above it grew and focus on its Open button, sidebar marks the parent current, Esc stays, Conversation and Details only at 900, long parent title cut at 320/390/600, parent gone falls back to Research without Part of',responsiveStates:fits.length+fitsNew.length+backFits.length};
+ return {checks:'Research sidebar entry from state.research.tasks with count, project desk without research rows, literal row text, New research question with research kind preselected, Literature review preset by keyboard and Verify my references, validation before scope_default, message preview, draft kept, scope_default {project_id:null,kind:research}, research scope editor without project/commands/network, source hints, exact agent_create with kind research and no project, no project switch, first message waiting in the composer, research chips, Back to Research, bibliography required and sent unchanged, project task unchanged with no kind and no research key, research key added by scope edit, research team read-only with citation checker and no Review, no-project install, light/dark 320-1280 fit, a restarted session\'s colliding msg_1 kept in turns 4 and 7 and its colliding rs_2 in turn 4 under turn-scoped keys, parent and child keep their own cached cards, Back names the parent and returns to it (also through Part of and the sidebar row) with the child card where it was after the stream above it grew and focus on its Open button, sidebar marks the parent current, Esc stays, Conversation and Details only at 900, long parent title cut at 320/390/600, parent gone falls back to Research without Part of, Running now forgets a deleted task and its subagents',responsiveStates:fits.length+fitsNew.length+backFits.length};
 }

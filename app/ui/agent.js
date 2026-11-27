@@ -375,7 +375,7 @@ function childRows(list,id){
 function columnIds(){
  const ids=[];const add=raw=>{const id=parentOf(raw)||raw;if(id&&!ids.includes(id))ids.push(id);};
  for(const t of state?.scheduler?.running||[])add(t.task_id);for(const t of state?.scheduler?.queued||[])add(t.task_id);
- for(const t of allRows())if(t&&(t.mode==='agent'||t.kind==='research'))add(t.id);for(const id of S.ids())add(id);
+ for(const t of allRows())if(t&&(t.mode==='agent'||t.kind==='research'))add(t.id);for(const id of S.ids())if(row(id)||scheduled(id))add(id);
  return ids;
 }
 function renderRunning(){
