@@ -40,13 +40,14 @@ function fillProviders(value){
 let built=null,lastModel='';
 const modelNode=()=>$('new-model'),effortNode=()=>$('new-effort');
 const pickedProvider=()=>$('new-provider').value;
-function buildEffort(value){
+function buildEffort(value,drop){
  effortNode()?.parentElement.remove();
  const route=P.routeFor('orchestrator'),choice=resolved(pickedProvider(),modelNode()?.value.trim()||'','');
  // The model the effort list belongs to: the routing's own, until another model is picked.
  P.effortSelect($('new-model-slot'),{id:'new-effort',label:'Orchestrator effort (optional)',provider:choice.provider||'',model:choice.model||'',value,
   defaultLabel:choice.keepsRoute&&route?.effort?'Default (your default: '+route.effort+')':undefined});
- effortNode().onchange=()=>host.changed?.();
+ effortNode().onchange=()=>{effortNode().setCustomValidity('');host.changed?.();};
+ if(drop)effortNode().setModel(choice.provider||'',choice.model||'');  // Drops the effort when the new model does not offer it.
 }
 function buildModel(model){
  const route=P.routeFor('orchestrator'),provider=pickedProvider()||route?.provider||'';
@@ -55,7 +56,7 @@ function buildModel(model){
  lastModel=model;
  node.onchange=node.oninput=()=>{
   const m=modelNode();m.setCustomValidity('');
-  if(m.value!==lastModel){lastModel=m.value;buildEffort('');}
+  if(m.value!==lastModel){lastModel=m.value;buildEffort(effortNode()?.value||'',true);}
   host.changed?.();
  };
 }
@@ -109,7 +110,7 @@ function invalid(input,text){input.setCustomValidity(text);input.reportValidity(
 async function review(){
  if(loading||step)return;
  const titleInput=$('new-title'),modelInput=modelNode(),goal=$('new-goal'),bib=$('new-bib');
- for(const i of [titleInput,modelInput,goal,bib])i.setCustomValidity('');
+ for(const i of [titleInput,modelInput,effortNode(),goal,bib])i.setCustomValidity('');
  const research=kind()==='research',p=PRESETS[preset()],question=goal.value.trim();
  if(research&&p.bib&&!bib.value.trim())return invalid(bib,'Paste the references to check.');
  if(research&&!p.bib&&!question)return invalid(goal,'Enter your '+(preset()==='question'?'research question':p.ask.toLowerCase())+'.');
@@ -122,6 +123,8 @@ async function review(){
  if(Array.from(title).length>160)return invalid(titleInput,'Use at most 160 characters.');
  const gone=modelInput.tagName==='SELECT'&&modelInput.selectedOptions[0]?.textContent.endsWith('(not available)');
  if(gone)return invalid(modelInput,model+' is not available on '+P.title(choice.provider||'')+'. Choose another model.');
+ const effortGone=effortNode().selectedOptions[0]?.textContent.endsWith('(not available)');
+ if(effortGone)return invalid(effortNode(),'The effort '+effort+' is not available for this model. Choose another effort.');
  const problem=P.checkModel(choice.provider,model);if(problem)return invalid(modelInput,problem);
  if(!research&&!project_id)return;
  const desk=state.project_id;loading=true;formError='';host.refresh();

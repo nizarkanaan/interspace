@@ -118,7 +118,7 @@ function effortSelect(parent,{id,label,provider,model,value,defaultLabel}){
  const render=(r,keep,reset)=>{
   select.replaceChildren();
   const hasList=!!(r&&r.models.length),m=hasList?(mod?r.models.find(x=>x.id===mod):r.models.find(x=>x.is_default)):null;
-  const efforts=m?m.efforts:[],def=m?.default_effort||(hasList&&prov==='claude'?'low':'');
+  const efforts=m?m.efforts:[],def=m?.default_effort||'';
   opt(select,'',defaultLabel||(def?'Default ('+def+')':'Default'));
   for(const e of efforts)opt(select,e,e);
   if(keep&&!efforts.includes(keep)){
@@ -229,18 +229,19 @@ function unavailable(role,target){
 }
 function save(form){
  if(saving||!draft)return;
+ const warnings=[];
  for(const role of ['orchestrator',...ROLES]){
   const target=role==='orchestrator'?draft.orchestrator:draft.roles[role];if(!target)continue;
   const input=form.querySelector('#route-'+role+'-model'),problem=checkModel(target.provider,target.model||'');
   if(problem){input.setCustomValidity(problem);input.reportValidity();return;}
   const gone=unavailable(role,target);
-  if(gone){saveError=gone;saveNote='Unsaved changes';noteUpdate(form);return;}
+  if(gone)warnings.push(gone);  // A saved choice the account no longer offers warns; it never blocks the save.
   if(WRITE_ROLES.has(role)&&get(target.provider)&&!canWrite(target.provider)){saveError=roleTitle(role)+' needs a provider that can write.';noteUpdate(form);return;}
  }
  saving=true;saveError='';saveNote='Saving…';touch();
  const sent=copy(draft),full=t=>({...t,provider:t.provider,model:t.model||null,effort:t.effort||null});
  sent.orchestrator=full(sent.orchestrator);for(const role of Object.keys(sent.roles||{}))sent.roles[role]=full(sent.roles[role]);
- request('routing_update',{routing:sent},{manual:true}).then(r=>{routing=r&&typeof r==='object'?r:sent;draft=copy(routing);dirty=false;saveNote='Saved';})
+ request('routing_update',{routing:sent},{manual:true}).then(r=>{routing=r&&typeof r==='object'?r:sent;draft=copy(routing);dirty=false;saveNote=warnings.length?'Saved. '+warnings.join(' '):'Saved';})
   .catch(e=>{saveError=e.message||'The defaults were not saved.';saveNote='Unsaved changes';}).finally(()=>{saving=false;touch();});
 }
 function renderSettings(container){

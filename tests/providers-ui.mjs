@@ -170,7 +170,9 @@ export default async function check(page,url){
  assert(await old.inputValue()==='gpt-5-old'&&(await old.locator('option:checked').textContent())==='gpt-5-old (not available)','Unavailable model not shown: '+await old.inputValue());
  const before=(await req('routing_update')).length;
  await settings.locator('.routing-form').getByRole('button',{name:'Save defaults',exact:true}).click();
- assert((await text(settings.locator('.route-error'))).includes('gpt-5-old')&&(await req('routing_update')).length===before,'Unavailable model not refused with a warning');
+ await page.waitForFunction(()=>document.querySelector('#providers-settings .route-status').textContent.startsWith('Saved.'));
+ const savedNote=await text(settings.locator('.route-status'));
+ assert(savedNote.includes('gpt-5-old')&&savedNote.includes('not available')&&(await req('routing_update')).length===before+1,'Unavailable model must warn but still save: '+savedNote);
 
  // New task: the Orchestrator defaults to the routing choice and can be overridden; no old runtime picker.
  await page.getByRole('button',{name:'New task',exact:true}).click();
@@ -196,7 +198,9 @@ export default async function check(page,url){
  await page.locator('#new-title').fill('Max effort');
  await page.locator('#new-effort').selectOption('max');
  await page.locator('#new-model').selectOption('claude-haiku-5-5');
- assert(await page.locator('#new-effort').inputValue()==='','Effort kept after another model');
+ assert(await page.locator('#new-effort').inputValue()==='max','Effort lost on a model that offers it');
+ assert((await page.locator('#new-effort option:checked').textContent())==='max','Effort label: '+await page.locator('#new-effort option:checked').textContent());
+ await page.locator('#new-effort').selectOption('');
  assert((await page.locator('#new-effort option:checked').textContent())==='Default (low)','Default label for a different model: '+await page.locator('#new-effort option:checked').textContent());
  await page.locator('#new-model').selectOption('');
  assert((await page.locator('#new-effort option:checked').textContent())==='Default (your default: high)','Routing default not restored');
@@ -216,6 +220,24 @@ export default async function check(page,url){
  await page.waitForFunction(()=>[...document.querySelectorAll('#new-model option')].some(o=>o.value==='codex-fixture-2'));
  assert(JSON.stringify(await page.locator('#new-model option').evaluateAll(o=>o.map(x=>x.value)))===JSON.stringify(['','codex-fixture-1','codex-fixture-2']),'Codex models not offered');
  assert(await page.locator('#new-model').inputValue()===''&&await page.locator('#new-effort').inputValue()==='','Provider change kept model or effort');
+ await page.locator('#new-model').selectOption('codex-fixture-1');
+ await page.locator('#new-effort').selectOption('xhigh');
+ await page.locator('#new-model').selectOption('codex-fixture-2');
+ assert(await page.locator('#new-effort').inputValue()==='','Effort kept on a model that does not offer it');
+ await page.locator('#new-model').selectOption('codex-fixture-1');
+ await page.locator('#new-effort').selectOption('high');
+ await page.locator('#new-model').selectOption('codex-fixture-2');
+ assert(await page.locator('#new-effort').inputValue()==='high','Offered effort dropped on a model change');
+ await page.locator('#new-effort').selectOption('');
+ // Review blocks a model or an effort that is no longer offered.
+ await page.evaluate(()=>{const m=document.querySelector('#new-model'),o=new Option('gpt-gone (not available)','gpt-gone');m.add(o);m.value='gpt-gone';});
+ await page.getByRole('button',{name:'Review scope',exact:true}).click();
+ assert((await page.locator('#new-model').evaluate(e=>e.validationMessage)).includes('gpt-gone is not available')&&await page.locator('#new-agent-scope .scope-editor').count()===0,'Unavailable model not blocked in New task');
+ await page.evaluate(()=>{const m=document.querySelector('#new-model');m.value='codex-fixture-2';m.dispatchEvent(new Event('change'));});
+ await page.evaluate(()=>{const e=document.querySelector('#new-effort');e.add(new Option('turbo (not available)','turbo'));e.value='turbo';});
+ await page.getByRole('button',{name:'Review scope',exact:true}).click();
+ assert((await page.locator('#new-effort').evaluate(e=>e.validationMessage)).includes('turbo is not available')&&await page.locator('#new-agent-scope .scope-editor').count()===0,'Unavailable effort not blocked in New task');
+ await page.evaluate(()=>{const e=document.querySelector('#new-effort');e.value='';e.dispatchEvent(new Event('change'));});
  await page.locator('#new-model').selectOption('codex-fixture-2');
  await page.getByRole('button',{name:'Review scope',exact:true}).click();
  await page.waitForFunction(()=>document.querySelector('#new-agent-scope .scope-editor'));
