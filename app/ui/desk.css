@@ -470,35 +470,59 @@ body.resizing,body.resizing *{cursor:col-resize!important;user-select:none}
 @media(prefers-reduced-motion:reduce){.split-handle::after{transition:none}}
 
 /* Evidence tab (2026-11-20-evidence-table-design.md): a scrolling table whose first column stays put; disagreements
-   carry an oxblood rule, numbers to check a dotted one, and each cell says its status in words. */
+   carry an oxblood rule, numbers to check a dotted one, and each cell says its status in words.
+   Compact (2026-11-27-readable-workspace-design.md): a 170px paper column, value columns of 120–220px clamped to three
+   lines, and a drawer beside the table for a cell's quotes and choices. In the split reader the table fills the pane,
+   so its sideways scrollbar stays on screen; elsewhere it is at most a window high. */
 .evidence{display:grid;gap:14px;min-width:0}.evidence>*{margin:0;min-width:0}
 .evidence-picker{display:grid;gap:14px;max-width:760px}
 .evidence-choice{border:1px solid var(--line);border-radius:4px;padding:10px 14px 12px;display:grid;gap:6px;min-width:0}
 .evidence-choice legend{font-weight:550;padding:0 4px}
 .evidence-choice .display-option .footnote{margin-left:4px}
 .evidence-custom{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr) auto auto;gap:6px;align-items:center}
-.ev-wrap{overflow:auto;border:1px solid var(--line);border-radius:4px;max-height:70vh}
+.ev-body{display:flex;align-items:flex-start;gap:12px;min-width:0}
+.ev-wrap{flex:0 1 auto;min-width:0;overflow:auto;border:1px solid var(--line);border-radius:4px;max-height:calc(100vh - 96px);scroll-padding:48px 0 0 170px}
+#agent-view.split #agent-evidence.has-table{flex:1 1 0;min-height:240px;display:flex;flex-direction:column}
+#agent-view.split #agent-evidence.has-table>.ev-body{flex:1 1 0;min-height:0}
+#agent-view.split .ev-wrap,#agent-view.split .ev-drawer{max-height:100%}
 .ev-wrap:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.ev-table{border-collapse:separate;border-spacing:0;font-size:13.5px;min-width:100%}
-.ev-table th,.ev-table td{border-bottom:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top;min-width:170px;max-width:280px}
+.ev-table{border-collapse:separate;border-spacing:0;font-size:13.5px}
+.ev-table th,.ev-table td{border-bottom:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top;min-width:120px;max-width:220px}
 .ev-table thead th{position:sticky;top:0;z-index:2;background:var(--bg);font-weight:600}
-.ev-table tbody th{position:sticky;left:0;z-index:1;background:var(--leaf);font-weight:500;min-width:220px;border-right:1px solid var(--line)}
+.ev-table tbody th,.ev-table thead th:first-child{width:170px;min-width:170px;max-width:170px}
+.ev-table tbody th{position:sticky;left:0;z-index:1;background:var(--leaf);font-weight:500;border-right:1px solid var(--line)}
 .ev-table thead th:first-child{left:0;z-index:3}
-.ev-paper{display:block;font-family:var(--serif)}.ev-source{display:block}
-.ev-cell{display:table-cell}.ev-cell>*{display:block;margin:0 0 4px}
+.ev-paper{display:block;font-family:var(--serif);overflow-wrap:anywhere}.ev-source{display:block}
+.ev-paper.is-clamped,.ev-cell .ev-value,.ev-pair{display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden}
+.ev-paper.is-clamped{-webkit-line-clamp:2}
+.ev-cell .ev-value{-webkit-line-clamp:3}
+.ev-pair{-webkit-line-clamp:2;font-size:13.5px;overflow-wrap:anywhere}
+.ev-cell{display:table-cell;cursor:pointer}.ev-cell>*{margin:0 0 3px}.ev-cell>.ev-word{display:block}
+.ev-cell:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.ev-cell.is-open{background:var(--subtle)}
 .ev-word{font:600 11.5px var(--sans);color:var(--muted)}
 .ev-value{font-size:14px;overflow-wrap:anywhere}
-.ev-cell.is-agree .ev-word{color:var(--accent)}
-.ev-cell.is-check{box-shadow:inset 3px 0 0 var(--muted)}.ev-cell.is-check .ev-word{color:var(--ink)}
-.ev-cell.is-disagree{box-shadow:inset 3px 0 0 var(--warn);background:color-mix(in srgb,var(--warn) 5%,transparent)}.ev-cell.is-disagree .ev-word{color:var(--warn)}
-.ev-cell.is-resolved .ev-word{color:var(--accent)}
-.ev-option{border-top:1px dashed var(--line);padding-top:6px;margin-top:4px;display:grid;gap:3px}
+.ev-cell.is-agree .ev-word,.ev-drawer.is-agree .ev-word{color:var(--accent)}
+.ev-cell.is-check{box-shadow:inset 3px 0 0 var(--muted)}.ev-cell.is-check .ev-word,.ev-drawer.is-check .ev-word{color:var(--ink)}
+.ev-cell.is-disagree{box-shadow:inset 3px 0 0 var(--warn);background:color-mix(in srgb,var(--warn) 5%,transparent)}.ev-cell.is-disagree .ev-word,.ev-drawer.is-disagree .ev-word{color:var(--warn)}
+.ev-cell.is-disagree.is-open{background:var(--subtle)}
+.ev-cell.is-resolved .ev-word,.ev-drawer.is-resolved .ev-word{color:var(--accent)}
+/* The drawer is an aside: it undoes the sidebar's bare `aside` rules (sticky, a window high). */
+.ev-drawer{position:static;height:auto;flex:0 0 clamp(240px,40%,360px);min-width:0;overflow:auto;border:1px solid var(--line);border-radius:4px;background:var(--leaf);padding:10px 14px 14px;display:grid;gap:8px;align-content:start}
+.ev-drawer>*{margin:0;min-width:0}
+.ev-drawer:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.ev-drawer-head{display:flex;align-items:flex-start;gap:8px}
+.ev-drawer-title{flex:1;min-width:0;margin:2px 0 0;font:500 16px/1.35 var(--serif);overflow-wrap:anywhere}
+.ev-drawer-close{flex:none;padding:1px 9px 3px;font-size:18px;line-height:1.2;color:var(--muted)}
+.ev-drawer-close:hover{color:var(--ink)}
+.ev-drawer-col{display:grid;gap:1px}.ev-drawer-col strong{font-weight:600}
+.ev-option{border-top:1px dashed var(--line);padding-top:6px;display:grid;gap:3px}
 .ev-who{font:600 11.5px var(--sans);color:var(--muted)}
-.ev-option button,.ev-cell .quiet,.ev-cell .primary{font-size:12.5px;padding:4px 9px;justify-self:start}
-.ev-quote-line,.ev-quote blockquote{margin:0;font:italic 12.5px/1.5 var(--serif);color:var(--muted);border-left:2px solid var(--line);padding-left:8px}
-.ev-quote summary{font-size:12px;color:var(--accent)}
-.ev-cell input{width:100%;margin:2px 0 4px}
-.ev-quote{border-top:0;padding-top:0;margin:4px 0 0}
+.ev-option button,.ev-drawer-actions button,.ev-own button{font-size:12.5px;padding:4px 9px;justify-self:start}
+.ev-quote-line{margin:0;font:italic 12.5px/1.5 var(--serif);color:var(--muted);border-left:2px solid var(--line);padding-left:8px;overflow-wrap:anywhere}
+.ev-drawer-actions,.ev-own{display:flex;flex-wrap:wrap;gap:6px}
+.ev-own input{flex:1 1 100%;min-width:0}
+@media(max-width:600px){.ev-body{flex-direction:column}.ev-wrap{max-width:100%}.ev-drawer{flex:none;align-self:stretch}}
 
 /* Split reader: the document never scrolls (focus and scrollIntoView could scroll it and shift the view). */
 html:has(#agent-view.split:not([hidden])){overflow:hidden;height:100%;overscroll-behavior:none}
@@ -523,8 +547,8 @@ html:has(#agent-view.split:not([hidden])){overflow:hidden;height:100%;overscroll
 .sidebar-expand{display:none}
 @media(min-width:601px){
  body.sidebar-collapsed .shell{grid-template-columns:44px minmax(0,1fr)}
- body.sidebar-collapsed aside{padding:14px 5px;align-items:center;overflow:hidden}
- body.sidebar-collapsed aside>*:not(#sidebar-expand){display:none}
+ body.sidebar-collapsed .shell>aside{padding:14px 5px;align-items:center;overflow:hidden}
+ body.sidebar-collapsed .shell>aside>*:not(#sidebar-expand){display:none}
  body.sidebar-collapsed .sidebar-expand{display:block}
 }
 @media(max-width:600px){.sidebar-collapse{display:none}}
@@ -537,7 +561,7 @@ html:has(#agent-view.split:not([hidden])){overflow:hidden;height:100%;overscroll
 #agent-view.split.focus .agent-layout{grid-template-columns:minmax(0,1fr)}
 #agent-view.split.focus .agent-main,#agent-view.split.focus .split-handle,#agent-view.focus #agent-detail-toggle{display:none}
 body:has(#agent-view.focus:not([hidden])) .shell{grid-template-columns:minmax(0,1fr)}
-body:has(#agent-view.focus:not([hidden])) aside{display:none}
+body:has(#agent-view.focus:not([hidden])) .shell>aside{display:none}
 /* What needs the user while in Focus stays in view at the top of the pane. The banner and the tab row share one sticky
    header (the tab row alone is sticky outside the split), so a scrolled pane never puts one over the other. */
 .results-head{position:sticky;top:0;z-index:4;background:var(--leaf)}

@@ -274,16 +274,21 @@ function reportArea(id){
 }
 // Evidence tab (2026-11-20-evidence-table-design.md): loaded when opened and again after each `evidence` event.
 const tables=new Map();
+// The note about asking the Orchestrator (2026-11-27-readable-workspace-design.md) clears once any cell has a value, or
+// once the task is no longer running: a status newer than the one shown when it was asked, neither working nor paused.
+const ASKED='Asked the Orchestrator to fill the table with Claude and Codex. Approve the team in the conversation.';
+const anyValue=table=>(table?.rows||[]).some(r=>Object.values(r.cells||{}).some(c=>c&&(c.resolved||Object.keys(c.values||{}).length)));
 function evidenceArea(id){
- if(!tables.has(id))tables.set(id,{data:null,loading:false,error:'',note:'',seen:null,busy:false,rev:0,ui:{}});
+ if(!tables.has(id))tables.set(id,{data:null,loading:false,error:'',note:'',seen:null,busy:false,rev:0,ui:{},askedStatus:null});
  const t=tables.get(id),ev=JSON.stringify(S.evidence(id));
  const load=()=>{t.loading=true;host.request('task_table',{task_id:id},{manual:true}).then(x=>{t.data=x;t.error='';}).catch(e=>{t.error=e.message;}).finally(()=>{t.loading=false;t.rev++;refresh();});};
  if(t.seen!==ev&&!t.loading){t.seen=ev;load();}
+ if(t.note===ASKED&&(anyValue(t.data?.table)||(S.status(id)!==t.askedStatus&&!S.busy(status(id))))){t.note='';t.rev++;}
  const busy=['queued','starting','running','waiting_lock','cancelling'].includes(status(id)?.state);
  const box=$('agent-evidence'),k=id+':'+t.rev+':'+busy;if(box.dataset.key===k)return;box.dataset.key=k;
  window.interspaceEvidence.render(box,t.data,t.ui,{busy:t.busy,canFill:!busy,error:t.error,note:t.note,
   onFill:(columns,rows)=>{t.busy=true;t.error='';t.rev++;refresh();
-   host.request('table_start',{task_id:id,columns,rows},{manual:true}).then(x=>{t.data=x;t.ui.editing=false;const why=gate(id);if(why)throw Error(why);post(id,'Fill the evidence table.');t.note='Asked the Orchestrator to fill the table with Claude and Codex. Approve the team in the conversation.';})
+   host.request('table_start',{task_id:id,columns,rows},{manual:true}).then(x=>{t.data=x;t.ui.editing=false;const why=gate(id);if(why)throw Error(why);t.askedStatus=S.status(id);post(id,'Fill the evidence table.');t.note=ASKED;})
     .catch(e=>{t.error=e.message||'The table could not start.';}).finally(()=>{t.busy=false;t.rev++;refresh();});},
   onResolve:(row,column,value)=>{host.request('table_resolve',{task_id:id,row,column,value},{manual:true}).then(x=>{t.data=x;}).catch(e=>{t.error=e.message;}).finally(()=>{t.rev++;refresh();});},
   onExport:()=>{t.note='';host.request('table_export',{task_id:id},{manual:true}).then(()=>host.request('task_output_save',{task_id:id,name:'evidence.csv'},{manual:true})).then(r=>{t.note=r?.saved?'Saved evidence.csv.':'Not saved.';}).catch(e=>{t.error=e.message;}).finally(()=>{t.rev++;refresh();});}});
