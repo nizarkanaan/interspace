@@ -99,5 +99,7 @@ function set(value,{persist=true}={}){
  if(changed)window.dispatchEvent(new Event('resize'));
 }
 set(read(),{persist:false});
-window.interspaceSidebar={render,place,renderUsage,collapsed,set};
+// What a task state asks of the user, in the sidebar's words ('' when nothing); Focus mode's banner uses it too.
+const needs=state=>typeof state==='string'&&Object.hasOwn(NEEDS,state)?NEEDS[state]:'';
+window.interspaceSidebar={render,place,renderUsage,collapsed,set,needs};
 })();

@@ -67,11 +67,67 @@ export default async function check(page,url){
  assert(!(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth)),'No sideways scroll');
  await page.setViewportSize({width:390,height:900});
  await page.waitForFunction(()=>!document.querySelector('#agent-view.split'));
+ assert(await page.locator('#agent-focus').isHidden(),'Focus offered outside the split reader');
  {const wide=await page.evaluate(()=>[...document.querySelectorAll('body *')].filter(e=>e.getBoundingClientRect().right>innerWidth+1&&e.offsetParent).slice(0,4).map(e=>e.tagName+'#'+e.id+'.'+e.className+':'+Math.round(e.getBoundingClientRect().right)));
   assert(!(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth)),'No sideways scroll at 390: '+JSON.stringify(wide));}
  await page.setViewportSize({width:1280,height:1000});
  // Leaving the split reader must free the page: Settings scrolls (the reader's scroll guard once pinned it to the top).
  await page.waitForFunction(()=>document.querySelector('#agent-view.split'));
+
+ // Focus (2026-11-27-readable-workspace-design.md): the results pane takes the whole window; Esc or Exit focus returns.
+ const focusButton=page.locator('#agent-focus'),chat=page.locator('#agent-view .agent-main'),aside=page.locator('aside'),banner=page.locator('#agent-focus-banner');
+ const focused=()=>page.evaluate(()=>document.getElementById('agent-view').classList.contains('focus'));
+ const collapsed=()=>page.evaluate(()=>document.body.classList.contains('sidebar-collapsed'));
+ const store=()=>page.evaluate(()=>{const out={};for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);out[k]=localStorage.getItem(k);}return JSON.stringify(Object.entries(out).sort());});
+ assert(await page.locator('#agent-tabs #agent-focus').count()===1&&await focusButton.isVisible()&&(await text(focusButton))==='Focus'&&await focusButton.getAttribute('aria-pressed')==='false'&&await focusButton.getAttribute('type')==='button','Focus button on the results tab row');
+ const open=await store();
+ await focusButton.click();
+ assert(await focused()&&await page.evaluate(()=>window.interspaceAgent.isFocused())&&(await text(focusButton))==='Exit focus'&&await focusButton.getAttribute('aria-pressed')==='true','Focus on');
+ assert(await chat.isHidden()&&await aside.isHidden()&&await reader.isVisible()&&await banner.isHidden(),'Focus hides the conversation and the sidebar');
+ {const share=await page.evaluate(()=>document.getElementById('agent-results').getBoundingClientRect().width/innerWidth);assert(share>=0.9,'Results pane share in Focus: '+share);}
+ assert(!(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth)),'No sideways scroll in Focus');
+ // Every results tab works in Focus.
+ await page.locator('[data-agent-tab=corpus]').click();
+ assert(await focused()&&await page.locator('#agent-corpus').isVisible(),'Corpus in Focus');
+ await page.locator('[data-agent-tab=report]').click();
+ await page.keyboard.press('Escape');
+ assert(!(await focused())&&!(await page.evaluate(()=>window.interspaceAgent.isFocused()))&&await chat.isVisible()&&await aside.isVisible()&&(await text(focusButton))==='Focus'&&await focusButton.getAttribute('aria-pressed')==='false','Esc exits Focus');
+ assert(!(await collapsed())&&await store()===open,'Focus leaves an open sidebar open and saves nothing');
+ // A collapsed sidebar stays collapsed after Focus, and Focus saves nothing.
+ await page.locator('#sidebar-collapse').click();
+ const shut=await store();
+ assert(await collapsed()&&shut.includes('["interspace.sidebarCollapsed","1"]'),'Sidebar collapsed and saved');
+ await focusButton.click();
+ assert(await focused()&&await aside.isHidden(),'Focus over a collapsed sidebar');
+ await focusButton.click();
+ assert(!(await focused())&&await collapsed()&&await aside.isVisible()&&await store()===shut,'Collapsed sidebar kept and nothing saved');
+ await page.locator('#sidebar-expand').click();
+ // Something that needs you while in Focus: Focus stays on, a banner names it, Go to conversation exits and shows it.
+ const said=(tag,n)=>Array.from({length:n},(_,i)=>ev('r1','message',{role:'assistant',text:'Progress note '+tag+i+'. '+'Searching more sources about outage fallback. '.repeat(4),final:false},tag+i));
+ await push(page,[...said('a',20),ev('r1','team_proposed',{team_id:'tm1',summary:'Check every reference.',budget:null,members:[{member_id:'m1',role:'citation_checker',brief:'Check every reference.',provider:'codex',model:null,access:'read',default:true}]}),...said('b',20)]);
+ await page.waitForFunction(()=>document.querySelector('#agent-stream .card.team'));
+ await focusButton.click();
+ assert(await focused()&&await banner.isHidden(),'No banner while nothing needs you');
+ await page.evaluate(()=>{window.rFixture.research[0].status='paused_team';window.rFixture.setState();});
+ await banner.waitFor();
+ assert(await focused()&&(await text(banner)).includes('Approve the team'),'Banner: '+await text(banner));
+ await banner.getByRole('button',{name:'Go to conversation',exact:true}).click();
+ assert(!(await focused())&&await chat.isVisible()&&await banner.isHidden(),'Go to conversation exits Focus');
+ {const seen=await page.evaluate(()=>{const c=document.querySelector('#agent-view .agent-main').getBoundingClientRect(),t=[...document.querySelectorAll('#agent-stream .card.team')].pop(),r=t.getBoundingClientRect();
+   return {top:Math.round(r.top),chat:[Math.round(c.top),Math.round(c.bottom)],focus:document.activeElement===t||t.contains(document.activeElement)};});
+  assert(seen.top>=seen.chat[0]-1&&seen.top<seen.chat[1]&&seen.focus,'Team card shown and focused: '+JSON.stringify(seen));}
+ await focusButton.click();
+ assert(await banner.isVisible(),'Banner when Focus starts while the team waits');
+ await page.evaluate(()=>{window.rFixture.research[0].status='idle';window.rFixture.setState();});
+ await page.waitForFunction(()=>document.getElementById('agent-focus-banner').hidden);
+ assert(await focused(),'Focus stays on after the team is answered');
+ // Leaving the task (to Settings, from the app menu while the sidebar is hidden) exits Focus and restores the sidebar.
+ await page.evaluate(()=>document.querySelector('aside [data-view=settings]').click());
+ await page.waitForFunction(()=>document.getElementById('agent-view').hidden);
+ assert(!(await focused())&&!(await page.evaluate(()=>window.interspaceAgent.isFocused()))&&!(await collapsed())&&await aside.isVisible(),'Leaving the task exits Focus');
+ await page.locator('[data-view=research]').click();await page.locator('[data-open-task=r1]').click();
+ await page.waitForFunction(()=>document.querySelector('#agent-view.split'));
+ assert(!(await focused())&&(await text(focusButton))==='Focus','Back in the task without Focus');
  await page.getByRole('button',{name:'Settings',exact:true}).click();
  await page.waitForFunction(()=>document.getElementById('agent-view').hidden);
  await page.evaluate(()=>scrollTo(0,400));
@@ -79,5 +135,5 @@ export default async function check(page,url){
  assert(!(await page.evaluate(()=>document.getElementById('agent-view').classList.contains('split'))),'Hidden reader keeps no split');
  assert(!errors.length,'Page errors: '+errors.join('; '));
  assert(!(await page.evaluate(()=>window.pwned)),'Script ran');
- return {checks:'Read opens the Report tab (no inline report view), verdicts in words from the corpus, summary, literal text, citation links incl. lists and ranges, unknown brackets kept, keyboard jump and Back to text, Save, refetch on change, no sideways scroll'};
+ return {checks:'Read opens the Report tab (no inline report view), verdicts in words from the corpus, summary, literal text, citation links incl. lists and ranges, unknown brackets kept, keyboard jump and Back to text, Save, refetch on change, no sideways scroll; Focus: button on the results tab row only in the split reader, hides the conversation and the sidebar, results at least 90% wide, every tab, Esc and Exit focus, sidebar state kept and nothing saved, needs-you banner with Go to conversation to the team card, leaving the task exits Focus'};
 }

@@ -85,12 +85,15 @@ function scopeArea(id){
 function renderAgent(){
  const id=current;$('agent-view').hidden=view!=='agent'||!id;
  // Leaving the reader undoes the split: while `placed` stays true the page-level scroll guard keeps every other
- // page (Settings, the desks) pinned to the top.
+ // page (Settings, the desks) pinned to the top. place(false) also leaves Focus, so leaving the task ends it.
  if($('agent-view').hidden){place(false);return;}
  head($('agent-head'),id);$('agent-stop').hidden=!stoppable(id);$('agent-back').textContent=isResearch(id)?'← Research':'← Tasks';
  scopeArea(id);
  outputsArea(id);
  const {tab,talk,split}=layoutTabs(id);
+ // Focus belongs to the task it started on: opening another task leaves it.
+ if(focused&&focusTask!==id)setFocus(false);
+ focusControls();
  $('agent-stream').hidden=!talk;$('agent-composer').hidden=!talk;detailToggle(talk);$('agent-scope-editor').hidden=split?tab!=='details':!talk;
  scopeNote(id,talk);
  // A newer scope than the one displayed (edited elsewhere) is reloaded before it can be approved.
@@ -178,12 +181,46 @@ function splitHandle(){
  addEventListener('resize',()=>{if(placed)splitWidth(now());});
 }
 function place(split){
+ // Focus is a state on top of the split: leaving the split (a narrow window, a hidden reader) leaves Focus first.
+ if(!split)setFocus(false);
  if(split===placed)return;placed=split;
  const main=document.querySelector('#agent-view .agent-main'),results=$('agent-results'),layout=document.querySelector('#agent-view .agent-layout');
  const parts=['agent-tabs','agent-scope-editor','agent-report','agent-corpus','agent-evidence','agent-details'].map(x=>$(x));
  $('agent-view').classList.toggle('split',split);results.hidden=!split;$('agent-topbar').hidden=!split;$('split-handle').hidden=!split;if(split)splitWidth(null);
  if(split){$('agent-topbar').prepend($('agent-back'));$('agent-topbar-status').after($('agent-detail-toggle'));results.append(...parts);}
  else{main.prepend($('agent-back'));$('agent-back').after($('agent-tabs'));$('agent-scope-note').after($('agent-scope-editor'));$('agent-stream').before($('agent-report'),$('agent-corpus'),$('agent-evidence'),$('agent-detail-toggle'));layout.append($('agent-details'));}
+ focusControls();
+}
+// Focus mode (2026-11-27-readable-workspace-design.md): in the split reader the results pane takes the whole window.
+// The sidebar is hidden without saving that choice and comes back as it was. Esc or Exit focus returns.
+let focused=false,focusTask=null,sidebarWas=false;
+function setFocus(on){
+ const next=!!on&&placed&&!!current;if(next===focused)return;
+ const Side=window.interspaceSidebar,banner=$('agent-focus-banner'),lost=banner.contains(document.activeElement);
+ focused=next;focusTask=next?current:null;
+ $('agent-view').classList.toggle('focus',next);
+ if(next){sidebarWas=Side.collapsed();Side.set(true,{persist:false});}
+ // A sidebar shown meanwhile (⌘\) stays shown.
+ else if(Side.collapsed())Side.set(sidebarWas,{persist:false});
+ focusControls();
+ if(lost&&!next)$('agent-focus').focus();
+}
+// The Focus button, and the banner that names what needs the user (the sidebar's words for the task row's state).
+function focusControls(){
+ const b=$('agent-focus');b.hidden=!placed;b.textContent=focused?'Exit focus':'Focus';b.setAttribute('aria-pressed',String(focused));
+ const need=focused?window.interspaceSidebar.needs(row(current)?.status):'';
+ $('agent-focus-banner').hidden=!need;$('agent-focus-need').textContent=need?'Needs you: '+need:'';
+}
+// Go to conversation: leave Focus and show what needs the user: the latest team or question card, or the scope note.
+function goToConversation(){
+ const st=row(current)?.status,stream=$('agent-stream'),chat=document.querySelector('#agent-view .agent-main');
+ setFocus(false);
+ const last=sel=>[...stream.querySelectorAll(sel)].pop()||null,note=$('agent-scope-note');
+ const target=st==='paused_team'?last('.card.team'):st==='paused_ask'?last('.card.ask'):st==='paused_scope'&&!note.hidden?note:null;
+ if(!target){if(chat)chat.scrollTop=chat.scrollHeight;$('agent-message').focus({preventScroll:true});return;}
+ target.scrollIntoView({block:'start'});
+ if(!target.hasAttribute('tabindex'))target.tabIndex=-1;
+ target.focus({preventScroll:true});
 }
 function topbar(id,split){
  if(!split)return;
@@ -320,11 +357,20 @@ window.interspaceAgent={
   addEventListener('scroll',()=>{if(placed&&(scrollX||scrollY))scrollTo(0,0);},{passive:true});
   $('agent-stop').onclick=()=>cancel(current);
   $('agent-detail-toggle').onclick=()=>{const D=window.interspaceDisplay;D.setDetail(D.get().detail==='detailed'?'simple':'detailed');};
+  $('agent-focus').onclick=()=>setFocus(!focused);
+  $('agent-focus-go').onclick=goToConversation;
+  // One Esc listener: it closes the evidence drawer first (evidence.js, once it has one), then leaves Focus.
+  document.addEventListener('keydown',e=>{
+   if(e.key!=='Escape'||e.defaultPrevented||e.isComposing)return;
+   if(window.interspaceEvidence?.closeDrawer?.()===true){e.preventDefault();return;}
+   if(focused){e.preventDefault();setFocus(false);}
+  });
   $('agent-topbar-stop').onclick=()=>cancel(current);
   $('agent-topbar-scope').onclick=()=>{if(!current)return;tabs.set(current,'details');refresh();$('agent-results').scrollTop=0;};$('agent-back').onclick=()=>host.navigate(current&&isResearch(current)?'research':'tasks');
  },
  isAgent,isResearch,stateOf:id=>S.status(id)?.state||null,researchRows:()=>(Array.isArray(state?.research?.tasks)?state.research.tasks:[]).filter(t=>t&&typeof t.id==='string'&&!t.parent_task_id&&!parentOf(t.id)),title:()=>title(current),current:()=>current,parentOf,
  setDraft(id,text){drafts.set(id,text);if(current===id)shownDraftFor=null;},
+ focus(on){setFocus(on);},isFocused:()=>focused,
  open(id){current=id;S.sync(id);if(!scopes.has(id)||!scopeInfo(id).scope)loadScope(id);},
  render(nextState,nextView){state=nextState;view=nextView;refresh();}
 };

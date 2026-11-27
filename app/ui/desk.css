@@ -528,3 +528,17 @@ html:has(#agent-view.split:not([hidden])){overflow:hidden;height:100%;overscroll
  body.sidebar-collapsed .sidebar-expand{display:block}
 }
 @media(max-width:600px){.sidebar-collapse{display:none}}
+
+/* Focus mode (2026-11-27-readable-workspace-design.md): on top of the split reader, the results pane takes the whole
+   window. The conversation, the divider, the conversation's view toggle and the sidebar are hidden. */
+.detail-tabs .focus-toggle{margin-left:auto;align-self:center;border:1px solid var(--line);border-radius:7px;padding:4px 12px;font-size:13px;color:var(--muted)}
+.detail-tabs .focus-toggle:hover{background:var(--surface);border-color:var(--muted);color:var(--ink)}
+.detail-tabs .focus-toggle[aria-pressed=true]{background:var(--subtle);color:var(--accent);border-color:var(--accent)}
+#agent-view.split.focus .agent-layout{grid-template-columns:minmax(0,1fr)}
+#agent-view.split.focus .agent-main,#agent-view.split.focus .split-handle,#agent-view.focus #agent-detail-toggle{display:none}
+body:has(#agent-view.focus:not([hidden])) .shell{grid-template-columns:minmax(0,1fr)}
+body:has(#agent-view.focus:not([hidden])) aside{display:none}
+/* What needs the user while in Focus stays in view at the top of the pane. */
+.focus-banner{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:10px 0 0;background:var(--surface);border-left-color:var(--warn);color:var(--ink)}
+.focus-banner #agent-focus-need{font-weight:600}
+.focus-banner button{font-size:13px;padding:5px 10px}
