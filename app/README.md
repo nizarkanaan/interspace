@@ -14,6 +14,7 @@ Launch `dist/Interspace.app` with a double-click. It opens its own native window
 **Sidebar.** A **Research | Code** switch follows the page you are on.
 - **New research question** or **New code task** starts a task of that kind.
 - In Code mode, the **Project** picker and **Add project folder** sit under the button.
+- **◀** collapses the sidebar to a narrow **☰** rail, and **☰** opens it again. **⌘\** does the same on a Mac (Ctrl+\ elsewhere) unless you are typing in a field. Interspace remembers the choice.
 - The mode's tasks are grouped under **Needs you**, **Working** and **Done**, each with its state in words: Approve the team, Answer a question, Working, Report ready, Stopped after an error. Subagents are listed under their task, not here.
 - **Running now** lists every running task across both modes.
 - **Usage** shows each provider's usage limits as the provider reported them during its latest run (percent used, status, reset time), with the time of the reading. It updates only while an agent of that provider runs.
@@ -66,9 +67,14 @@ Keys and emails are your own. They are kept in this Mac's Keychain, are never sh
 - **Corpus.** Every paper the agents and subagents found, with duplicates merged, and each one's verdict and where it was found. It has search, filters (Checked, Not checked, Open access) and sorting. Agents can read the corpus too.
 - **Evidence.** Choose columns, from presets or your own, and rows: the cited papers, or every checked paper.
   - **Fill table** asks for two extractors, one on Claude and one on Codex. Each fills the table alone, with a quote for every value.
-  - Cells say **Agree**, **Agree, check the number**, **Disagree** (both values side by side, with **Use Claude's**, **Use Codex's** or **Type my own**) or **Not reported**. **Needs you** filters to what needs a decision.
+  - The table fills the pane. Each cell shows its value and a status word: **Agree**, **Agree, check the number** or **Not reported**. A disagreement shows as "Claude: x / Codex: y". Papers are labelled like "Zhang et al. 2022"; hover for the title. **Needs you** filters to what needs a decision.
+  - Click a cell, or press Enter on it, to open **Cell details** beside the table: the paper, the column, both quotes, and **Use Claude's**, **Use Codex's** or **Type my own**. Esc or **×** closes it.
   - **Export CSV** saves `evidence.csv`.
 - **Scope and outputs.** Status, scope and outputs.
+
+**Focus.** **Focus** on the results tab row hides the conversation and the sidebar so the results use the whole window. **Exit focus** or Esc brings them back (Esc closes an open cell drawer first). If a team, a question or a scope needs you, a banner says so, with **Go to conversation**.
+
+**Simple and Detailed.** The conversation shows **Simple** by default: subagents and teams are one-line rows with **Details ▸**, a team to approve is a short card with **Approve team**, **Decline** and **Edit team**, and orchestration calls stay hidden unless they fail. Questions for you, approvals and errors always show in full. Switch with **Simple view** / **Detailed view** in the conversation header, or under **Settings → Conversation display**, which also holds the switches for searches, thinking, plans, notes, and commands and file changes.
 
 In a narrower window the same parts are tabs: **Conversation**, **Report**, **Corpus**, **Evidence** and **Details**.
 
