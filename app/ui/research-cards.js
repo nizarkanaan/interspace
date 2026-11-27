@@ -180,9 +180,10 @@ function citationCard(card,report,{state,bump,brief=false,id=card.id}){
  if(report?.checked_at&&!short)el('p','footnote','Checked at '+str(report.checked_at),card);
 }
 
-// Text-safe Markdown for report.md: headings, lists, quotes, fenced code, `code`, **bold**, *italic* and
-// [links](https://…). Every piece of text is a text node; a link that is not https stays plain text, and an https
-// link's real host is shown after its text, so text that looks like another address cannot hide where it goes.
+// Text-safe Markdown for report.md and research replies: headings, lists, quotes, fenced code, pipe tables, `code`,
+// **bold**, *italic* and [links](https://…). Every piece of text is a text node; a link that is not https stays plain
+// text, and an https link's real host is shown after its text, so text that looks like another address cannot hide
+// where it goes.
 function inline(text,parent){
  for(const part of text.split(/(`[^`\n]+`|\*\*[^*\n]+\*\*|\*[^*\n]+\*|\[[^\]\n]+\]\([^)\s]+\))/)){
   if(!part)continue;
@@ -193,10 +194,54 @@ function inline(text,parent){
   else parent.append(document.createTextNode(part));
  }
 }
+// Pipe tables (a GFM subset): a line with an unescaped | over a delimiter row (cells of ---, :--, :-: or --: split by
+// |, one per header cell) starts a table, even right after a paragraph or a list. Body rows follow until a blank line,
+// a line with no unescaped |, or a fence, heading or quote, which then renders as usual. A short row gets empty cells
+// and a long one loses its extra cells. Cells go through inline(), so they stay text-safe; alignment is a class.
+const DELIMITER=/^:?-+:?$/,BLOCK=/^(```|#{1,6}\s|>)/;
+// A row's cells, or null when the line has no unescaped |: one outer pipe on each side is dropped, the rest is split
+// on unescaped pipes and trimmed, and \| is a literal |.
+function cells(line){
+ let s=line.trim();
+ if(!/(^|[^\\])\|/.test(s))return null;
+ if(s[0]==='|')s=s.slice(1);
+ if(s.endsWith('|')&&!s.endsWith('\\|'))s=s.slice(0,-1);
+ const out=[''];
+ for(let i=0;i<s.length;i++){
+  if(s[i]==='\\'&&s[i+1]==='|'){out[out.length-1]+='|';i++;}
+  else if(s[i]==='|')out.push('');
+  else out[out.length-1]+=s[i];
+ }
+ return out.map(c=>c.trim());
+}
+// The column alignments of a delimiter row for `n` header cells, or null when the line is not one.
+function alignments(line,n){
+ const c=line==null?null:cells(line);
+ if(!c||c.length!==n||!c.every(x=>DELIMITER.test(x)))return null;
+ return c.map(x=>x[0]===':'&&x.endsWith(':')?'center':x.endsWith(':')?'right':x[0]===':'?'left':'');
+}
+// Draws the table whose header row is lines[i], in a focusable box named by its header cells that scrolls a table too
+// wide for its column; returns the index of the table's last line.
+function table(lines,i,head,align,box){
+ const wrap=el('div','table-wrap',null,box),t=el('table','md-table',null,wrap);
+ const row=(tag,values,parent)=>{const tr=el('tr','',null,parent);align.forEach((a,j)=>inline(values[j]??'',el(tag,a?'align-'+a:'',null,tr)));return tr;};
+ const top=row('th',head,el('thead','',null,t));for(const th of top.cells)th.scope='col';
+ let body=null;
+ for(i+=2;i<lines.length;i++){
+  const r=BLOCK.test(lines[i])?null:cells(lines[i]);
+  if(!r)break;
+  row('td',r,body||(body=el('tbody','',null,t)));
+ }
+ const names=[...top.cells].map(c=>c.textContent.trim()).filter(Boolean).join(', '),label='Table'+(names?': '+names:'');
+ wrap.tabIndex=0;wrap.setAttribute('role','region');wrap.setAttribute('aria-label',label.length>80?label.slice(0,79).trimEnd()+'…':label);
+ return i-1;
+}
 function markdown(text,parent){
  const box=el('div','md report-md',null,parent);let code=null,para=[],list=null;
  const flush=()=>{if(para.length){inline(para.join('\n'),el('p','',null,box));para=[];}};
- for(const line of String(text).split('\n')){
+ const lines=String(text).split('\n');
+ for(let i=0;i<lines.length;i++){
+  const line=lines[i];
   if(/^```/.test(line)){flush();list=null;if(code)code=null;else code=el('code','',null,el('pre','code-block',null,box));continue;}
   if(code){code.textContent+=(code.textContent?'\n':'')+line;continue;}
   let m;
@@ -204,6 +249,8 @@ function markdown(text,parent){
   if((m=/^(#{1,6})\s+(.*)$/.exec(line))){flush();list=null;inline(m[2],el('h'+Math.min(6,m[1].length+2),'',null,box));continue;}
   if((m=/^\s*([-*+]|\d+[.)])\s+(.*)$/.exec(line))){flush();const ordered=/\d/.test(m[1]);if(!list||list.ordered!==ordered){list=el(ordered?'ol':'ul','',null,box);list.ordered=ordered;}inline(m[2],el('li','',null,list));continue;}
   if((m=/^>\s?(.*)$/.exec(line))){flush();list=null;inline(m[1],el('blockquote','',null,box));continue;}
+  const head=cells(line),align=head&&alignments(lines[i+1],head.length);
+  if(align){flush();list=null;i=table(lines,i,head,align,box);continue;}
   list=null;para.push(line);
  }
  flush();return box;

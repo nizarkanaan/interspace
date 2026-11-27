@@ -170,6 +170,59 @@ export default async function check(page,url){
  same(await parts([{citation:{truncated:true,references:[{status:'verified'}]}}]),['1 step'],'workParts with a cut report and no summary');
  same(await parts([{citation:{truncated:true,summary:{verified:2,...none},references:[vrow(0),vrow(1)]}}]),['2 references checked: all verified','1 step'],'workParts with a compacted whole report');
  same(await page.evaluate(()=>window.interspaceResearchCards.workerName({provider:'codex',role:'citation_checker'})),'Codex citation checker','workerName');
+
+ // Markdown pipe tables (a GFM subset) in the research renderer: a header line with a pipe and a delimiter row under it
+ // make a real table in a focusable, labelled box; anything else stays a paragraph. Cells go through the inline
+ // renderer, so they stay text-safe. Each block is [tag, text], and a table is ['table', {box, head, body}] with each
+ // cell as [text, class] (a header cell also gives its scope).
+ const blocks=src=>page.evaluate(src=>{const host=document.createElement('div');document.body.append(host);const box=window.interspaceResearchCards.markdown(src,host);
+  const out=[...box.children].map(n=>{
+   if(!n.matches('.table-wrap'))return [n.tagName.toLowerCase(),n.textContent];
+   const t=n.querySelector('table'),tb=t?t.tBodies:[];
+   return ['table',{box:[n.getAttribute('role'),n.getAttribute('tabindex'),n.getAttribute('aria-label'),t?.className,tb.length],
+    head:t?.tHead?[...t.tHead.rows].map(r=>[...r.cells].map(c=>[c.textContent,c.className,c.tagName==='TH'?c.getAttribute('scope'):'not th'])):null,
+    body:tb.length?[...tb[0].rows].map(r=>[...r.cells].map(c=>c.tagName==='TD'?[c.textContent,c.className]:['not td'])):null}];
+  });
+  host.remove();return out;},src);
+ same(await blocks('| Verdict | Count |\n|---|---:|\n| Supported | 12 |\n| Not supported | 3 |'),[['table',{box:['region','0','Table: Verdict, Count','md-table',1],head:[[['Verdict','','col'],['Count','align-right','col']]],
+  body:[[['Supported',''],['12','align-right']],[['Not supported',''],['3','align-right']]]}]],'Basic table');
+ same((await blocks('| L | C | R | N |\n|:--|:-:|--:|---|\n| a | b | c | d |'))[0][1].body,[[['a','align-left'],['b','align-center'],['c','align-right'],['d','']]],'Alignment classes');
+ same((await blocks('| L | C | R | N |\n| :-- | :-: | --: | --- |\n| a | b | c | d |'))[0][1].head.map(r=>r.map(c=>c[1])),[['align-left','align-center','align-right','']],'Header alignment');
+ // No outer pipes, and an escaped pipe is a literal pipe in its cell.
+ same(await blocks('Name | Note\n--- | ---\na \\| b | c'),[['table',{box:['region','0','Table: Name, Note','md-table',1],head:[[['Name','','col'],['Note','','col']]],body:[[['a | b',''],['c','']]]}]],'Escaped pipe, no outer pipes');
+ // A short row is padded with empty cells; extra cells are dropped.
+ same((await blocks('| A | B | C |\n|---|---|---|\n| 1 |\n| 1 | 2 | 3 | 4 | 5 |'))[0][1].body,[[['1',''],['',''],['','']],[['1',''],['2',''],['3','']]],'Ragged rows');
+ // A table interrupts a paragraph or a list; its header line is not part of either.
+ const T1=['table',{box:['region','0','Table: A, B','md-table',1],head:[[['A','','col'],['B','','col']]],body:[[['1',''],['2','']]]}];
+ same(await blocks('Intro line\n| A | B |\n|---|---|\n| 1 | 2 |'),[['p','Intro line'],T1],'Table after a paragraph line');
+ same(await blocks('- item one\n- item two\n| A | B |\n|---|---|\n| 1 | 2 |'),[['ul','item oneitem two'],T1],'Table after a list');
+ // No delimiter row, no table: a bare ---, pipes without a delimiter, and a delimiter with another cell count.
+ same(await blocks('Para\n---\nMore'),[['p','Para\n---\nMore']],'Bare --- line');
+ same(await blocks('a | b\n---\nc'),[['p','a | b\n---\nc']],'Pipe line over a bare ---');
+ same(await blocks('a | b\nc | d'),[['p','a | b\nc | d']],'Pipe lines without a delimiter');
+ same(await blocks('| A | B |\n|---|\n| 1 | 2 |'),[['p','| A | B |\n|---|\n| 1 | 2 |']],'Delimiter with another cell count');
+ // Cells use the inline renderer: code, bold, italic and https links with their host shown; other links stay text.
+ same(await page.evaluate(src=>{const host=document.createElement('div');document.body.append(host);const t=window.interspaceResearchCards.markdown(src,host).querySelector('table');
+  const out=t&&{code:[...t.querySelectorAll('td code')].map(x=>x.textContent),strong:[...t.querySelectorAll('td strong')].map(x=>x.textContent),em:[...t.querySelectorAll('td em')].map(x=>x.textContent),
+   links:[...t.querySelectorAll('a')].map(a=>a.getAttribute('href')),cells:[...t.querySelectorAll('td')].map(c=>c.textContent)};host.remove();return out;},
+  '| Code | Link | Bad |\n|---|---|---|\n| `x\\|y` is **bold** and *it* | [paper](https://example.org/p) | [bad](javascript:window.pwned=1) |'),
+  {code:['x|y'],strong:['bold'],em:['it'],links:['https://example.org/p'],cells:['x|y is bold and it','paper (example.org)','bad (javascript:window.pwned=1)']},'Inline Markdown in cells');
+ // Markup in a cell is literal text; inside a fence nothing is a table.
+ same(await page.evaluate(src=>{const host=document.createElement('div');document.body.append(host);const box=window.interspaceResearchCards.markdown(src,host);
+  const out={cell:box.querySelector('td')?.textContent,img:box.querySelectorAll('img,script').length};host.remove();return out;},'| A |\n|---|\n| <img src=x onerror=alert(1)> |'),
+  {cell:'<img src=x onerror=alert(1)>',img:0},'Markup in a cell');
+ same(await blocks('```\n| A | B |\n|---|---|\n| 1 | 2 |\n```'),[['pre','| A | B |\n|---|---|\n| 1 | 2 |']],'Table inside a fence');
+ // The body ends at a blank line, a line with no pipe, or a heading, fence or quote; that line then renders as usual.
+ const one=['table',{box:['region','0','Table: A','md-table',1],head:[[['A','','col']]],body:[[['1','']]]}];
+ same(await blocks('| A |\n|---|\n| 1 |\n\nAfter'),[one,['p','After']],'Table ends at a blank line');
+ same(await blocks('| A |\n|---|\n| 1 |\nAfter text'),[one,['p','After text']],'Table ends at a line without a pipe');
+ same(await blocks('| A |\n|---|\n| 1 |\n# Head | x\n> quote | y'),[one,['h3','Head | x'],['blockquote','quote | y']],'Table ends at a heading and a quote');
+ same(await blocks('| A |\n|---|\n| 1 |\n```\ncode | z\n```'),[one,['pre','code | z']],'Table ends at a fence');
+ // A header-only table has no tbody; a long label is cut to about 80 characters.
+ same(await blocks('| A | B |\n|---|---|'),[['table',{box:['region','0','Table: A, B','md-table',0],head:[[['A','','col'],['B','','col']]],body:null}]],'Header-only table');
+ {const label=(await blocks('|'+Array.from({length:12},(_,i)=>' Long header number '+i+' |').join('')+'\n|'+'---|'.repeat(12)))[0][1].box[2];
+  assert(label.startsWith('Table: Long header number 0, Long header number 1')&&label.length<=80&&label.endsWith('…'),'Long table label: '+label);}
+
  // The brief card (Simple's Show citation report): counts, the retracted alert and only the problem rows, problems first.
  // `draw` restores focus by id as stream.js render does, so the Show all toggle keeps focus across a re-render.
  const cardBox=(id,r,brief=true)=>page.evaluate(([id,r,brief])=>{const box=document.createElement('div');box.id=id;box.className='card test-card';document.body.append(box);const state={};
@@ -277,8 +330,22 @@ export default async function check(page,url){
  await page.waitForFunction(()=>document.querySelector('#agent-head').textContent.includes('Semantic Scholar 4 sent'));
  assert(await out.locator('.output-text').count()===1,'Open view lost on update');
 
+ // A wide table, in a reply and in the report, scrolls inside its own box and never the page, at 320/390/600 in light
+ // and dark; its cells never shrink to a character's width.
+ const WIDE='Columns compared:\n\n|'+Array.from({length:12},(_,i)=>' Column '+i+' |').join('')+'\n|'+'---|'.repeat(12)+'\n|'+Array.from({length:12},(_,i)=>' value '+i+' in plain words |').join('');
+ await push(page,[ev('r1','message',{role:'assistant',text:WIDE,final:true},'mw')]);
+ await page.evaluate(t=>{window.rFixture.readable.r1['report.md']+='\n\n'+t;},WIDE);
+ await push(page,[ev('r1','outputs',{outputs:[{name:'report.md',kind:'report',bytes:2300},{name:'references.bib',kind:'bibtex',bytes:512}]})]);
+ const tab=async name=>{const b=page.locator('[data-agent-tab='+name+']');if(await b.isVisible()&&await b.getAttribute('aria-pressed')!=='true')await b.click();};
+ const wide=async sel=>{await page.waitForFunction(sel=>document.querySelector(sel+' .table-wrap'),sel);
+  const s=await page.evaluate(sel=>{const w=document.querySelector(sel+' .table-wrap'),cells=[...w.querySelectorAll('th,td')];
+   return {shown:w.getClientRects().length>0,scrolls:w.scrollWidth>w.clientWidth,narrowest:Math.round(Math.min(...cells.map(c=>c.getBoundingClientRect().width)))};},sel);
+  assert(s.shown&&s.scrolls&&s.narrowest>=40,'Wide table in '+sel+': '+JSON.stringify(s));};
+ const fitsTable=[...await fit(page,'research-cards-table-reply',async()=>{await tab('conversation');await wide('#agent-stream [data-item=mw]');},false,[320,390,600]),
+  ...await fit(page,'research-cards-table-report',async()=>{await tab('report');await wide('#agent-report');},false,[320,390,600])];
+
  const fits=await fit(page,'research-cards',null,true);
  assert(!(await page.evaluate(()=>window.pwned)),'Script ran');
  assert(!errors.length,'Page errors: '+errors.join(' | '));
- return {checks:'research tool cards (search with title/authors/year/venue/source badges/citations/retracted flag, searched and skipped, paper with abstract, BibTeX, open copy, denied call, cut result then full blob), https-only links, collapsible long lists by keyboard, citation report counts from rows with verified/mismatch fields/not found/retracted/unchecked reason/unknown, problem rows first with reference numbers, retracted callout, honest Verified meaning, nothing else looks verified, per-source requests sent and cache answers without money, link host shown after markdown links, BibTeX output note, work-line helpers (summaryText, workParts with distinct papers from searches and Follow citations, a cut search with and without its full output, an unreadable search, searches that name no source, a declined team, cut citation reports never all verified, workerName), citationCounts and the citation pointer text for whole, compacted and cut reports (a problem past the cut still counted, a cut with no readable summary given no number), papers entries that are not objects skipped, brief citation card with problem rows only (at most 10, an Object.prototype status counted and sorted as a problem, the rows a cut report leaves out said, a retracted reference past the cut alerted, an empty list hidden) then Show all keeping focus by id, Show all and Show fewer with ten or fewer references, brief cards fitting at 320/390/600, no every-citation claim, no Review for research tasks, outputs panel with text-safe Markdown report and plain BibTeX, task_output_read per file, Save and cancelled save, live update keeps open view, literal text everywhere, light/dark 320-1280 fit',responsiveStates:fits.length};
+ return {checks:'research tool cards (search with title/authors/year/venue/source badges/citations/retracted flag, searched and skipped, paper with abstract, BibTeX, open copy, denied call, cut result then full blob), https-only links, collapsible long lists by keyboard, citation report counts from rows with verified/mismatch fields/not found/retracted/unchecked reason/unknown, problem rows first with reference numbers, retracted callout, honest Verified meaning, nothing else looks verified, per-source requests sent and cache answers without money, link host shown after markdown links, BibTeX output note, work-line helpers (summaryText, workParts with distinct papers from searches and Follow citations, a cut search with and without its full output, an unreadable search, searches that name no source, a declined team, cut citation reports never all verified, workerName), citationCounts and the citation pointer text for whole, compacted and cut reports (a problem past the cut still counted, a cut with no readable summary given no number), papers entries that are not objects skipped, brief citation card with problem rows only (at most 10, an Object.prototype status counted and sorted as a problem, the rows a cut report leaves out said, a retracted reference past the cut alerted, an empty list hidden) then Show all keeping focus by id, Show all and Show fewer with ten or fewer references, brief cards fitting at 320/390/600, no every-citation claim, no Review for research tasks, outputs panel with text-safe Markdown report and plain BibTeX, task_output_read per file, Save and cancelled save, live update keeps open view, literal text everywhere, Markdown pipe tables (thead with th scope=col and tbody, alignment classes, escaped pipes, no outer pipes, ragged rows padded or cut, a table after a paragraph line or a list, no table without a matching delimiter row, inline code/bold/italic/https links with host in cells and other links as text, literal markup in cells, nothing in a fence, the body ending at a blank, pipe-less, heading, quote or fence line, header-only tables without tbody, a labelled focusable region with a cut label), a wide table scrolling in its own box in a reply and the report at 320/390/600, light/dark 320-1280 fit',responsiveStates:fits.length+fitsTable.length};
 }

@@ -178,7 +178,44 @@ export default async function check(page,url){
  await page.evaluate(()=>scrollTo(0,400));
  assert(await page.evaluate(()=>scrollY)>0,'Settings scrolls after leaving the split reader');
  assert(!(await page.evaluate(()=>document.getElementById('agent-view').classList.contains('split'))),'Hidden reader keeps no split');
+
+ // A report with a Markdown table: citations in its cells, the first column's included, link to the report's own
+ // references in reading order; the reference list, its verdicts and the claims to look at work as in running text.
+ // At 1440x900 the four long columns wrap inside the reader's measure, so the table needs no sideways scroll.
+ const TABLE_REPORT='# Gains as reported\n\nThe gains below are as the authors state them [1].\n\n| Ref | Method | Evaluation | Headline result |\n|---|---|---|---|\n'+
+  '| [2] | Federated deep reinforcement learning that coordinates two xApps across the slices of one cell | Simulation with synthetic traffic | Higher throughput and lower delay than a conventional single-agent baseline in every scenario tried |\n'+
+  '| [3] | Transfer learning between slices that reuses the action-selection policy | Simulation | Lower delay for the low-latency slice and higher throughput for the broadband slice, as in [2] |\n'+
+  '| [4], [5] | Two constrained multi-agent methods compared on one testbed | Testbed with ten handsets | Fewer agreement violations for a small extra cost in resources |\n\n'+REPORT.slice(REPORT.indexOf('## References'));
+ const TABLE_CLAIMS={started_at:'t0',counts:{claims:1,pending:0,supported:0,partly:0,not_supported:1,cannot_tell:0},claims:[{id:'3:1',n:3,k:1,sentence:'Transfer learning between slices [3].',reference:'Ref 3',paper:null,
+  status:'judged',by:'codex Citation checker',at:'2026-11-27T10:00:00Z',verdict:'not_supported',reason:'The source reports no delay figure.',quote:'throughput only'}]};
+ await page.setViewportSize({width:1440,height:900});
+ await page.locator('[data-view=research]').click();await page.locator('[data-open-task=r1]').click();
+ await page.waitForFunction(()=>document.querySelector('#agent-view.split'));
+ await page.locator('[data-agent-tab=report]').click();
+ await page.evaluate(([t,c])=>{window.rFixture.readable.r1['report.md']=t;window.rFixture.claimsNow=c;},[TABLE_REPORT,TABLE_CLAIMS]);
+ await push(page,[ev('r1','outputs',{outputs:[{name:'report.md',kind:'report',bytes:1400}]}),ev('r1','claims',TABLE_CLAIMS.counts)]);
+ await page.waitForFunction(()=>document.querySelector('#agent-report .md-table')&&document.querySelector('#agent-report .claim-item'));
+ {const first=await reader.locator('.md-table').evaluate(t=>[...t.tBodies[0].rows].map(r=>[...r.cells[0].querySelectorAll('.cite-link')].map(a=>[a.textContent,a.getAttribute('href'),a.dataset.claim])));
+  assert(JSON.stringify(first)===JSON.stringify([[['2','#report-ref-2','2:1']],[['3','#report-ref-3','3:1']],[['4','#report-ref-4','4:1'],['5','#report-ref-5','5:1']]]),'Citations in the first column: '+JSON.stringify(first));}
+ {const all=await reader.locator('.cite-link').evaluateAll(as=>as.map(a=>a.textContent+'='+a.dataset.claim));
+  assert(JSON.stringify(all)===JSON.stringify(['1=1:1','2=2:1','3=3:1','2=2:2','4=4:1','5=5:1']),'Citations in reading order: '+JSON.stringify(all));}
+ assert(await reader.locator('.report-reference').count()===5&&(await text(reader.locator('.reader-summary')))==='5 references: 1 verified, 1 retracted, 1 not verified, 1 not checked, 1 not in the corpus.','References with a table: '+await text(reader.locator('.reader-summary')));
+ assert(await reader.locator('.md-table [data-claim="3:1"]').evaluate(a=>a.classList.contains('claim-not_supported')&&a.getAttribute('aria-label')==='Reference 3, not supported'),'Claim verdict on a cell citation');
+ assert(await reader.locator('.claim-item').count()===1&&(await text(reader.locator('.claim-item'))).includes('Transfer learning between slices [3].'),'Claims to look at with a table: '+await text(reader.locator('.claim-list')));
+ await reader.locator('.claim-item').getByRole('link',{name:'Show in text'}).click();
+ assert(await page.evaluate(()=>document.activeElement?.dataset.claim==='3:1'&&!!document.activeElement.closest('td')),'Show in text to a cell citation');
+ await reader.locator('.md-table .cite-link').filter({hasText:'4'}).focus();await page.keyboard.press('Enter');
+ assert(await page.evaluate(()=>document.activeElement?.id)==='report-ref-4','Cell citation focuses its reference');
+ await reader.locator('#report-ref-4 .report-back').click();
+ assert(await page.evaluate(()=>document.activeElement?.dataset.claim==='4:1'),'Back to the cell citation');
+ {const t=await page.evaluate(()=>{const w=document.querySelector('#agent-report .table-wrap'),t=w.querySelector('table'),text=document.querySelector('#agent-report .reader-text');
+   return {wrap:[w.scrollWidth,w.clientWidth],table:Math.round(t.getBoundingClientRect().width),text:Math.round(text.getBoundingClientRect().width),rows:Math.round(t.tBodies[0].rows[0].getBoundingClientRect().height),page:document.documentElement.scrollWidth<=innerWidth};});
+  assert(t.wrap[0]<=t.wrap[1]&&t.table<=t.text&&t.rows>40&&t.page,'Table at 1440x900 needs a sideways scroll or does not wrap: '+JSON.stringify(t));}
+ for(const width of [320,390,600]){await page.setViewportSize({width,height:900});await page.waitForFunction(()=>!document.querySelector('#agent-view.split'));
+  const r=await page.evaluate(()=>({shown:!!document.querySelector('#agent-report .table-wrap')?.getClientRects().length,page:document.documentElement.scrollWidth,width:innerWidth}));
+  assert(r.shown&&r.page<=r.width,'Table report overflows at '+width+': '+JSON.stringify(r));}
+ await page.setViewportSize({width:1280,height:1000});
  assert(!errors.length,'Page errors: '+errors.join('; '));
  assert(!(await page.evaluate(()=>window.pwned)),'Script ran');
- return {checks:'Read opens the Report tab (no inline report view), verdicts in words from the corpus, summary, literal text, citation links incl. lists and ranges, unknown brackets kept, keyboard jump and Back to text, Save, refetch on change, no sideways scroll; Focus: button on the results tab row only in the split reader, hides the conversation and the sidebar, results at least 90% wide, every tab, Esc and Exit focus, sidebar state kept and nothing saved, needs-you banner from the live task state with an always-present live region and Go to conversation to the team card, sidebar toggle never saves a fitted split width, leaving the task exits Focus'};
+ return {checks:'Read opens the Report tab (no inline report view), verdicts in words from the corpus, summary, literal text, citation links incl. lists and ranges, unknown brackets kept, keyboard jump and Back to text, Save, refetch on change, no sideways scroll; Focus: button on the results tab row only in the split reader, hides the conversation and the sidebar, results at least 90% wide, every tab, Esc and Exit focus, sidebar state kept and nothing saved, needs-you banner from the live task state with an always-present live region and Go to conversation to the team card, sidebar toggle never saves a fitted split width, leaving the task exits Focus; a report with a Markdown table: citations in its cells (first column included) linked in reading order with claim ids, references, verdicts and summary unchanged, a claim verdict on a cell citation, Show in text and Back to text to a cell, four long columns wrapping without a sideways scroll at 1440x900, no page overflow at 320/390/600'};
 }

@@ -20,8 +20,12 @@ const sub=(E,id,role,provider,turn)=>[started(E,id,role,provider,'running',turn)
 
 export default async function check(page,url){
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
- const R_TITLE='DRL for RAN slice resource allocation',C_TITLE='Citation checker: check every reference',L_TITLE='Live search',X_TITLE='Restarted reply';
- const rEv=evFor('R'),cEv=evFor('C'),lEv=evFor('L'),xEv=evFor('X');
+ const R_TITLE='DRL for RAN slice resource allocation',C_TITLE='Citation checker: check every reference',L_TITLE='Live search',X_TITLE='Restarted reply',T_TITLE='Table reply';
+ const rEv=evFor('R'),cEv=evFor('C'),lEv=evFor('L'),xEv=evFor('X'),tEv=evFor('T');
+ // Replies with a Markdown table of 8 rows. In the earlier one the cut (300 characters) falls in the table: the intro
+ // (130) and the header (19) come first, row 1 (68, with a link) starts at 149, row 2 (100) at 217 and row 3 at 317.
+ const tableReply=(intro,tag)=>para(130,intro)+'\n\n| Method | Setting | Result |\n|---|---|---|\n'+Array.from({length:8},(_,i)=>'| Method '+(i+1)+' | Simulation with synthetic traffic | '+
+  (i===0?'See the [paper](https://example.org/'+tag+'1)':i===3?'Also [this one](https://example.org/'+tag+'4) '+para(31,'with more'):para(59,'Result '+(i+1)))+' |').join('\n')+'\n\n'+para(100,'Closing words');
  const MSG_B=para(200,'Reply b opens')+'\n\n'+['First','Second','Third'].map(w=>'- '+para(78,w+' item')).join('\n')+'\n\n'+para(100,'See the [paper](https://example.org/p) for the method')+'\n\n'+para(200,'Last paragraph');
  const R_EVENTS=[
   rEv('scope',{scope_version:1,scope_digest:'sha256:aa',change:'approved',summary:'Scope approved.'}),
@@ -54,14 +58,17 @@ export default async function check(page,url){
   {id:'R',mode:'agent',kind:'research',project_id:null,title:R_TITLE,status:'idle',provider:'claude',model:null},
   {id:'C',mode:'agent',kind:'research',project_id:null,parent_task_id:'R',role:'citation_checker',provider:'codex',model:null,title:C_TITLE,status:'completed'},
   {id:'L',mode:'agent',kind:'research',project_id:null,title:L_TITLE,status:'running',provider:'claude',model:null},
-  {id:'X',mode:'agent',kind:'research',project_id:null,title:X_TITLE,status:'idle',provider:'claude',model:null}],
+  {id:'X',mode:'agent',kind:'research',project_id:null,title:X_TITLE,status:'idle',provider:'claude',model:null},
+  {id:'T',mode:'agent',kind:'research',project_id:null,title:T_TITLE,status:'idle',provider:'claude',model:null}],
   history:{
    R:R_EVENTS,
    C:[user(cEv,'user_u1','Check every reference.'),call(cEv,'v1','verify_citations',{}),ok(cEv,'v1',{references:[{},{},{}]}),
     cEv('citation_report',report(ref('verified'),ref('verified'),ref('not_found')),'cite_c'),reply(cEv,'cm','Checked.')],
    L:[user(lEv,'user_u1','Find sources.'),status(lEv,'running'),call(lEv,'l1','research_search',{query:'O-RAN xApp slicing'})],
    X:[user(xEv,'user_u1','First question','u1'),reply(xEv,'msg_1',para(600,'First answer'),'u1'),
-    user(xEv,'user_u4','Fourth question','u4'),reply(xEv,'msg_1',para(1500,'Fourth answer'),'u4')]},
+    user(xEv,'user_u4','Fourth question','u4'),reply(xEv,'msg_1',para(1500,'Fourth answer'),'u4')],
+   T:[user(tEv,'user_u1','Compare the methods.','u1'),reply(tEv,'msg_t1',tableReply('Here is the comparison','a'),'u1'),
+    user(tEv,'user_u2','And once more?','u2'),reply(tEv,'msg_t2',tableReply('Here it is again','b'),'u2')]},
   corpora:{R:{v:1,updated_at:'2026-11-27T10:00:00Z',full:true,incomplete:0,papers:[]}}});
  const nav=page.locator('[data-view=research]'),stream=page.locator('#agent-stream');
  const keys=()=>page.evaluate(()=>[...document.querySelectorAll('#agent-stream>[data-item]')].map(n=>n.dataset.item));
@@ -299,6 +306,37 @@ export default async function check(page,url){
  assert(same(await keys(),['user_u1','msg_1','user_u4','msg_1@u4','client:c1','user_u5'])&&(await whole('client:c1'))?.more===0,'After a later turn: '+JSON.stringify(await keys()));
  assert((await text(top('msg_1@u4').locator('.more')))==='Show whole reply ▾','Earlier reply not cut after a later turn: '+await text(top('msg_1@u4')));
 
+ // A table that crosses the cut is cut per row, never clamped: the header and the rows that start before the cut show,
+ // later rows and blocks are hidden, and the links in the rows shown stay reachable. Show whole reply shows every row,
+ // Show less cuts it again; the newest reply's table and Detailed are whole.
+ await openTask('T',T_TITLE);
+ await page.waitForFunction(()=>document.querySelector('#agent-stream>[data-item=msg_t2] table'));
+ const tableCut=k=>top(k).locator('.md').evaluate(md=>[...md.children].map(c=>{const w=c.matches('.table-wrap'),s=getComputedStyle(c);
+  return {tag:w?'table':c.tagName.toLowerCase(),hidden:c.hidden,cut:c.classList.contains('is-cut'),shown:c.getClientRects().length>0,
+   ...(w?{clamp:s.webkitLineClamp,display:s.display,head:[...c.querySelectorAll('thead tr')].map(r=>r.getClientRects().length>0),
+    rows:[...c.querySelectorAll('tbody tr')].map(r=>r.hidden?'hidden':r.getClientRects().length>0?'shown':'not shown'),
+    links:[...c.querySelectorAll('a')].map(a=>a.closest('[hidden]')?'hidden':a.tabIndex)}:{})};}));
+ const ROWS_CUT=['shown','shown','hidden','hidden','hidden','hidden','hidden','hidden'];
+ const T_CUT=[{tag:'p',hidden:false,cut:false,shown:true},{tag:'table',hidden:false,cut:true,shown:true,clamp:'none',display:'block',head:[true],rows:ROWS_CUT,links:[0,'hidden']},{tag:'p',hidden:true,cut:false,shown:false}];
+ assert(same(await tableCut('msg_t1'),T_CUT),'Earlier table reply cut: '+JSON.stringify(await tableCut('msg_t1')));
+ assert((await whole('msg_t2'))?.more===0&&await top('msg_t2').locator('tbody tr').count()===8,'Newest table reply cut: '+JSON.stringify(await tableCut('msg_t2')));
+ const moreT=page.locator('#more-T-msg_t1');
+ assert((await text(moreT))==='Show whole reply ▾'&&await moreT.getAttribute('aria-expanded')==='false','Table reply toggle: '+await text(moreT));
+ await moreT.focus();await page.keyboard.press('Enter');
+ await page.waitForFunction(()=>document.querySelector('#more-T-msg_t1')?.getAttribute('aria-expanded')==='true');
+ {const t=await tableCut('msg_t1');
+  assert(await whole('msg_t1')&&t[1].rows.every(r=>r==='shown')&&t[2].shown&&same(t[1].links,[0,0])&&await active()==='more-T-msg_t1'&&(await text(moreT))==='Show less ▴','Whole table reply: '+JSON.stringify(t)+' focus on '+await active());}
+ await page.keyboard.press('Enter');
+ await page.waitForFunction(()=>document.querySelector('#more-T-msg_t1')?.getAttribute('aria-expanded')==='false');
+ assert(same(await tableCut('msg_t1'),T_CUT)&&await active()==='more-T-msg_t1','Table reply after Show less: '+JSON.stringify(await tableCut('msg_t1')));
+ const fitsT=await fit(page,'simple-view-table',async()=>{if(await heading()!==T_TITLE)await openTask('T',T_TITLE);await top('msg_t1').locator('.table-wrap').waitFor();},false,[320,390,600]);
+ await page.evaluate(()=>window.interspaceDisplay.setDetail('detailed'));
+ await page.waitForFunction(()=>!document.querySelector('#agent-stream .more'));
+ assert(await whole('msg_t1')&&await top('msg_t1').locator('tbody tr').count()===8,'Table reply cut in Detailed: '+JSON.stringify(await tableCut('msg_t1')));
+ await page.evaluate(()=>window.interspaceDisplay.setDetail('simple'));
+ await page.waitForFunction(()=>document.querySelector('#more-T-msg_t1'));
+ assert(same(await tableCut('msg_t1'),T_CUT),'Table reply not cut again in Simple: '+JSON.stringify(await tableCut('msg_t1')));
+
  // T9 and Review Focus 5: Detailed shows every step with no work line and no stale in-work class, and every message
  // whole; Simple comes back with the opened line and the whole reply still open.
  await openTask('R',R_TITLE);
@@ -371,5 +409,5 @@ export default async function check(page,url){
 
  assert(!(await page.evaluate(()=>window.pwned)),'Script ran');
  assert(!errors.length,'Page errors: '+errors.join(' | '));
- return {checks:'research turns as your message, one work line and the reply; work-line counts (sources, papers, look-ups, report, team, subagents, all-verified citations, values, steps); folded count; at most 2 Open buttons; Details and Hide details by keyboard with focus kept; opened items in order with their own controls; open lines kept per task; asks, errors, failed calls, open teams, running and paused subagents, status rows and an edited scope never fold; Approve team sends team_answer; settled scope rows fold; a live line stays open with the new step last and focus kept; Working with the running search; Open from the line and Back to it with focus and position, also with Details left focused; compact and nested copies untouched; collision in Simple; earlier long messages and replies cut to their first lines (crossing block clamped, a list cut per item, later blocks hidden, links past the cut unreachable) with Show whole message, Show whole reply and Show less by keyboard with focus kept; the newest turn, a 600-character reply, pending, failed and streaming messages never cut; the newest reply whole while a message is sending or not sent, and cut once the server takes a later one; whole replies kept for the session and across Detailed; Detailed parity without stale in-work and the line kept open across it; a citation report with problems as one warn line (counts, mismatch, not found, retracted: do not cite) with Show citation report opening the brief card of problem rows and Show all by keyboard with focus kept, Open Corpus only on a root research task switching to the Corpus tab with focus and a fresh task_corpus, and the full report in Detailed; the N steps folded note beside the switch (described by it, in the top bar and the narrow layout, 1 step folded on a subagent, hidden in Detailed, at 0 and in Focus, and counting only what the display switches show); long query, previews, the citation pointer and the note with an open line, whole reply and brief card fit 320/390/600',responsiveStates:fits.length+fitsR.length+fitsNote.length};
+ return {checks:'research turns as your message, one work line and the reply; work-line counts (sources, papers, look-ups, report, team, subagents, all-verified citations, values, steps); folded count; at most 2 Open buttons; Details and Hide details by keyboard with focus kept; opened items in order with their own controls; open lines kept per task; asks, errors, failed calls, open teams, running and paused subagents, status rows and an edited scope never fold; Approve team sends team_answer; settled scope rows fold; a live line stays open with the new step last and focus kept; Working with the running search; Open from the line and Back to it with focus and position, also with Details left focused; compact and nested copies untouched; collision in Simple; earlier long messages and replies cut to their first lines (crossing block clamped, a list cut per item, later blocks hidden, links past the cut unreachable) with Show whole message, Show whole reply and Show less by keyboard with focus kept; the newest turn, a 600-character reply, pending, failed and streaming messages never cut; the newest reply whole while a message is sending or not sent, and cut once the server takes a later one; whole replies kept for the session and across Detailed; Detailed parity without stale in-work and the line kept open across it; a citation report with problems as one warn line (counts, mismatch, not found, retracted: do not cite) with Show citation report opening the brief card of problem rows and Show all by keyboard with focus kept, Open Corpus only on a root research task switching to the Corpus tab with focus and a fresh task_corpus, and the full report in Detailed; the N steps folded note beside the switch (described by it, in the top bar and the narrow layout, 1 step folded on a subagent, hidden in Detailed, at 0 and in Focus, and counting only what the display switches show); long query, previews, the citation pointer and the note with an open line, whole reply and brief card fit 320/390/600; an earlier reply whose table crosses the cut shows its header and the rows that start before the cut (no line clamp, links in shown rows reachable), later rows and blocks hidden, Show whole reply and Show less by keyboard with focus kept, the newest reply’s table and Detailed whole, the cut table fitting 320/390/600',responsiveStates:fits.length+fitsR.length+fitsNote.length+fitsT.length};
 }
