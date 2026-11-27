@@ -53,7 +53,7 @@ export default async function check(page,url){
  // the Detailed one does; Edit team opens today's editors; the answered team and orchestration calls fold away.
  await page.locator('[data-open-task="U"]').click();
  const toggle=page.locator('#agent-detail-toggle'),uStream=page.locator('#agent-view #agent-stream');
- assert(await toggle.isVisible()&&(await text(toggle))==='Simple view'&&await toggle.getAttribute('aria-pressed')==='false','Header toggle not showing Simple ('+await toggle.count()+' found)');
+ assert(await toggle.isVisible()&&(await text(toggle))==='Simple view'&&await toggle.getAttribute('aria-pressed')===null,'Header toggle not showing Simple, or carries aria-pressed beside its changing text ('+await toggle.count()+' found)');
  const sMembers=[{member_id:'s1',role:'researcher',brief:'Read the docs folder',provider:'codex',model:null,access:'read',default:true},
   {member_id:'s2',role:'implementer',brief:'Fix the typo',provider:'claude',model:null,access:'write',default:true}];
  const sTeam=id=>({team_id:id,summary:'Check the docs <b>first</b>.',budget:{used:10,budget:250000},members:sMembers});
@@ -80,6 +80,7 @@ export default async function check(page,url){
  assert(await sLine.evaluate(n=>n.classList.contains('is-line'))&&(await text(sLine)).startsWith('Team approved · Codex researcher, Claude implementer'),'Answered team not one line: '+await text(sLine));
  const teamDetails=sLine.locator('button.team-details');
  assert((await text(teamDetails))==='Details ▸'&&await teamDetails.getAttribute('aria-expanded')==='false','Answered line has no Details');
+ assert(await teamDetails.getAttribute('aria-label')==='Team details'&&await teamDetails.locator('span[aria-hidden=true]').textContent()==='▸','Answered line Details is not named for the team: '+await teamDetails.getAttribute('aria-label'));
  // Edit team reveals today's member editors in the same card; the untouched proposal still approves the same way.
  await push([ev('U',8,'team_proposed',sTeam('teamS2')),sPaused(9)]);
  const sCard2=uStream.locator('.card.team').nth(1),edit=sCard2.locator('button.team-edit');
@@ -98,7 +99,7 @@ export default async function check(page,url){
  const updates=await req('display_update');
  assert(updates.length===1&&updates[0].display.detail==='detailed','Toggle did not save Detailed: '+JSON.stringify(updates));
  await page.waitForFunction(()=>document.querySelector('#agent-detail-toggle')?.textContent==='Detailed view');
- assert(await toggle.getAttribute('aria-pressed')==='true','Toggle not pressed in Detailed');
+ assert(await toggle.getAttribute('aria-pressed')===null,'Toggle carries aria-pressed in Detailed');
  assert((await text(uStream)).includes('Orchestration')&&await uStream.locator('.card.team.is-line,.card.team.is-simple').count()===0,'Detailed did not restore the full cards');
  await sCard2.getByRole('button',{name:'Approve team',exact:true}).click();
  const detailedAnswer=(await req('team_answer')).at(-1);
@@ -159,6 +160,12 @@ export default async function check(page,url){
  await card.getByRole('button',{name:'Remove Reviewer',exact:true}).click();
  assert((await text(card)).includes('Removed')&&await card.getByRole('button',{name:'Keep Reviewer',exact:true}).count()===1,'Removed member not marked');
  assert(await card.getByLabel('Implementer brief').inputValue()==='Add input validation to parse()\nwith tests','Edit lost after a rebuild');
+ // Edits made in Detailed stay in view in Simple: the edited proposal keeps its editors and says it was changed.
+ await toggle.click();
+ await page.waitForFunction(()=>document.querySelector('#agent-detail-toggle')?.textContent==='Simple view');
+ assert(await card.getByLabel('Implementer brief').inputValue()==='Add input validation to parse()\nwith tests'&&await card.locator('.team-lines').count()===0&&(await text(card)).includes('You changed this team'),'Simple folded an edited team: '+await text(card));
+ await toggle.click();
+ await page.waitForFunction(()=>document.querySelector('#agent-detail-toggle')?.textContent==='Detailed view');
  await card.getByLabel('Researcher model').selectOption('claude-haiku-5-5');
  await card.getByRole('button',{name:'Approve team',exact:true}).click();
  const answers=(await req('team_answer')).filter(p=>p.task_id==='T');

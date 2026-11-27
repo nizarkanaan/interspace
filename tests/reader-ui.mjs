@@ -79,10 +79,10 @@ export default async function check(page,url){
  const focused=()=>page.evaluate(()=>document.getElementById('agent-view').classList.contains('focus'));
  const collapsed=()=>page.evaluate(()=>document.body.classList.contains('sidebar-collapsed'));
  const store=()=>page.evaluate(()=>{const out={};for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);out[k]=localStorage.getItem(k);}return JSON.stringify(Object.entries(out).sort());});
- assert(await page.locator('#agent-tabs #agent-focus').count()===1&&await focusButton.isVisible()&&(await text(focusButton))==='Focus'&&await focusButton.getAttribute('aria-pressed')==='false'&&await focusButton.getAttribute('type')==='button','Focus button on the results tab row');
+ assert(await page.locator('#agent-tabs #agent-focus').count()===1&&await focusButton.isVisible()&&(await text(focusButton))==='Focus'&&await focusButton.getAttribute('aria-pressed')===null&&await focusButton.getAttribute('type')==='button','Focus button on the results tab row');
  const open=await store();
  await focusButton.click();
- assert(await focused()&&await page.evaluate(()=>window.interspaceAgent.isFocused())&&(await text(focusButton))==='Exit focus'&&await focusButton.getAttribute('aria-pressed')==='true','Focus on');
+ assert(await focused()&&await page.evaluate(()=>window.interspaceAgent.isFocused())&&(await text(focusButton))==='Exit focus'&&await focusButton.getAttribute('aria-pressed')===null,'Focus on: the changing text says it, no aria-pressed');
  assert(await chat.isHidden()&&await aside.isHidden()&&await reader.isVisible()&&await banner.isHidden(),'Focus hides the conversation and the sidebar');
  {const share=await page.evaluate(()=>document.getElementById('agent-results').getBoundingClientRect().width/innerWidth);assert(share>=0.9,'Results pane share in Focus: '+share);}
  assert(!(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth)),'No sideways scroll in Focus');
@@ -91,7 +91,7 @@ export default async function check(page,url){
  assert(await focused()&&await page.locator('#agent-corpus').isVisible(),'Corpus in Focus');
  await page.locator('[data-agent-tab=report]').click();
  await page.keyboard.press('Escape');
- assert(!(await focused())&&!(await page.evaluate(()=>window.interspaceAgent.isFocused()))&&await chat.isVisible()&&await aside.isVisible()&&(await text(focusButton))==='Focus'&&await focusButton.getAttribute('aria-pressed')==='false','Esc exits Focus');
+ assert(!(await focused())&&!(await page.evaluate(()=>window.interspaceAgent.isFocused()))&&await chat.isVisible()&&await aside.isVisible()&&(await text(focusButton))==='Focus'&&await focusButton.getAttribute('aria-pressed')===null,'Esc exits Focus');
  assert(!(await collapsed())&&await store()===open,'Focus leaves an open sidebar open and saves nothing');
  // A collapsed sidebar stays collapsed after Focus, and Focus saves nothing.
  await page.locator('#sidebar-collapse').click();
@@ -124,9 +124,14 @@ export default async function check(page,url){
  await page.waitForFunction(()=>document.querySelector('#agent-stream .card.team'));
  await focusButton.click();
  assert(await focused()&&await banner.isHidden(),'No banner while nothing needs you');
+ // The banner follows the task's live state (its status events), as the sidebar does.
  await page.evaluate(()=>{window.rFixture.research[0].status='paused_team';window.rFixture.setState();});
+ await push(page,[ev('r1','status',{state:'paused_team',detail:'',queue_position:null,reason:null})]);
  await banner.waitFor();
  assert(await focused()&&(await text(banner)).includes('Approve the team'),'Banner: '+await text(banner));
+ {const live=await page.evaluate(()=>{const l=document.getElementById('agent-focus-live'),b=document.getElementById('agent-focus-banner');
+   return l?{text:l.textContent,role:l.getAttribute('role'),need:document.getElementById('agent-focus-need').textContent,shown:!l.hidden&&!l.closest('[hidden]'),bannerRole:b.getAttribute('role')}:null;});
+  assert(live&&live.role==='status'&&live.text==='Needs you: Approve the team'&&live.text===live.need&&live.shown&&live.bannerRole===null,'Live region for the banner: '+JSON.stringify(live));}
  // Scrolled down a long report, the banner and the whole tab row (Exit focus too) stay reachable, one under the other.
  await page.setViewportSize({width:1280,height:600});
  {const r=await page.evaluate(()=>{const x=document.getElementById('agent-results');x.scrollTop=x.scrollHeight;return {scroll:x.scrollHeight-x.clientHeight,top:x.scrollTop};});
@@ -151,8 +156,16 @@ export default async function check(page,url){
  await focusButton.click();
  assert(await banner.isVisible(),'Banner when Focus starts while the team waits');
  await page.evaluate(()=>{window.rFixture.research[0].status='idle';window.rFixture.setState();});
+ await push(page,[ev('r1','status',{state:'running',detail:'',queue_position:null,reason:null})]);
  await page.waitForFunction(()=>document.getElementById('agent-focus-banner').hidden);
  assert(await focused(),'Focus stays on after the team is answered');
+ assert(await page.evaluate(()=>document.getElementById('agent-focus-live').textContent)==='','Live region cleared with the banner');
+ // A question arrives as a status event while the task row still says idle: the banner names it.
+ await push(page,[ev('r1','status',{state:'paused_ask',detail:'',queue_position:null,reason:null})]);
+ await banner.waitFor();
+ assert((await text(banner)).includes('Answer a question')&&await page.evaluate(()=>document.getElementById('agent-focus-live').textContent)==='Needs you: Answer a question','Banner from the live state: '+await text(banner));
+ await push(page,[ev('r1','status',{state:'running',detail:'',queue_position:null,reason:null})]);
+ await page.waitForFunction(()=>document.getElementById('agent-focus-banner').hidden);
  // Leaving the task (to Settings, from the app menu while the sidebar is hidden) exits Focus and restores the sidebar.
  await page.evaluate(()=>document.querySelector('aside [data-view=settings]').click());
  await page.waitForFunction(()=>document.getElementById('agent-view').hidden);

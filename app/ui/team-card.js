@@ -91,13 +91,17 @@ function memberSummary(m,label,list){
 // Simple (2026-11-27-readable-workspace-design.md): "Codex researcher · reads", one member per line.
 const short=(m,label)=>P.title(m.provider)+' '+String(label).toLowerCase();
 function memberLine(m,label,list){const li=el('li','team-line',short(m,label)+' · '+(DOES[m.access]||m.access),list);li.dataset.member=m.member_id;}
-function detailsButton(parent,cls,onclick){const b=el('button',cls,'Details ▸',parent);b.type='button';b.setAttribute('aria-expanded','false');b.onclick=onclick;return b;}
+// "Details ▸" is named for what it opens ("Researcher details", "Team details"); the arrow is not read out.
+function detailsButton(parent,cls,name,onclick){
+ const b=el('button',cls,'Details ',parent);b.type='button';b.setAttribute('aria-label',name+' details');b.setAttribute('aria-expanded','false');
+ el('span','','▸',b).setAttribute('aria-hidden','true');b.onclick=onclick;return b;
+}
 // The answered team on one line; Details opens today's answered card in place.
 function answeredLine(card,ctx,team,answered){
  card.classList.add('is-line');
  const members=Array.isArray(answered.members)&&answered.members.length?answered.members:answered.decision==='approve'?team.members||[]:[],n=names(members);
  el('p','team-line-text',answered.decision==='approve'?'Team approved'+(members.length?' · '+members.map(m=>short(m,n.get(m.member_id))).join(', '):''):'Team declined',card);
- detailsButton(card,'team-details',ctx.unfold);
+ detailsButton(card,'team-details','Team',ctx.unfold);
 }
 // Edit team (or Details on a proposal that can no longer be answered) opens today's editors in the same card. The
 // button that did it is gone, so focus moves to the first editor, or to the card.
@@ -113,7 +117,8 @@ function teamCard(card,ctx){
  if(!team){el('h3','','Team',card);if(answered)el('p','answered',answered.decision==='approve'?'Team approved':'Team declined',card);return;}
  if(answered&&ctx.folded){answeredLine(card,ctx,team,answered);return;}
  // Simple shows a short card: the members one per line and the summary, until Edit team opens the editors.
- const folded=!answered&&!ctx.compact&&!!ctx.simple&&!draftFor(ctx.taskId,team).editing;
+ // A proposal already edited (in Detailed) keeps its editors and its "You changed this team" note.
+ const draft=draftFor(ctx.taskId,team),folded=!answered&&!ctx.compact&&!!ctx.simple&&!draft.editing&&!edited(team,draft);
  if(!answered&&!ctx.compact&&ctx.simple)card.classList.add('is-simple');
  const head=el('div','card-head',null,card);el('span','badge','Team',head);el('strong','','Proposed team',head);
  el('span','state',answered?(answered.decision==='approve'?'Approved':'Declined'):ctx.closed?'Closed':'Needs your approval',head);
@@ -139,9 +144,9 @@ function teamCard(card,ctx){
  }
  if(folded){list.classList.add('team-lines');for(const m of d.members)if(!d.removed.has(m.member_id))memberLine(m,n.get(m.member_id),list);}
  else for(const m of d.members)memberEditor(ctx,team,d,m,n.get(m.member_id),list,locked);
- if(ctx.closed&&!d.sent){el('p','footnote','This proposal is no longer open: the task is '+ctx.closedText+'.',card);if(folded)detailsButton(card,'team-details',()=>reveal(card,ctx,d));return;}
+ if(ctx.closed&&!d.sent){el('p','footnote','This proposal is no longer open: the task is '+ctx.closedText+'.',card);if(folded)detailsButton(card,'team-details','Proposed team',()=>reveal(card,ctx,d));return;}
  if(d.error)el('p','error-text',d.error,card).setAttribute('role','alert');
- if(d.sent){el('p','footnote',(d.sent==='approve'?'Approved':'Declined')+'. Waiting for the Orchestrator.',card);if(folded)detailsButton(card,'team-details',()=>reveal(card,ctx,d));return;}
+ if(d.sent){el('p','footnote',(d.sent==='approve'?'Approved':'Declined')+'. Waiting for the Orchestrator.',card);if(folded)detailsButton(card,'team-details','Proposed team',()=>reveal(card,ctx,d));return;}
  el('p','footnote',folded?'Nothing runs until you approve.':edited(team,d)?'You changed this team: Approve sends your edited team, which is checked again before it starts.':'Nothing runs until you approve. You can change each member’s provider, model, access and brief, or remove members.',card);
  const actions=el('div','actions',null,card);
  if(d.declining){
@@ -167,7 +172,7 @@ function subagentCard(card,ctx){
  const finished=st.state==='idle'&&s.finished;
  el('span','state '+(finished?'finished':st.state||''),finished?'Finished':ctx.statusText({state:st.state}),head);
  // Simple: provider, role and state on one line; Details opens the full card in place.
- if(ctx.folded){card.classList.add('is-line');detailsButton(head,'sub-details',ctx.unfold);return;}
+ if(ctx.folded){card.classList.add('is-line');detailsButton(head,'sub-details',label,ctx.unfold);return;}
  const facts=[(s.model||'default model'),ACCESS[s.access]||s.access];if(s.tokens_used!=null)facts.push(tokens(s.tokens_used)+' tokens');
  el('p','footnote',facts.filter(Boolean).join(' · '),card);
  if(s.brief)el('p','',s.brief,card);

@@ -209,15 +209,18 @@ function setFocus(on,{restore=true}={}){
  focusControls();
  if(lost&&!next&&restore)$('agent-focus').focus();
 }
-// The Focus button, and the banner that names what needs the user (the sidebar's words for the task row's state).
+// The Focus button, and the banner that names what needs the user (the sidebar's words for the task's live state).
+// The button's text says its state (Focus or Exit focus), so it carries no aria-pressed.
 function focusControls(){
- const b=$('agent-focus');b.hidden=!placed;b.textContent=focused?'Exit focus':'Focus';b.setAttribute('aria-pressed',String(focused));
- const need=focused?window.interspaceSidebar.needs(row(current)?.status):'';
- $('agent-focus-banner').hidden=!need;$('agent-focus-need').textContent=need?'Needs you: '+need:'';
+ const b=$('agent-focus');b.hidden=!placed;b.textContent=focused?'Exit focus':'Focus';b.classList.toggle('is-on',focused);
+ const need=focused?window.interspaceSidebar.needs(status(current)?.state):'',words=need?'Needs you: '+need:'';
+ $('agent-focus-banner').hidden=!need;$('agent-focus-need').textContent=words;
+ // The banner is shown and hidden, so a live region that is always there announces it; it changes only with the words.
+ const live=$('agent-focus-live');if(live.textContent!==words)live.textContent=words;
 }
 // Go to conversation: leave Focus and show what needs the user: the latest team or question card, or the scope note.
 function goToConversation(){
- const st=row(current)?.status,stream=$('agent-stream'),chat=document.querySelector('#agent-view .agent-main');
+ const st=status(current)?.state,stream=$('agent-stream'),chat=document.querySelector('#agent-view .agent-main');
  setFocus(false,{restore:false});
  const last=sel=>[...stream.querySelectorAll(sel)].pop()||null,note=$('agent-scope-note');
  const target=st==='paused_team'?last('.card.team'):st==='paused_ask'?last('.card.ask'):st==='paused_scope'&&!note.hidden?note:null;
@@ -236,10 +239,10 @@ function topbar(id,split){
  $('agent-topbar-stop').hidden=!stoppable(id);
 }
 // Simple or Detailed conversation (2026-11-27-readable-workspace-design.md): one click beside the conversation, the
-// same setting as Settings → Conversation display.
+// same setting as Settings → Conversation display. Its text says the current view, so it carries no aria-pressed.
 function detailToggle(talk){
  const b=$('agent-detail-toggle'),detailed=window.interspaceDisplay?.get?.()?.detail==='detailed';
- b.hidden=!talk;b.textContent=detailed?'Detailed view':'Simple view';b.setAttribute('aria-pressed',String(detailed));
+ b.hidden=!talk;b.textContent=detailed?'Detailed view':'Simple view';b.classList.toggle('is-on',detailed);
 }
 function scopeNote(id,talk){
  const info=scopeInfo(id),waiting=!!info.scope&&!Scope.approved(info)&&!info.editing;

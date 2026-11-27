@@ -67,6 +67,7 @@ export default async function check(page,url){
  assert(!lineText.includes('Survey the')&&await line.getByRole('button',{name:'Open Researcher subagent'}).count()===0,'Subagent line shows its full card: '+lineText);
  const more=line.locator('button.sub-details');
  assert((await text(more))==='Details ▸'&&await more.getAttribute('aria-expanded')==='false','Subagent line has no Details');
+ assert(await more.getAttribute('aria-label')==='Researcher details'&&await more.locator('span[aria-hidden=true]').textContent()==='▸','Subagent Details is not named for its role: '+await more.getAttribute('aria-label'));
  const svText=await text(sv);
  assert(!svText.includes('Wait for')&&!svText.includes('Still waiting'),'Orchestration call shown in Simple: '+svText);
  assert(svText.includes('Start member')&&svText.includes('No member s9'),'Failed orchestration call hidden in Simple: '+svText);

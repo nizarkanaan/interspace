@@ -537,7 +537,7 @@ html:has(#agent-view.split:not([hidden])){overflow:hidden;height:100%;overscroll
 .sub-details,.team-details{justify-self:start;font-size:12.5px;padding:2px 0;border:0;background:transparent;color:var(--accent)}
 .sub-details:hover,.team-details:hover{background:transparent;text-decoration:underline}
 .detail-toggle{display:block;margin:0 0 10px auto;font-size:13px;padding:5px 10px}
-.detail-toggle[aria-pressed=true]{background:var(--subtle);color:var(--accent);border-color:var(--accent)}
+.detail-toggle.is-on{background:var(--subtle);color:var(--accent);border-color:var(--accent)}
 .agent-topbar .detail-toggle{margin:0;font-size:13px;padding:5px 10px}
 
 /* Collapsible sidebar: a 44px rail with only the show button. Not applied when the layout stacks (600px and below). */
@@ -557,7 +557,7 @@ html:has(#agent-view.split:not([hidden])){overflow:hidden;height:100%;overscroll
    window. The conversation, the divider, the conversation's view toggle and the sidebar are hidden. */
 .detail-tabs .focus-toggle{margin-left:auto;align-self:center;border:1px solid var(--line);border-radius:7px;padding:4px 12px;font-size:13px;color:var(--muted)}
 .detail-tabs .focus-toggle:hover{background:var(--surface);border-color:var(--muted);color:var(--ink)}
-.detail-tabs .focus-toggle[aria-pressed=true]{background:var(--subtle);color:var(--accent);border-color:var(--accent)}
+.detail-tabs .focus-toggle.is-on{background:var(--subtle);color:var(--accent);border-color:var(--accent)}
 #agent-view.split.focus .agent-layout{grid-template-columns:minmax(0,1fr)}
 #agent-view.split.focus .agent-main,#agent-view.split.focus .split-handle,#agent-view.focus #agent-detail-toggle{display:none}
 body:has(#agent-view.focus:not([hidden])) .shell{grid-template-columns:minmax(0,1fr)}

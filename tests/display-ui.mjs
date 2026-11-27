@@ -37,7 +37,7 @@ export default async function check(page,url){
  // approval the results open on Scope and outputs, which holds status, scope and outputs.
  const panel=page.locator('#agent-details');
  assert(await page.locator('#agent-view.split').count()===1&&await page.locator('#agent-topbar').isVisible(),'Split reader with a top bar');
- assert(await page.locator('#agent-topbar #agent-detail-toggle').isVisible()&&(await text(page.locator('#agent-detail-toggle')))==='Simple view','Simple/Detailed toggle in the top bar');
+ assert(await page.locator('#agent-topbar #agent-detail-toggle').isVisible()&&(await text(page.locator('#agent-detail-toggle')))==='Simple view'&&await page.locator('#agent-detail-toggle').getAttribute('aria-pressed')===null,'Simple/Detailed toggle in the top bar, its text the only state');
  assert(await panel.isVisible()&&(await text(page.locator('[data-agent-tab=details]')))==='Scope and outputs'&&(await page.locator('[data-agent-tab=details]').getAttribute('aria-pressed'))==='true','Scope and outputs open first');
  for(const id of ['agent-head','agent-scope'])assert(await panel.locator('#'+id).count()===1,id+' in the panel');
  assert(await page.locator('[data-agent-tab=conversation]').isHidden(),'No Conversation tab beside the conversation');
