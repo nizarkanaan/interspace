@@ -310,6 +310,27 @@ class DefaultsTests(unittest.TestCase):
         custom['roles']['researcher'] = {'provider': 'nope', 'model': None}
         self.assertEqual(orchestrator.routing_defaults({'routing': custom}, table), orchestrator.DEFAULT_ROUTING)
 
+    def effort_routing(self):
+        custom = json.loads(json.dumps(orchestrator.DEFAULT_ROUTING))
+        custom['roles']['researcher'] = {'provider': 'codex', 'model': 'gpt-6-sol', 'effort': 'xhigh'}
+        return custom
+
+    def resolve_member(self, **extra):
+        table = self.table()
+        member = dict({'role': 'researcher', 'brief': 'b'}, **extra)
+        _, (resolved,) = orchestrator.normalize_team({'summary': 's', 'members': [member], 'reason_for_overrides': 'r'},
+                                                     self.effort_routing(), table)
+        return resolved
+
+    def test_member_on_role_model_keeps_role_effort(self):
+        self.assertEqual(self.resolve_member()['effort'], 'xhigh')
+
+    def test_member_on_other_model_gets_default_effort(self):
+        self.assertIsNone(self.resolve_member(model='gpt-6-luna')['effort'])
+
+    def test_member_on_other_provider_gets_default_effort(self):
+        self.assertIsNone(self.resolve_member(provider='claude')['effort'])
+
     def test_write_on_a_provider_without_write_is_refused(self):
         reader = {'name': 'reader', 'title': 'Reader', 'models': (), 'default_model': None,
                   'capabilities': {'write': False, 'web_search': True, 'approvals': False}}
@@ -392,6 +413,17 @@ class RunTests(OrchestratorCase):
         self.assertEqual(child_budget[-1]['budget'], 250000)
         statuses = [e['data'] for e in self.events_of('parent', 'subagent_status') if e['data']['task_id'] == researcher['id']]
         self.assertEqual(statuses[-1]['tokens_used'], 1200)
+
+    def test_approved_team_creates_children_carrying_the_member_effort(self):
+        self.make(orchestrating(self.results))
+        self.store.state['routing'] = {'v': 1, 'orchestrator': {'provider': 'claude', 'model': None, 'effort': None},
+                                       'roles': dict(orchestrator.DEFAULT_ROUTING['roles'],
+                                                     researcher={'provider': 'codex', 'model': None, 'effort': 'xhigh'})}
+        self.parent()
+        self.sched.submit('parent', 'p1', 'x', None)
+        self.approve_when_proposed()
+        self.wait_state('parent', 'idle')
+        self.assertEqual((self.member_task('m1')['effort'], self.member_task('m2')['effort']), ('xhigh', None))
 
     def test_a_sibling_continues_when_one_child_runs_out_of_budget(self):
         gate = threading.Event()

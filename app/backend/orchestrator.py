@@ -146,7 +146,8 @@ def system_prompt(routing, providers, *, research=False, project_less=False):
     lines += ['', "The user's routing defaults:"]
     for role in tasks.TEAM_ROLES:
         entry = routing['roles'].get(role) or DEFAULT_ROUTING['roles'][role]
-        lines.append('- %s: %s, model %s' % (role, entry['provider'], entry.get('model') or 'default'))
+        lines.append('- %s: %s, model %s, effort %s' % (role, entry['provider'], entry.get('model') or 'default',
+                                                        entry.get('effort') or 'default'))
     lines += ['', 'Providers and their capabilities:']
     for name, record in providers.items():
         caps = record.get('capabilities') or {}
@@ -194,8 +195,9 @@ def _resolve(member, routing, table, *, member_id, reason=None):
         raise OrchestrationError('Access must be read or write.')
     if (access == 'write' or role in tasks.WRITE_ROLES) and not (record.get('capabilities') or {}).get('write'):
         raise OrchestrationError(record.get('title', provider) + ' cannot write, so it cannot take the ' + role + ' role.')
+    effort = default.get('effort') if provider == default['provider'] and model == default_model else None
     result = {'member_id': member_id, 'role': role, 'brief': _text(member.get('brief'), tasks.MAX_BRIEF_CHARS, 'A brief'),
-              'provider': provider, 'model': model, 'access': access,
+              'provider': provider, 'model': model, 'effort': effort, 'access': access,
               'default': provider == default['provider'] and model == default_model}
     if not result['default'] and reason:
         result['reason'] = reason
@@ -540,7 +542,7 @@ class Orchestrator:
         collection = s.store.collection(parent)  # The project's tasks, or the Research collection.
         for member in members:
             child = tasks.child(parent, role=member['role'], brief_text=member['brief'], provider=member['provider'],
-                                model=member['model'], access=member['access'], team_id=team['team_id'],
+                                model=member['model'], effort=member.get('effort'), access=member['access'], team_id=team['team_id'],
                                 member_id=member['member_id'])
             scope = child_scope(parent['scope'], child['id'], member['access'])
             s.policy.validate(scope, project_ids=list(s.store.state['projects']))

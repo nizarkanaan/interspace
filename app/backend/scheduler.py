@@ -517,6 +517,8 @@ class RunContext:
         self.scope = copy.deepcopy(task['scope'])  # For prompts and display only; decisions read the live scope.
         # A model id from the signed-in account's model list (0B-7), or None for the provider default.
         self.model = task.get('model') if isinstance(task.get('model'), str) and task.get('model') else None
+        # An effort level for the provider, or None for its default.
+        self.effort = task.get('effort') if isinstance(task.get('effort'), str) and task.get('effort') else None
         self.cancel = run.cancel
         self.role = run.role
         # 'read' or 'write': runtimes start read sessions without workspace writes. The Orchestrator reads only.

@@ -436,6 +436,19 @@ class AgentProviderTests(ApplicationCase):
         task = self.create(app, project_id, model='')
         self.assertEqual((task['provider'], task['model']), ('codex', None))
 
+    def test_orchestrator_choice_carries_the_routing_effort(self):
+        app = self.open()
+        routing_doc = routing.default()
+        routing_doc['orchestrator'] = {'provider': 'claude', 'model': 'claude-opus-5-5', 'effort': 'high'}
+        app.handle('routing_update', {'routing': routing_doc})
+        with app.lock:
+            choose = app.orchestrator_choice
+            self.assertEqual(choose({}), ('claude', 'claude-opus-5-5', 'high'))
+            self.assertEqual(choose({'model': 'claude-haiku-5-5'}), ('claude', 'claude-haiku-5-5', None))
+            self.assertEqual(choose({'effort': 'max'}), ('claude', 'claude-opus-5-5', 'max'))
+            with self.assertRaises(ValueError):
+                choose({'effort': 'turbo'})
+
     def test_invalid_provider_or_model_is_refused_before_anything_is_saved(self):
         app = self.open()
         project_id = self.add_project(app)

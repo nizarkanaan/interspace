@@ -402,7 +402,7 @@ class Application:
                 row=dict(id=identity,title=task['title'],mode=task.get('mode','review'),kind=tasks.kind(task),
                          project_id=project.get('id'))
                 if row['mode']=='agent':
-                    row.update(status=task['agent'].get('state') or 'draft',provider=tasks.provider(task),model=task.get('model'),
+                    row.update(status=task['agent'].get('state') or 'draft',provider=tasks.provider(task),model=task.get('model'),effort=task.get('effort'),
                                role=task.get('role'),parent_task_id=task.get('parent_task_id'))
                     # The sidebar groups tasks by what they need (2026-11-20-sidebar-modes-design.md).
                     row['archived']=isinstance(task.get('archived_at'),str)
@@ -464,7 +464,7 @@ class Application:
         except (KeyError,TypeError,ValueError):approved=False
         agent=task['agent']
         return {'state':agent.get('state'),'detail':agent.get('detail',''),'reason':agent.get('reason'),
-                'provider':tasks.provider(task),'model':task.get('model'),
+                'provider':tasks.provider(task),'model':task.get('model'),'effort':task.get('effort'),
                 'scope_version':scope.get('version'),'scope_approved':approved,'project_id':agent['project_id'],
                 'kind':tasks.kind(task),'last_seq':self.events.last_seq(task['id'])}
 
@@ -652,8 +652,8 @@ class Application:
                 if project is None:raise ValueError('Unknown project.')
                 if not isinstance(project.get('tasks',{}),dict):raise ValueError('Saved tasks are unavailable; preserve app data before recovery.')
                 collection=project.setdefault('tasks',{})
-            runtime,model=self.orchestrator_choice(params)
-            task=tasks.create(params.get('title','New agent task'),project_id=project_id,provider=runtime,model=model,
+            runtime,model,effort=self.orchestrator_choice(params)
+            task=tasks.create(params.get('title','New agent task'),project_id=project_id,provider=runtime,model=model,effort=effort,
                               kind='research' if research else 'project')
             proposed=params.get('scope')
             if proposed is not None:
@@ -683,9 +683,10 @@ class Application:
             return {'task_id':task['id'],'scope_digest':digest}
 
     def orchestrator_choice(self, params):
-        """(provider, model) for a new Orchestrator task: `routing.orchestrator` unless the request names them.
+        """(provider, model, effort) for a new Orchestrator task: `routing.orchestrator` unless the request names them.
 
         An explicit `provider` without `model` runs that provider's default model. A blank model means the default.
+        Without an `effort`, the routing effort applies only when the provider and the model both match the routing's.
         """
         default=routing.current(self.state)['orchestrator']
         provider=tasks.validate_provider(params['provider'] if 'provider' in params else default['provider'])
@@ -693,7 +694,12 @@ class Application:
             model=params['model']
         else:
             model=default['model'] if provider==default['provider'] else None
-        return provider,tasks.validate_model(provider,model)
+        model=tasks.validate_model(provider,model)
+        if 'effort' in params:
+            effort=params['effort']
+        else:
+            effort=default.get('effort') if provider==default['provider'] and model==tasks.validate_model(provider,default.get('model')) else None
+        return provider,model,tasks.validate_effort(provider,effort)
 
     def scope_update(self, task, params):
         current=task['scope']

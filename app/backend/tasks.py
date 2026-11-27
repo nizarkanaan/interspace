@@ -21,6 +21,7 @@ AGENT_STATES = ('queued','starting','running','waiting_lock','paused_ask','pause
 # saved before providers existed have no `provider`; they ran on Codex.
 LEGACY_PROVIDER = 'codex'
 SAVED_MODEL = re.compile(registry.MODEL_RE)
+SAVED_EFFORT = re.compile(registry.EFFORT_RE)
 MAX_SAFE_INTEGER = 9007199254740991
 # Saved run stages that ended; any other saved stage was cut off when an earlier version quit.
 FINISHED_STAGES = ('completed','completed_unreviewed','accepted','needs_revision','blocked','failed','cancelled',
@@ -82,6 +83,15 @@ def validate_model(provider_name, value):
     return registry.check_model(validate_provider(provider_name),value)
 
 
+def validate_effort(provider_name, value):
+    """An optional effort for `provider_name`, checked by the registry; None (or blank) means the provider's default."""
+    if value is None:return None
+    if not isinstance(value,str):raise ValueError('The effort must be an effort level.')
+    value=value.strip()
+    if not value:return None
+    return registry.check_effort(validate_provider(provider_name),value)
+
+
 def provider(task):
     """The provider an agent task runs on; agent tasks saved before providers existed run on Codex."""
     return task.get('provider',LEGACY_PROVIDER)
@@ -96,7 +106,7 @@ def is_research(task):
     return kind(task)=='research'
 
 
-def create(name='New agent task', *, project_id, provider=None, model=None, token_budget=None, kind=None):
+def create(name='New agent task', *, project_id, provider=None, model=None, effort=None, token_budget=None, kind=None):
     """A new Orchestrator task. The scope (scope.md) is attached by the caller, which needs the task ID to build it.
 
     `project_id` None needs `kind='research'` (research/tasks.md); tasks with a project are `kind='project'`.
@@ -111,6 +121,7 @@ def create(name='New agent task', *, project_id, provider=None, model=None, toke
             'error':'','error_status':None,'scope':None,'scope_approval':None,
             'provider':validate_provider(registry.DEFAULT_PROVIDER if provider is None else provider),
             'model':validate_model(registry.DEFAULT_PROVIDER if provider is None else provider,model),
+            'effort':validate_effort(registry.DEFAULT_PROVIDER if provider is None else provider,effort),
             'agent':{'project_id':project_id,'state':None,'detail':'','reason':None,'turns':0,'active_s':0.0,'workspaces':{}}}
 
 
@@ -130,14 +141,14 @@ def validate_access(value):
     return value
 
 
-def child(parent, *, role, brief_text, provider, model, access, team_id, member_id):
+def child(parent, *, role, brief_text, provider, model, access, team_id, member_id, effort=None):
     """A subagent row (orchestration.md): a normal agent task with the child fields. Scope is attached by the caller."""
     if role not in TEAM_ROLES:raise ValueError('Unknown subagent role.')
     if is_research(parent) and (role in WRITE_ROLES or access!='read'):raise ValueError(RESEARCH_WRITE_REFUSED)
     text=brief(brief_text)
     label=role.replace('_',' ').capitalize()+': '+' '.join(text.split())
     task=create(label if len(label)<=160 else label[:159]+'…',project_id=parent['agent']['project_id'],
-                provider=provider,model=model,token_budget=parent.get('token_budget'),kind=kind(parent))
+                provider=provider,model=model,effort=effort,token_budget=parent.get('token_budget'),kind=kind(parent))
     task.update(role=role,brief=text,access=validate_access(access),parent_task_id=parent['id'],
                 team_id=team_id,member_id=member_id)
     return task
@@ -171,6 +182,8 @@ def validate_agent(task):
     # model a provider no longer offers fails that turn instead of hiding the whole saved task.
     model=task.get('model')
     if model is not None and (not isinstance(model,str) or not SAVED_MODEL.match(model)):raise ValueError()
+    effort=task.get('effort')
+    if effort is not None and (not isinstance(effort,str) or not SAVED_EFFORT.match(effort)):raise ValueError()
     if task.get('scope') is not None and not isinstance(task['scope'],dict):raise ValueError()
     if task.get('archived_at') is not None and not isinstance(task['archived_at'],str):raise ValueError()
     if task.get('scope_approval') is not None and not isinstance(task['scope_approval'],dict):raise ValueError()

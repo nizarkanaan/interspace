@@ -82,6 +82,22 @@ class TaskStorageTests(unittest.TestCase):
             with self.subTest(method=method):
                 with self.assertRaisesRegex(ValueError,'Unknown method'):app.handle(method,{'project_id':pid})
 
+    def test_effort_is_stored_validated_and_optional_on_saved_tasks(self):
+        task=tasks.create('t',project_id='p',provider='claude',model=None,effort='high')
+        self.assertEqual(task['effort'],'high')
+        tasks.validate(task,task['id'])
+        self.assertIsNone(tasks.create('t',project_id='p')['effort'])
+        self.assertIsNone(tasks.validate_effort('claude','  '))
+        with self.assertRaises(ValueError):tasks.validate_effort('claude','turbo')
+        old=tasks.create('t',project_id='p');old.pop('effort')
+        tasks.validate(old,old['id'])
+        bad=dict(task,effort='Bad Value')
+        with self.assertRaises(ValueError):tasks.validate(bad,bad['id'])
+        parent=tasks.create('t',project_id='p')
+        child=tasks.child(parent,role='researcher',brief_text='b',provider='claude',model=None,effort='max',
+                          access='read',team_id='t1',member_id='m1')
+        self.assertEqual(child['effort'],'max')
+
     def test_new_tasks_are_orchestrator_tasks_and_subagents_are_child_rows(self):
         parent=tasks.create('Fix it',project_id='p1',token_budget=90000)
         self.assertEqual(parent['role'],'orchestrator')
