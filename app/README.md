@@ -26,14 +26,14 @@ Launch `dist/Interspace.app` with a double-click. It opens its own native window
 
 **Add project folder** registers a Git repository. The project picker switches among projects; each keeps its own tasks. **Settings → Project details** saves a name, brief, priority and next action locally, without a model call or source edits.
 
-**Settings → Providers** shows each provider's sign-in state, starts a sign-in or shows the command to run, and sets the default provider and model for each role (Orchestrator, researcher, implementer, reviewer, tester, writer, citation checker).
+**Settings → Providers** shows each provider's sign-in state, starts a sign-in or shows the command to run, and sets the default provider for each role (Orchestrator, researcher, implementer, reviewer, tester, writer, citation checker). Each role has a Model and an Effort dropdown. Claude lists claude-sonnet-5-5, claude-opus-5-5 and claude-haiku-5-5, with efforts low to max; Default runs low. Codex's models and efforts come from your signed-in account. If Codex is signed out or does not answer, you type the model instead.
 
 **New task** starts an Orchestrator conversation. Choose **Research question** (no project needed; see [Research](#research)) or **Project task**:
-1. Give a title and, for a project task, pick the project. The Orchestrator uses your default provider and model unless you change them here.
+1. Give a title and, for a project task, pick the project. The Orchestrator uses your default provider, model and effort unless you change them here; New task has the same Model and Effort dropdowns.
 2. Review the task scope, then choose **Create task**.
 3. Approve the scope on the task, then message the Orchestrator.
 
-**Teams.** When the Orchestrator wants help, it proposes a team. Each member has a role, a brief, a provider, a model and read or write access. A member that differs from your defaults shows the Orchestrator's one-line reason. You can change any member's provider, model, access and brief, or remove members. Nothing runs until you choose **Approve team**; **Decline** can carry a note back to the Orchestrator.
+**Teams.** When the Orchestrator wants help, it proposes a team. Each member has a role, a brief, a provider, a model (a dropdown on the team card) and read or write access. A member that differs from your defaults shows the Orchestrator's one-line reason. You can change any member's provider, model, access and brief, or remove members. Nothing runs until you choose **Approve team**; **Decline** can carry a note back to the Orchestrator.
 
 **Subagents.** Approved members run in parallel. Each works in its own copy of the project, and its card on the task shows its state, tokens and latest activity. **Show activity** opens its full stream. Subagents never appear as separate tasks on the desk; **Running** groups them under their task.
 
