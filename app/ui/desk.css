@@ -502,3 +502,16 @@ body.resizing,body.resizing *{cursor:col-resize!important;user-select:none}
 
 /* Split reader: the document never scrolls (focus and scrollIntoView could scroll it and shift the view). */
 html:has(#agent-view.split:not([hidden])){overflow:hidden;height:100%;overscroll-behavior:none}
+/* Simple conversation (2026-11-27-readable-workspace-design.md): folded team and subagent cards, and the header toggle. */
+.card.is-line{border:0;border-left:2px solid var(--line);border-radius:0;padding:2px 0 2px 12px;gap:2px;background:transparent}
+.card.team.is-line{border-left-color:var(--accent);display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 10px}
+.card.is-line .card-head strong{flex:0 1 auto}
+.team-line-text{flex:0 1 auto;font-size:14px;overflow-wrap:anywhere}
+.card.team.is-simple .actions{justify-content:flex-start}
+.team-lines{gap:2px}
+.team-line{font-size:14px;overflow-wrap:anywhere}
+.sub-details,.team-details{justify-self:start;font-size:12.5px;padding:2px 0;border:0;background:transparent;color:var(--accent)}
+.sub-details:hover,.team-details:hover{background:transparent;text-decoration:underline}
+.detail-toggle{display:block;margin:0 0 10px auto;font-size:13px;padding:5px 10px}
+.detail-toggle[aria-pressed=true]{background:var(--subtle);color:var(--accent);border-color:var(--accent)}
+.agent-topbar .detail-toggle{margin:0;font-size:13px;padding:5px 10px}

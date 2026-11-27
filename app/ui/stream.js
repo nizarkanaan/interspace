@@ -181,13 +181,16 @@ function toolCard(m,it,card){
 // Conversation display (2026-11-20-details-panel-and-display-design.md). Your messages, replies, questions, team
 // cards, subagents, errors and failed calls always show; the rest follows Settings → Conversation display.
 const NOTE_ROWS=new Set(['budget','scope','status']);
-const display=()=>window.interspaceDisplay?.get?.()||{thinking:'summary',searches:'summary',tools:true,citations:true,plans:true,notes:true};
+const display=()=>window.interspaceDisplay?.get?.()||{thinking:'summary',searches:'summary',tools:true,citations:true,plans:true,notes:true,detail:'simple'};
 function visible(it,d){
  if(it.message||it.team||it.sub||it.ask||it.error||it.blobError)return true;
  if(it.row)return d.notes||!NOTE_ROWS.has(it.row);
  if(it.citation)return !!d.citations;
  if(it.call||it.result||it.output!=null){
   if(it.result&&it.result.status&&it.result.status!=='ok')return true;
+  // Simple (2026-11-27-readable-workspace-design.md) hides orchestration calls whatever the commands switch says;
+  // a failed one still shows (above), a waiting one does not.
+  if(it.call?.category==='orchestrate'&&d.detail!=='detailed')return false;
   return it.call?.category==='research'?d.searches!=='hidden':!!d.tools;
  }
  if(it.diff)return !!d.tools;
@@ -207,10 +210,12 @@ function build(m,it,compact){
  if(it.row){const r=el('p','row-event '+it.row,it.text);r.dataset.item=it.key;return r;}
  if(it.message){const msg=el('div','message '+it.message.role+(it.message.pending?' pending':''));msg.dataset.item=it.key;el('small','',it.message.role==='user'?'You':'Agent',msg);(it.message.role==='assistant'&&it.message.final&&window.interspaceAgent?.isResearch?.(m.id)?window.interspaceResearchCards.markdown:markdown)(it.message.text,msg);if(!it.message.final&&!it.message.pending)el('span','streaming footnote','Writing…',msg);if(it.message.pending&&!it.message.failed)el('span','footnote','Sending…',msg);if(it.message.failed)el('p','error-text','Not sent: '+it.message.failed,msg);return msg;}
  const card=el('article','card');card.dataset.item=it.key;
+ // Simple folds team and subagent cards until they are opened; the compact copy (Running view) never folds.
+ const simple=!compact&&display().detail!=='detailed',fold={simple,folded:simple&&!unfolded.has(m.id+'|'+it.key),unfold:()=>unfold(m,it,card)};
  if(it.team){const row=rowStatus(m.id),late=!BUSY.has(m.status?.state)&&TERMINAL.has(row);
-  window.interspaceTeam.teamCard(card,{taskId:m.id,team:it.team,request,compact:!!compact,open:()=>open(m.id),closed:!!it.team.closed||terminal(m.status)||late,
+  window.interspaceTeam.teamCard(card,{...fold,taskId:m.id,team:it.team,request,compact:!!compact,open:()=>open(m.id),closed:!!it.team.closed||terminal(m.status)||late,
    closedText:it.team.closed||(terminal(m.status)||!late?statusText(m.status).toLowerCase():statusText({state:row}).toLowerCase()),bump:()=>{it.version++;changed(m.id);}});}
- else if(it.sub)window.interspaceTeam.subagentCard(card,subContext(m,it,compact));
+ else if(it.sub)window.interspaceTeam.subagentCard(card,{...subContext(m,it,compact),...fold});
  else if(it.ask)askCard(m,it,card,compact);
  else if(it.citation)window.interspaceResearchCards.citationCard(card,it.citation,{state:it,bump:()=>{it.version++;changed(m.id);}});
  else if(it.call||it.result||it.output!=null)toolCard(m,it,card);
@@ -222,6 +227,14 @@ function build(m,it,compact){
  return card;
 }
 const terminal=s=>!!s&&TERMINAL.has(s.state);
+// Cards opened from Simple stay open for the session. Opening replaces the button that did it, so focus moves to
+// the opened card.
+const unfolded=new Set();
+function unfold(m,it,card){
+ const box=card.parentNode;unfolded.add(m.id+'|'+it.key);it.version++;changed(m.id);
+ const now=box&&[...box.children].find(c=>c.dataset.item===it.key);
+ if(now&&now!==card){now.tabIndex=-1;now.focus();}
+}
 // A subagent card also changes with its child's own stream, the child's task row and host state (a merge).
 const stamp=(m,it)=>it.sub?it.version+'|'+(tasks.get(it.sub.task_id)?.rev||0)+'|'+(rowStatus(it.sub.task_id)||'')+'|'+stampOf(it.sub.task_id):it.version;
 // A child's own stream renders into one container that lives as long as its card, so it reconciles in place.

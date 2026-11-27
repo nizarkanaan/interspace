@@ -119,6 +119,8 @@ with app.lock:
     app.state['projects'][project['id']] = project
     app.state['selected_project_id'] = project['id']
     app.state['routing'] = json.loads(json.dumps(ROUTING))
+    # The browser checks the full team and subagent cards, which the default Simple conversation folds.
+    app.state['display'] = {'detail': 'detailed'}
     app.persist()
 
 PROVIDERS = [

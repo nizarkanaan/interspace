@@ -37,6 +37,7 @@ export default async function check(page,url){
  // approval the results open on Scope and outputs, which holds status, scope and outputs.
  const panel=page.locator('#agent-details');
  assert(await page.locator('#agent-view.split').count()===1&&await page.locator('#agent-topbar').isVisible(),'Split reader with a top bar');
+ assert(await page.locator('#agent-topbar #agent-detail-toggle').isVisible()&&(await text(page.locator('#agent-detail-toggle')))==='Simple view','Simple/Detailed toggle in the top bar');
  assert(await panel.isVisible()&&(await text(page.locator('[data-agent-tab=details]')))==='Scope and outputs'&&(await page.locator('[data-agent-tab=details]').getAttribute('aria-pressed'))==='true','Scope and outputs open first');
  for(const id of ['agent-head','agent-scope'])assert(await panel.locator('#'+id).count()===1,id+' in the panel');
  assert(await page.locator('[data-agent-tab=conversation]').isHidden(),'No Conversation tab beside the conversation');
@@ -126,14 +127,14 @@ export default async function check(page,url){
  await details.waitFor();
  assert(await panel.isHidden(),'Panel hidden on Conversation when narrow');
  await details.click();
- assert(await panel.isVisible()&&await stream.isHidden(),'Details tab shows the panel');
+ assert(await panel.isVisible()&&await stream.isHidden()&&await page.locator('#agent-detail-toggle').isHidden(),'Details tab shows the panel');
  assert((await text(panel)).includes('report.md'),'Outputs in Details');
  await page.locator('[data-agent-tab=conversation]').click();
- assert(await stream.isVisible()&&await panel.isHidden(),'Back to Conversation');
+ assert(await stream.isVisible()&&await panel.isHidden()&&await page.locator('.agent-main #agent-detail-toggle').isVisible(),'Back to Conversation, with the Simple/Detailed toggle above it');
  const fit=await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth);
  assert(fit,'No sideways scroll when narrow');
  await page.setViewportSize({width:1280,height:1000});
  assert(!errors.length,'Page errors: '+errors.join('; '));
  assert(!(await page.evaluate(()=>window.pwned)),'Script ran');
- return {checks:'details panel beside the conversation (Details tab when narrow), one-line search summaries with Show details/less by keyboard, reasoning summary, failed calls always shown, settings hide searches/thinking/plans/notes with replies kept, full mode, literal text, no sideways scroll'};
+ return {checks:'Simple/Detailed toggle in the split top bar and above the narrow conversation, details panel beside the conversation (Details tab when narrow), one-line search summaries with Show details/less by keyboard, reasoning summary, failed calls always shown, settings hide searches/thinking/plans/notes with replies kept, full mode, literal text, no sideways scroll'};
 }

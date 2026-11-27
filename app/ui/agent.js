@@ -91,7 +91,7 @@ function renderAgent(){
  scopeArea(id);
  outputsArea(id);
  const {tab,talk,split}=layoutTabs(id);
- $('agent-stream').hidden=!talk;$('agent-composer').hidden=!talk;$('agent-scope-editor').hidden=split?tab!=='details':!talk;
+ $('agent-stream').hidden=!talk;$('agent-composer').hidden=!talk;detailToggle(talk);$('agent-scope-editor').hidden=split?tab!=='details':!talk;
  scopeNote(id,talk);
  // A newer scope than the one displayed (edited elsewhere) is reloaded before it can be approved.
  const ev=S.scopeEvent(id),info=scopeInfo(id);const seen=ev&&ev.scope_version+':'+ev.scope_digest;
@@ -182,8 +182,8 @@ function place(split){
  const main=document.querySelector('#agent-view .agent-main'),results=$('agent-results'),layout=document.querySelector('#agent-view .agent-layout');
  const parts=['agent-tabs','agent-scope-editor','agent-report','agent-corpus','agent-evidence','agent-details'].map(x=>$(x));
  $('agent-view').classList.toggle('split',split);results.hidden=!split;$('agent-topbar').hidden=!split;$('split-handle').hidden=!split;if(split)splitWidth(null);
- if(split){$('agent-topbar').prepend($('agent-back'));results.append(...parts);}
- else{main.prepend($('agent-back'));$('agent-back').after($('agent-tabs'));$('agent-scope-note').after($('agent-scope-editor'));$('agent-stream').before($('agent-report'),$('agent-corpus'),$('agent-evidence'));layout.append($('agent-details'));}
+ if(split){$('agent-topbar').prepend($('agent-back'));$('agent-topbar-status').after($('agent-detail-toggle'));results.append(...parts);}
+ else{main.prepend($('agent-back'));$('agent-back').after($('agent-tabs'));$('agent-scope-note').after($('agent-scope-editor'));$('agent-stream').before($('agent-report'),$('agent-corpus'),$('agent-evidence'),$('agent-detail-toggle'));layout.append($('agent-details'));}
 }
 function topbar(id,split){
  if(!split)return;
@@ -193,6 +193,12 @@ function topbar(id,split){
  scope.textContent=info.scope?(Scope.approved(info)?'Scope approved · v'+info.scope.version:'Scope needs approval'):'';
  scope.className=info.scope&&!Scope.approved(info)?'scope-waiting':'';
  $('agent-topbar-stop').hidden=!stoppable(id);
+}
+// Simple or Detailed conversation (2026-11-27-readable-workspace-design.md): one click beside the conversation, the
+// same setting as Settings → Conversation display.
+function detailToggle(talk){
+ const b=$('agent-detail-toggle'),detailed=window.interspaceDisplay?.get?.()?.detail==='detailed';
+ b.hidden=!talk;b.textContent=detailed?'Detailed view':'Simple view';b.setAttribute('aria-pressed',String(detailed));
 }
 function scopeNote(id,talk){
  const info=scopeInfo(id),waiting=!!info.scope&&!Scope.approved(info)&&!info.editing;
@@ -313,6 +319,7 @@ window.interspaceAgent={
   // shifted the whole view up and left a blank band; any such scroll is undone at once.
   addEventListener('scroll',()=>{if(placed&&(scrollX||scrollY))scrollTo(0,0);},{passive:true});
   $('agent-stop').onclick=()=>cancel(current);
+  $('agent-detail-toggle').onclick=()=>{const D=window.interspaceDisplay;D.setDetail(D.get().detail==='detailed'?'simple':'detailed');};
   $('agent-topbar-stop').onclick=()=>cancel(current);
   $('agent-topbar-scope').onclick=()=>{if(!current)return;tabs.set(current,'details');refresh();$('agent-results').scrollTop=0;};$('agent-back').onclick=()=>host.navigate(current&&isResearch(current)?'research':'tasks');
  },

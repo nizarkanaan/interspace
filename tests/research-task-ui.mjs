@@ -6,7 +6,8 @@ export default async function check(page,url){
  resetSeq();
  const rows=[{id:'p-task',mode:'agent',kind:'project',project_id:'p1',title:'Fix the parser',status:'idle',provider:'claude',model:null}];
  const research=[{id:'r-dup',mode:'agent',kind:'research',project_id:null,title:'Duplicated research row',status:'completed',provider:'codex',model:null},{id:'r-old',mode:'agent',kind:'research',project_id:null,title:'Earlier <b>review</b>',status:'idle',provider:null,model:null}];
- await install(page,url,{rows,researchRows:research});
+ // Detailed: the research team checks need the full team and subagent cards, which the default Simple conversation folds.
+ await install(page,url,{rows,researchRows:research,display:{detail:'detailed'}});
  const nav=page.locator('[data-view=research]');
 
  // The sidebar's Research entry lists research tasks once each; the project desk does not.

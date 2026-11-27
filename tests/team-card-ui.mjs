@@ -13,14 +13,15 @@ export default async function check(page,url){
   const scheduler={max_running:4,running:[{task_id:'T',project_id:'p1',state:'running',parent_task_id:null,role:'orchestrator',provider:'claude',tokens:{used:1200,budget:250000},lock:null},
    {task_id:'C1',project_id:'p1',state:'running',parent_task_id:'T',role:'researcher',provider:'codex',tokens:{used:300,budget:250000},lock:null}],
    queued:[{task_id:'C2',project_id:'p1',state:'queued',position:1,parent_task_id:'T',role:'implementer',provider:'claude'}]};
-  const state=()=>({version:4,projects:[project],project_id:'p1',project:'Fixture project',task_id:null,task:null,tasks:rows,active:null,error:'',scheduler});
+  // No saved display at first, so the conversation starts Simple; the header toggle saves Detailed through display_update.
+  const state=()=>({version:4,projects:[project],project_id:'p1',project:'Fixture project',task_id:null,task:null,tasks:rows,active:null,error:'',scheduler,display:window.teamFixture.display});
   const providers={providers:[
    {name:'claude',title:'Claude',models:['claude-sonnet-5-5','claude-opus-5-5','claude-haiku-5-5'],default_model:'claude-sonnet-5-5',capabilities:{write:true,web_search:true,approvals:true}},
    {name:'codex',title:'Codex',models:[],default_model:null,capabilities:{write:true,web_search:true,approvals:true}},
    {name:'gemini',title:'Gemini',models:[],default_model:null,capabilities:{write:false,web_search:true,approvals:false}}],
    status:[],routing:{v:1,orchestrator:{provider:'claude',model:null},roles:{researcher:{provider:'codex',model:null},implementer:{provider:'claude',model:null},reviewer:{provider:'codex',model:null},tester:{provider:'claude',model:null},writer:{provider:'claude',model:null}}}};
   const scope={v:1,task_id:'T',version:1,projects:[{project_id:'p1',access:'write',read:['**'],write:['**'],deny:[]}],commands:{workspace:'allow',allow:[],deny:[]},network:{default:'deny',allow_hosts:[],deny_hosts:[]},apps:[],web_search:'deny',limits:{token_budget:250000,time_limit_s:3600}};
-  const f=window.teamFixture={requests:[],history:{},hold:{},held:[],reviewOpened:[],
+  const f=window.teamFixture={requests:[],history:{},hold:{},held:[],reviewOpened:[],display:undefined,
    respond(r,result){window.interspaceReceive({id:r.id,result});},fail(r,error){window.interspaceReceive({id:r.id,error});}};
   window.interspaceReview={open(id){f.reviewOpened.push(id);}};
   window.webkit={messageHandlers:{interspace:{postMessage(r){
@@ -32,6 +33,7 @@ export default async function check(page,url){
    else if(r.method==='task_events'){const events=(f.history[p.task_id]||[]).filter(e=>e.seq>p.after_seq);result={events,last_seq:events.length?events.at(-1).seq:p.after_seq,complete:true};}
    else if(r.method==='scope_get')result={scope:{...scope,task_id:p.task_id},scope_digest:'sha256:aa',scope_approval:{v:1,scope_version:1,scope_digest:'sha256:aa',approved_at:'2026-11-15T09:00:00.000Z',by:'user'}};
    else if(r.method==='team_answer')result={status:p.decision==='approve'?'approved':'declined'};
+   else if(r.method==='display_update'){f.display=p.display;result=p.display;}
    queueMicrotask(()=>f.respond(r,result));
   }}}};
   window.interspaceReceive({type:'state',state:state()});
@@ -46,6 +48,62 @@ export default async function check(page,url){
  const desk=await text(page.locator('#desk-tasks'));
  assert(!desk.includes('Researcher')&&(await page.locator('[data-open-task="C1"]').count())===0,'Child task shown as a desk row: '+desk);
  assert((await text(page.locator('#task-count')))==='2 tasks','Child counted on the desk');
+
+ // Simple (the default, 2026-11-27-readable-workspace-design.md): a proposal is a short card that approves exactly as
+ // the Detailed one does; Edit team opens today's editors; the answered team and orchestration calls fold away.
+ await page.locator('[data-open-task="U"]').click();
+ const toggle=page.locator('#agent-detail-toggle'),uStream=page.locator('#agent-view #agent-stream');
+ assert(await toggle.isVisible()&&(await text(toggle))==='Simple view'&&await toggle.getAttribute('aria-pressed')==='false','Header toggle not showing Simple ('+await toggle.count()+' found)');
+ const sMembers=[{member_id:'s1',role:'researcher',brief:'Read the docs folder',provider:'codex',model:null,access:'read',default:true},
+  {member_id:'s2',role:'implementer',brief:'Fix the typo',provider:'claude',model:null,access:'write',default:true}];
+ const sTeam=id=>({team_id:id,summary:'Check the docs <b>first</b>.',budget:{used:10,budget:250000},members:sMembers});
+ const sRunning=seq=>ev('U',seq,'status',{state:'running',detail:'',queue_position:null,reason:null},{turn_id:null});
+ const sPaused=seq=>ev('U',seq,'status',{state:'paused_team',detail:'',queue_position:null,reason:null},{turn_id:null});
+ await push([sRunning(1),
+  ev('U',2,'tool_call',{call_id:'u2',category:'orchestrate',tool:'propose_team',title:'propose_team',input:{},decision:null},{item_id:'u2'}),
+  ev('U',3,'tool_result',{call_id:'u2',status:'ok',output:{text:'{"members": []}',truncated:false}},{item_id:'u2'}),
+  ev('U',4,'team_proposed',sTeam('teamS1')),sPaused(5)]);
+ const sCard=uStream.locator('.card.team');
+ assert(await sCard.count()===1&&await sCard.evaluate(n=>n.classList.contains('is-simple')),'Simple team card missing');
+ const sText=await text(sCard);
+ for(const part of ['Proposed team','Check the docs <b>first</b>.','Codex researcher · reads','Claude implementer · writes'])assert(sText.includes(part),'Simple team card misses '+part+': '+sText);
+ assert(await sCard.locator('li').count()===2&&await sCard.locator('b').count()===0,'One line per member, literal summary');
+ assert(!sText.includes('Read the docs folder')&&await sCard.locator('textarea,select,input').count()===0,'Member editors shown in Simple: '+sText);
+ assert(await sCard.getByRole('button',{name:'Approve team',exact:true}).isVisible()&&await sCard.getByRole('button',{name:'Decline',exact:true}).isVisible(),'Approve or Decline missing in Simple');
+ assert(!(await text(uStream)).includes('Orchestration'),'Orchestration call shown in Simple');
+ await sCard.getByRole('button',{name:'Approve team',exact:true}).click();
+ const simpleAnswer=(await req('team_answer')).at(-1);
+ assert(JSON.stringify(simpleAnswer)===JSON.stringify({task_id:'U',team_id:'teamS1',decision:'approve'}),'Simple approve not exact: '+JSON.stringify(simpleAnswer));
+ assert((await text(sCard)).includes('Approved. Waiting for the Orchestrator.')&&await sCard.getByRole('button',{name:'Approve team'}).count()===0,'Simple card still answerable after approval');
+ await push([ev('U',6,'team_answered',{team_id:'teamS1',decision:'approve',members:[],note:null}),sRunning(7)]);
+ const sLine=uStream.locator('.card.team').first();
+ assert(await sLine.evaluate(n=>n.classList.contains('is-line'))&&(await text(sLine)).startsWith('Team approved · Codex researcher, Claude implementer'),'Answered team not one line: '+await text(sLine));
+ const teamDetails=sLine.locator('button.team-details');
+ assert((await text(teamDetails))==='Details ▸'&&await teamDetails.getAttribute('aria-expanded')==='false','Answered line has no Details');
+ // Edit team reveals today's member editors in the same card; the untouched proposal still approves the same way.
+ await push([ev('U',8,'team_proposed',sTeam('teamS2')),sPaused(9)]);
+ const sCard2=uStream.locator('.card.team').nth(1),edit=sCard2.locator('button.team-edit');
+ assert(await sCard2.evaluate(n=>n.classList.contains('is-simple'))&&(await text(edit))==='Edit team'&&await edit.getAttribute('aria-expanded')==='false','Edit team missing');
+ await edit.click();
+ assert(await sCard2.getByLabel('Researcher brief').inputValue()==='Read the docs folder'&&await sCard2.getByLabel('Implementer provider').isVisible()&&await sCard2.getByRole('button',{name:'Remove Researcher',exact:true}).isVisible(),'Edit team did not show the member editors');
+ assert(await sCard2.getByRole('button',{name:'Approve team',exact:true}).isVisible(),'Approve gone after Edit team');
+ // Details opens today's answered card in place, and it stays open as events arrive.
+ await teamDetails.click();
+ assert((await text(sLine)).includes('You approved this team.')&&!(await sLine.evaluate(n=>n.classList.contains('is-line'))),'Details did not open the answered card');
+ await push([ev('U',10,'message',{role:'assistant',text:'Waiting for the team.',final:true},{item_id:'u10'})]);
+ assert((await text(sLine)).includes('You approved this team.'),'Opened answered card folded again');
+ // The header toggle switches to Detailed (saved with display_update): every card is in full again.
+ await toggle.click();
+ await page.waitForFunction(()=>window.teamFixture.requests.some(r=>r.method==='display_update'));
+ const updates=await req('display_update');
+ assert(updates.length===1&&updates[0].display.detail==='detailed','Toggle did not save Detailed: '+JSON.stringify(updates));
+ await page.waitForFunction(()=>document.querySelector('#agent-detail-toggle')?.textContent==='Detailed view');
+ assert(await toggle.getAttribute('aria-pressed')==='true','Toggle not pressed in Detailed');
+ assert((await text(uStream)).includes('Orchestration')&&await uStream.locator('.card.team.is-line,.card.team.is-simple').count()===0,'Detailed did not restore the full cards');
+ await sCard2.getByRole('button',{name:'Approve team',exact:true}).click();
+ const detailedAnswer=(await req('team_answer')).at(-1);
+ assert(JSON.stringify(detailedAnswer)===JSON.stringify({...simpleAnswer,team_id:'teamS2'}),'Simple and Detailed approve differ: '+JSON.stringify([simpleAnswer,detailedAnswer]));
+ await page.locator('[data-view=tasks]').click();
  await page.locator('[data-open-task="T"]').click();
  assert((await text(page.locator('#agent-head'))).includes('Orchestrator on Claude · default model'),'Orchestrator line missing: '+await text(page.locator('#agent-head')));
  assert(await page.locator('#agent-head .provider-badge[data-provider=claude]').count()===1,'Header provider badge missing');
@@ -103,7 +161,7 @@ export default async function check(page,url){
  assert(await card.getByLabel('Implementer brief').inputValue()==='Add input validation to parse()\nwith tests','Edit lost after a rebuild');
  await card.getByLabel('Researcher model').selectOption('claude-haiku-5-5');
  await card.getByRole('button',{name:'Approve team',exact:true}).click();
- const answers=await req('team_answer');
+ const answers=(await req('team_answer')).filter(p=>p.task_id==='T');
  const expected={task_id:'T',team_id:'team1',decision:'approve',members:[{member_id:'m1',role:'researcher',brief:'Map the parser code',provider:'claude',model:'claude-haiku-5-5',access:'read'},{member_id:'m2',role:'implementer',brief:'Add input validation to parse()\nwith tests',provider:'claude',model:'claude-sonnet-5-5',access:'write'}]};
  assert(answers.length===1&&JSON.stringify(answers[0])===JSON.stringify(expected),'team_answer not exact: '+JSON.stringify(answers));
  assert((await text(card)).includes('Waiting for the Orchestrator')&&await card.getByRole('button',{name:'Approve team'}).count()===0&&await card.getByLabel('Implementer brief').isDisabled(),'Team still editable after approval');
@@ -189,12 +247,12 @@ export default async function check(page,url){
  const fits=[];
  for(const colorScheme of ['light','dark']){await page.emulateMedia({colorScheme});for(const width of [320,390,760,1024,1280]){await page.setViewportSize({width,height:900});
   for(const target of ['agent','running']){
-   if(target==='agent'){await page.locator('[data-view=tasks]').click();await page.locator('[data-open-task="T"]').click();}else await page.locator('[data-view=running]').click();
+   if(target==='agent'){await page.locator('[data-view=tasks]').click();await page.locator('[data-open-task="T"]').click();assert(await page.locator('#agent-detail-toggle').isVisible(),'Header toggle hidden at '+width);}else await page.locator('[data-view=running]').click();
    const fit=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}));assert(fit.scroll<=fit.width,'Overflow '+target+' '+width+' '+colorScheme);fits.push(fit);
    if(width===390||width===1280&&colorScheme==='light')await page.screenshot({path:'workspace-data/team-'+target+'-'+colorScheme+'-'+width+'.png',fullPage:true});
   }
  }}
  await page.emulateMedia({colorScheme:'light'});await page.setViewportSize({width:1280,height:1000});
  assert(!errors.length,'Page errors: '+errors.join(' | '));
- return {checks:'child rows hidden from the desk, header provider badge, team_proposed card (roles, briefs, badges, default vs suggested reason, budget, literal text), paused_team gate, write disabled for providers without write, edits (provider/model/brief/remove) with model validation, exact team_answer approve and decline-with-note by keyboard, failed answer recovery, closed proposal, subagent cards (badge/role/state/tokens), child stream via task_events with live events, finished diff summary and literal report, Review changes hook, Running view grouped by parent with child rows and parent link, light/dark 320-1280 fit',responsiveStates:fits.length};
+ return {checks:'Simple by default: short team card (one line per member, literal summary, no editors) whose approve equals the Detailed one, Edit team opens the editors, answered team as one line with Details kept open, orchestration calls hidden; header toggle saves Detailed and restores full cards, visible at every width; child rows hidden from the desk, header provider badge, team_proposed card (roles, briefs, badges, default vs suggested reason, budget, literal text), paused_team gate, write disabled for providers without write, edits (provider/model/brief/remove) with model validation, exact team_answer approve and decline-with-note by keyboard, failed answer recovery, closed proposal, subagent cards (badge/role/state/tokens), child stream via task_events with live events, finished diff summary and literal report, Review changes hook, Running view grouped by parent with child rows and parent link, light/dark 320-1280 fit',responsiveStates:fits.length};
 }

@@ -18,7 +18,8 @@ export default async function check(page,url){
    routing:{v:1,orchestrator:{provider:'claude',model:null},roles:{researcher:{provider:'codex',model:null},implementer:{provider:'claude',model:null},reviewer:{provider:'codex',model:null},tester:{provider:'claude',model:null},writer:{provider:'claude',model:null}}}};
   const scope={v:1,task_id:'T',version:1,projects:[{project_id:'p1',access:'write',read:['**'],write:['**'],deny:[]}],commands:{workspace:'allow',allow:[],deny:[]},network:{default:'deny',allow_hosts:[],deny_hosts:[]},apps:[],web_search:'deny',limits:{token_budget:250000,time_limit_s:3600}};
   const f=window.hardFixture={requests:[],history:{},signIn:{},rows,scheduler,
-   state:()=>({version:4,projects:[project],project_id:'p1',project:'Fixture project',task_id:null,task:null,tasks:f.rows,active:null,error:'',scheduler:f.scheduler}),
+   // Detailed: these checks need the full team and subagent cards, which the default Simple conversation folds.
+   state:()=>({version:4,projects:[project],project_id:'p1',project:'Fixture project',task_id:null,task:null,tasks:f.rows,active:null,error:'',scheduler:f.scheduler,display:{detail:'detailed'}}),
    events(p){const events=(f.history[p.task_id]||[]).filter(e=>e.seq>p.after_seq);return {events,last_seq:events.length?events.at(-1).seq:p.after_seq,complete:true};}};
   window.webkit={messageHandlers:{interspace:{postMessage(r){
    f.requests.push(r);const p=r.params||{};let result={};

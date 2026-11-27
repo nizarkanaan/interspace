@@ -9,7 +9,8 @@ export default async function check(page,url){
   const project={id:'p1',name:'Fixture project',brief:'',priority:'normal',next_action:''};
   const rows=[{id:'T',mode:'agent',title:'Add input validation',status:'running',provider:'claude',model:null},
    {id:'C1',mode:'agent',title:'Researcher',status:'running',provider:'codex',model:null,parent_task_id:'T',role:'researcher'},
-   {id:'C2',mode:'agent',title:'Implementer',status:'running',provider:'claude',model:null,parent_task_id:'T',role:'implementer'}];
+   {id:'C2',mode:'agent',title:'Implementer',status:'running',provider:'claude',model:null,parent_task_id:'T',role:'implementer'},
+   {id:'S',mode:'agent',title:'Simple view check',status:'running',provider:'claude',model:null}];
   const scheduler={max_running:4,running:[{task_id:'T',project_id:'p1',state:'running',parent_task_id:null,role:'orchestrator',provider:'claude',tokens:{used:1200,budget:250000},lock:null},
    {task_id:'C1',project_id:'p1',state:'running',parent_task_id:'T',role:'researcher',provider:'codex',tokens:{used:300,budget:250000},lock:null},
    {task_id:'C2',project_id:'p1',state:'running',parent_task_id:'T',role:'implementer',provider:'claude',tokens:{used:300,budget:250000},lock:null}],queued:[]};
@@ -20,8 +21,9 @@ export default async function check(page,url){
   const scope={v:1,task_id:'T',version:1,projects:[{project_id:'p1',access:'write',read:['**'],write:['**'],deny:[]}],commands:{workspace:'allow',allow:[],deny:[]},network:{default:'deny',allow_hosts:[],deny_hosts:[]},apps:[],web_search:'deny',limits:{token_budget:250000,time_limit_s:3600}};
   const summary={branch:'interspace/task-c2c2c2c2',base_commit:'1111111111',head_commit:'2222222222',files:[{path:'src/parser.py',change:'modify',old_path:null,additions:2,deletions:1,binary:false}],
    patch:'diff --git a/src/parser.py b/src/parser.py\n--- a/src/parser.py\n+++ b/src/parser.py\n@@ -1,2 +1,3 @@\n def parse(x):\n-    return x\n+    if x is None: raise ValueError("<b>no</b>")\n+    return x\n',truncated:false};
-  const f=window.subFixture={requests:[],history:{},hold:{},held:[],rows,scheduler,
-   state:()=>({version:4,projects:[project],project_id:'p1',project:'Fixture project',task_id:null,task:null,tasks:f.rows,active:null,error:'',scheduler:f.scheduler}),
+  // No saved display at first, so the conversation starts Simple; the header toggle saves Detailed through display_update.
+  const f=window.subFixture={requests:[],history:{},hold:{},held:[],rows,scheduler,display:undefined,
+   state:()=>({version:4,projects:[project],project_id:'p1',project:'Fixture project',task_id:null,task:null,tasks:f.rows,active:null,error:'',scheduler:f.scheduler,display:f.display}),
    respond(r,result){window.interspaceReceive({id:r.id,result});},fail(r,error){window.interspaceReceive({id:r.id,error});},
    events(p){const events=(f.history[p.task_id]||[]).filter(e=>e.seq>p.after_seq);return {events,last_seq:events.length?events.at(-1).seq:p.after_seq,complete:true};}};
   window.webkit={messageHandlers:{interspace:{postMessage(r){
@@ -35,6 +37,7 @@ export default async function check(page,url){
    else if(r.method==='review_summary')result=summary;
    else if(r.method==='review_branches')result={branches:['feature/other','interspace/task-c2c2c2c2','main'],current:'feature/other'};
    else if(r.method==='review_merge')result={status:'merged',merge_commit:'abcdef1234567890',conflicts:[],detail:'Merged.'};
+   else if(r.method==='display_update'){f.display=p.display;result=p.display;}
    queueMicrotask(()=>f.respond(r,result));
   }}}};
   window.interspaceReceive({type:'state',state:f.state()});
@@ -45,6 +48,44 @@ export default async function check(page,url){
  const req=method=>page.evaluate(m=>window.subFixture.requests.filter(r=>r.method===m).map(r=>r.params),method);
  const history=(task,list)=>page.evaluate(([t,l])=>{window.subFixture.history[t]=l;},[task,list]);
  const status=(task,seq,state)=>ev(task,seq,'status',{state,detail:'',queue_position:null,reason:null},{turn_id:null});
+
+ // Simple (the default, 2026-11-27-readable-workspace-design.md): a subagent is one line that opens in place and stays
+ // open; orchestration calls are hidden unless they failed.
+ await page.locator('[data-open-task="S"]').click();
+ await push([status('S',1,'running'),
+  ev('S',2,'tool_call',{call_id:'q1',category:'orchestrate',tool:'wait_for',title:'Wait for',input:{members:['s1']},decision:null},{item_id:'q1'}),
+  ev('S',3,'tool_result',{call_id:'q1',status:'ok',output:{text:'{"members": {"s1": "running"}}',truncated:false}},{item_id:'q1'}),
+  ev('S',4,'tool_call',{call_id:'q2',category:'orchestrate',tool:'start_member',title:'Start member',input:{member_id:'s9'},decision:null},{item_id:'q2'}),
+  ev('S',5,'tool_result',{call_id:'q2',status:'error',error:{code:'not_found',message:'No member s9'},output:{text:'',truncated:false}},{item_id:'q2'}),
+  ev('S',6,'tool_call',{call_id:'q3',category:'orchestrate',tool:'wait_for',title:'Still waiting',input:{},decision:null},{item_id:'q3'}),
+  ev('S',7,'subagent_started',{team_id:'teamS',member_id:'s1',task_id:'SC1',role:'researcher',provider:'codex',model:null,access:'read',brief:'Survey the <i>parser</i> callers'},{item_id:'sub_SC1'}),
+  ev('S',8,'subagent_status',{team_id:'teamS',member_id:'s1',task_id:'SC1',state:'running',tokens_used:700},{item_id:'sub_SC1'})]);
+ const sv=page.locator('#agent-view #agent-stream'),line=sv.locator('.card.subagent[data-child="SC1"]');
+ assert(await line.count()===1&&await line.evaluate(n=>n.classList.contains('is-line')),'Subagent not one line in Simple');
+ const lineText=await text(line);
+ assert(await line.locator('.provider-badge[data-provider=codex]').count()===1&&lineText.includes('Researcher')&&lineText.includes('Running'),'Subagent line misses badge, role or state: '+lineText);
+ assert(!lineText.includes('Survey the')&&await line.getByRole('button',{name:'Open Researcher subagent'}).count()===0,'Subagent line shows its full card: '+lineText);
+ const more=line.locator('button.sub-details');
+ assert((await text(more))==='Details ▸'&&await more.getAttribute('aria-expanded')==='false','Subagent line has no Details');
+ const svText=await text(sv);
+ assert(!svText.includes('Wait for')&&!svText.includes('Still waiting'),'Orchestration call shown in Simple: '+svText);
+ assert(svText.includes('Start member')&&svText.includes('No member s9'),'Failed orchestration call hidden in Simple: '+svText);
+ await page.setViewportSize({width:320,height:900});
+ const narrow=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}));
+ assert(narrow.scroll<=narrow.width&&await page.locator('#agent-detail-toggle').isVisible(),'Simple line overflows or toggle hidden at 320');
+ await page.setViewportSize({width:1280,height:1000});
+ await more.click();
+ assert(!(await line.evaluate(n=>n.classList.contains('is-line')))&&(await text(line)).includes('Survey the <i>parser</i> callers')&&await line.locator('i').count()===0,'Details did not open the full card: '+await text(line));
+ assert(await line.getByRole('button',{name:'Open Researcher subagent',exact:true}).isVisible(),'Open missing after Details');
+ await push([ev('S',9,'subagent_status',{team_id:'teamS',member_id:'s1',task_id:'SC1',state:'running',tokens_used:900},{item_id:'sub_SC1'})]);
+ assert((await text(line)).includes('900 tokens')&&(await text(line)).includes('Survey the'),'Opened subagent card folded again');
+ // Detailed through the header toggle: the orchestration calls come back.
+ await page.locator('#agent-detail-toggle').click();
+ await page.waitForFunction(()=>window.subFixture.requests.some(r=>r.method==='display_update'));
+ assert((await req('display_update')).at(-1).display.detail==='detailed','Toggle did not save Detailed');
+ await page.waitForFunction(()=>document.querySelector('#agent-view #agent-stream')?.textContent.includes('Still waiting'));
+ assert((await text(sv)).includes('Wait for'),'Detailed did not restore orchestration calls');
+ await page.locator('[data-view=tasks]').click();
 
  await page.locator('[data-open-task="T"]').click();
  // A suggestion always carries its reason; one without a reason says so; a member the user changes is marked.
@@ -81,7 +122,7 @@ export default async function check(page,url){
  let t1=await text(c1),t2=await text(c2);
  assert(t1.includes('Running')&&t1.includes('1,500 tokens')&&(await text(c1.locator('.sub-activity'))).includes('Reading the parser and its callers'),'C1 live progress: '+t1);
  assert(t2.includes('2,200 tokens')&&(await text(c2.locator('.sub-activity'))).includes('Run the <i>tests</i>')&&await c2.locator('i').count()===0,'C2 live progress: '+t2);
- assert(await c1.locator('.stream.nested').count()===0&&(await req('task_events')).every(p=>p.task_id==='T'),'Progress needed expanding or a history load');
+ assert(await c1.locator('.stream.nested').count()===0&&(await req('task_events')).filter(p=>p.task_id!=='S').every(p=>p.task_id==='T'),'Progress needed expanding or a history load');
  // Duplicates: a repeated start, a replayed seq and an older seq never add a card or a line.
  await push([ev('T',10,'subagent_started',{team_id:'team1',member_id:'m1',task_id:'C1',role:'researcher',provider:'codex',model:null,access:'read'},{item_id:'sub_C1'}),
   ev('T',9,'subagent_status',{team_id:'team1',member_id:'m2',task_id:'C2',state:'queued',tokens_used:0}),ev('C2',2,'message',{role:'assistant',text:'Replayed',final:true})]);
@@ -184,5 +225,5 @@ export default async function check(page,url){
  }}
  await page.emulateMedia({colorScheme:'light'});await page.setViewportSize({width:1280,height:1000});
  assert(!errors.length,'Page errors: '+errors.join(' | '));
- return {checks:'suggested reason and missing-reason flag, your-change marker, unedited approve exact, two children streaming with state/tokens/latest activity without expanding, literal activity text, duplicate start/seq ignored, expanded child stream ordered under interleaving and gap recovery, unfillable gap noted, focus kept while a sibling streams, Review changes → Merge by keyboard with project and reviewed head, Back returns focus, merged state on the child card, restart: interrupted parent/child/proposal shown, no resume button, new turn keeps the old proposal closed, Running view child state, light/dark 320-1280 fit',responsiveStates:fits.length};
+ return {checks:'Simple by default: subagent as one line (badge, role, state, Details) that opens to the full card and stays open, ok and waiting orchestration calls hidden, failed one shown, no overflow at 320; header toggle saves Detailed; suggested reason and missing-reason flag, your-change marker, unedited approve exact, two children streaming with state/tokens/latest activity without expanding, literal activity text, duplicate start/seq ignored, expanded child stream ordered under interleaving and gap recovery, unfillable gap noted, focus kept while a sibling streams, Review changes → Merge by keyboard with project and reviewed head, Back returns focus, merged state on the child card, restart: interrupted parent/child/proposal shown, no resume button, new turn keeps the old proposal closed, Running view child state, light/dark 320-1280 fit',responsiveStates:fits.length};
 }
