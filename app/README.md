@@ -125,3 +125,7 @@ python3 scripts/build-macos-app.py
 This creates `dist/Interspace.app` from source. No personal state, credentials or prior reports are bundled.
 
 For isolated development state, the native executable supports `--data-root /absolute/test/directory`. Do not point that directory inside a source project.
+
+## License
+
+[MIT](../LICENSE). Third-party files keep their own licenses; see [docs/third-party](../docs/third-party/README.md).
