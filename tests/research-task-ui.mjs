@@ -1,6 +1,6 @@
 /* Research tasks without a project, the Research sidebar entry, presets, the scope research section and research
    teams, against a fake bridge only (docs/superpowers/specs/research/tasks.md). */
-import {install,requests,push,assert,text,fit,ev,resetSeq} from './research-fixture.mjs';
+import {install,requests,push,assert,text,fit,ev,evFor,resetSeq} from './research-fixture.mjs';
 export default async function check(page,url){
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
  resetSeq();
@@ -125,7 +125,48 @@ export default async function check(page,url){
  await page.locator('#new-task').click();
  assert(await page.locator('input[name=new-kind][value=research]').isChecked()&&await page.locator('input[name=new-kind][value=project]').isDisabled(),'No-project kinds');
  assert(!(await page.locator('#propose-task').isDisabled()),'Review scope disabled without a project');
+
+ // Replies keep their place, and each task keeps its own cards. Every task's log starts at seq 1 and every task's
+ // first message is user_u1, so a node cache shared between tasks shows one task's cards in another. A restarted
+ // Claude session numbered its replies from msg_1 again, so turn 4's reply must not replace turn 1's.
+ const R_TITLE='Deep reinforcement learning for RAN slice resource allocation in O-RAN networks';
+ const rEv=evFor('R'),cEv=evFor('C'),xEv=evFor('X');
+ const spent=n=>({charge_kind:'reported',tokens:n,used:n,budget:null});
+ await install(page,url,{rows:[],display:{detail:'detailed'},researchRows:[
+  {id:'R',mode:'agent',kind:'research',project_id:null,title:R_TITLE,status:'idle',provider:'claude',model:null},
+  {id:'C',mode:'agent',kind:'research',project_id:null,parent_task_id:'R',role:'citation_checker',provider:'codex',model:null,title:'Citation checker: Call claims_pending, judge every claim only against its source abstract',status:'completed'},
+  {id:'X',mode:'agent',kind:'research',project_id:null,title:'Restarted reply',status:'idle',provider:'claude',model:null}],
+  history:{
+   R:[rEv('message',{role:'user',text:'R question'},'user_u1'),rEv('budget',spent(100)),
+    rEv('subagent_started',{task_id:'C',role:'citation_checker',provider:'codex',model:null,access:'read',brief:'Check every claim.',state:'running'}),
+    rEv('subagent_finished',{task_id:'C',state:'completed'})],
+   C:[cEv('message',{role:'user',text:'CHILD BRIEF'},'user_u1'),cEv('budget',spent(999))],
+   X:[xEv('message',{role:'user',text:'First question'},'user_u1','u1'),xEv('message',{role:'assistant',text:'First answer',final:true},'msg_1','u1'),
+    xEv('message',{role:'user',text:'Fourth question'},'user_u4','u4'),xEv('message',{role:'assistant',text:'Fourth answer',final:true},'msg_1','u4')]}});
+ const keys=()=>page.evaluate(()=>[...document.querySelectorAll('#agent-stream [data-item]')].map(n=>n.dataset.item));
+ await nav.click();await page.locator('[data-open-task=X]').click();
+ await page.waitForFunction(()=>document.querySelector('#agent-stream').textContent.includes('Fourth answer'));
+ assert(JSON.stringify(await keys())===JSON.stringify(['user_u1','msg_1','user_u4','msg_1@u4']),'Colliding reply keys: '+JSON.stringify(await keys()));
+ assert((await text(page.locator('#agent-stream [data-item=msg_1]'))).includes('First answer'),'Turn 1 reply replaced: '+await text(page.locator('#agent-stream [data-item=msg_1]')));
+ assert((await text(page.locator('#agent-stream [data-item="msg_1@u4"]'))).includes('Fourth answer'),'Turn 4 reply missing');
+ await push(page,[xEv('message',{role:'user',text:'Seventh question'},'user_u7','u7'),xEv('message_delta',{role:'assistant',text_delta:'Partial'},'msg_1','u7')]);
+ await page.waitForFunction(()=>document.querySelector('#agent-stream [data-item="msg_1@u7"]'));
+ const live=await keys();
+ assert(live[live.length-1]==='msg_1@u7'&&(await text(page.locator('#agent-stream [data-item="msg_1@u7"]'))).includes('Writing…'),'Streaming reply in turn 7: '+JSON.stringify(live));
+ assert((await text(page.locator('#agent-stream [data-item=msg_1]'))).includes('First answer'),'Turn 7 delta replaced turn 1');
+ // Open the parent, then its child, then the parent again: each shows its own question and token line.
+ await nav.click();await page.locator('[data-open-task=R]').click();
+ await page.waitForFunction(()=>document.querySelector('#sub-open-C'));
+ await page.locator('#sub-open-C').click();
+ await page.waitForFunction(()=>document.querySelector('#agent-stream').textContent.includes('CHILD BRIEF'));
+ await nav.click();await page.locator('[data-open-task=R]').click();
+ await page.waitForFunction(()=>document.querySelector('#agent-stream [data-item="sub:C"]'));
+ // Let the parent's replay request answer and render again.
+ await page.evaluate(()=>new Promise(r=>setTimeout(r,50)));
+ const rq=await text(page.locator('#agent-stream [data-item=user_u1]')),rb=await text(page.locator('#agent-stream [data-item="seq:2"]'));
+ assert(rq.includes('R question')&&!rq.includes('CHILD BRIEF'),'Parent shows the child question: '+rq);
+ assert(rb.includes('100')&&!rb.includes('999'),'Parent shows the child tokens: '+rb);
  assert(!(await page.evaluate(()=>window.pwned)),'Script ran');
  assert(!errors.length,'Page errors: '+errors.join(' | '));
- return {checks:'Research sidebar entry from state.research.tasks with count, project desk without research rows, literal row text, New research question with research kind preselected, Literature review preset by keyboard and Verify my references, validation before scope_default, message preview, draft kept, scope_default {project_id:null,kind:research}, research scope editor without project/commands/network, source hints, exact agent_create with kind research and no project, no project switch, first message waiting in the composer, research chips, Back to Research, bibliography required and sent unchanged, project task unchanged with no kind and no research key, research key added by scope edit, research team read-only with citation checker and no Review, no-project install, light/dark 320-1280 fit',responsiveStates:fits.length+fitsNew.length};
+ return {checks:'Research sidebar entry from state.research.tasks with count, project desk without research rows, literal row text, New research question with research kind preselected, Literature review preset by keyboard and Verify my references, validation before scope_default, message preview, draft kept, scope_default {project_id:null,kind:research}, research scope editor without project/commands/network, source hints, exact agent_create with kind research and no project, no project switch, first message waiting in the composer, research chips, Back to Research, bibliography required and sent unchanged, project task unchanged with no kind and no research key, research key added by scope edit, research team read-only with citation checker and no Review, no-project install, light/dark 320-1280 fit, a restarted session\'s colliding msg_1 kept in turns 4 and 7 under turn-scoped keys, parent and child keep their own cached cards',responsiveStates:fits.length+fitsNew.length};
 }

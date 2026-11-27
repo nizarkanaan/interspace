@@ -687,6 +687,21 @@ class TurnTests(ClaudeCase):
         self.assertEqual(outcome['status'], 'completed', outcome)
         self.assertIn(('reasoning', {'text': 'Check the notes first.'}), [(k, d) for k, d, _ in ctx.events])
 
+    def test_item_ids_stay_unique_after_a_restart(self):
+        # Every session numbers its items from 1, so the turn id keeps a restarted task's next reply from
+        # reusing msg_1 and replacing the first reply in the conversation.
+        first = FakeContext(self.root)
+        first.turn_id = 'u1'
+        self.turn({'turns': [simple_turn('one')]}, ctx=first)
+        thinking = {'emit': {'type': 'assistant', 'parent_tool_use_id': None, 'session_id': 's1',
+                             'message': {'id': 'm', 'role': 'assistant', 'model': '$MODEL',
+                                         'content': [{'type': 'thinking', 'thinking': 'Check the notes first.'}]}}}
+        second = FakeContext(self.root)
+        second.turn_id = 'u2'
+        self.turn({'turns': [[INIT, thinking, assistant_text('two'), result()]]}, ctx=second)
+        self.assertEqual([i for c in (first, second) for k, _, i in c.events if k in ('message', 'reasoning')],
+                         ['msg_u1_1', 'rs_u2_1', 'msg_u2_2'])
+
     def test_ignored_and_retry_messages(self):
         steps = [INIT, {'emit': {'type': 'system', 'subtype': 'api_retry', 'attempt': 1}},
                  {'emit': {'type': 'rate_limit_event', 'rate_limit_info': {'status': 'allowed'}}},

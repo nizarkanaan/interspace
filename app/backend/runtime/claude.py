@@ -766,6 +766,14 @@ class ClaudeSession:
             raise _Fail('runtime_protocol', 'Claude Code started in an unexpected permission mode.')
         self._init_seen = True
 
+    def _item_id(self, prefix, ctx):
+        # The counter starts again in every session (an app restart opens a new one), so the turn id keeps a
+        # task's message and reasoning ids unique: msg_u4_1 never replaces turn 1's msg_u1_1.
+        self._counter += 1
+        if ctx.turn_id:
+            return '%s_%s_%d' % (prefix, ctx.turn_id, self._counter)
+        return '%s_%d' % (prefix, self._counter)
+
     def _assistant(self, message, ctx):
         body = message.get('message')
         if message.get('parent_tool_use_id') is not None:
@@ -776,13 +784,12 @@ class ClaudeSession:
             kind = block.get('type') if isinstance(block, dict) else None
             if kind == 'text' and isinstance(block.get('text'), str):
                 if block['text'].strip():
-                    self._counter += 1
                     ctx.emit('message', {'role': 'assistant', 'text': block['text'], 'final': True},
-                             item_id='msg_%d' % self._counter)
+                             item_id=self._item_id('msg', ctx))
             elif kind == 'thinking' and isinstance(block.get('thinking'), str):
                 if block['thinking'].strip():
-                    self._counter += 1
-                    ctx.emit('reasoning', {'text': block['thinking'][:MAX_OUTPUT_CHARS]}, item_id='rs_%d' % self._counter)
+                    ctx.emit('reasoning', {'text': block['thinking'][:MAX_OUTPUT_CHARS]},
+                             item_id=self._item_id('rs', ctx))
             elif kind == 'redacted_thinking':
                 pass
             elif kind == 'tool_use' and isinstance(block.get('id'), str) and isinstance(block.get('name'), str):

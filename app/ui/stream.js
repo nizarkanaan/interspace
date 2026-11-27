@@ -23,6 +23,11 @@ function model(id){
 }
 function item(m,key){let it=m.items.get(key);if(!it){it={key,version:0};m.items.set(key,it);}it.version++;return it;}
 function row(m,e,kind,fields){Object.assign(item(m,'seq:'+e.seq),{row:kind},fields);}
+// Before 2026-11-27 every Claude session numbered its replies from msg_1, so after a restart a later turn's reply
+// reused an earlier turn's id. A message or reasoning id that already belongs to another turn is kept under a
+// turn-scoped key (msg_1@u4), in its own place; ids that do not collide keep their key.
+function turnKey(m,key,e){const it=m.items.get(key),turn=e.turn_id;return it&&it.turn!=null&&typeof turn==='string'&&turn&&it.turn!==turn?key+'@'+turn:key;}
+function turnItem(m,key,e){const k=turnKey(m,key,e),fresh=!m.items.has(k),it=item(m,k);if(fresh)it.turn=e.turn_id??null;return it;}
 const valid=e=>e&&typeof e==='object'&&typeof e.task_id==='string'&&e.task_id&&Number.isSafeInteger(e.seq)&&e.seq>0&&typeof e.kind==='string';
 
 // Paths seen in a task become @mention candidates.
@@ -37,9 +42,9 @@ function apply(m,e){
   case 'status':{m.status=d;if(NOTABLE.has(d.state))row(m,e,'status',{text:statusText(d)});
    // An open proposal closes for good when its turn ends (stopped, interrupted, idle): a later turn never reopens it.
    if(TERMINAL.has(d.state)||d.state==='idle')for(const it of m.items.values())if(it.team&&!it.team.answered&&!it.team.closed){it.team.closed=statusText(d).toLowerCase();it.version++;}return;}
-  case 'message_delta':{const it=item(m,key);it.message={role:d.role||'assistant',text:(it.message&&!it.message.final?it.message.text:'')+(d.text_delta||''),final:false};return;}
-  case 'message':{if(d.role==='user'&&d.client_id)m.items.delete('client:'+d.client_id);item(m,key).message={role:d.role==='user'?'user':'assistant',text:String(d.text??''),final:true};return;}
-  case 'reasoning':item(m,key).reasoning=String(d.text??'');return;
+  case 'message_delta':{const it=turnItem(m,key,e);it.message={role:d.role||'assistant',text:(it.message&&!it.message.final?it.message.text:'')+(d.text_delta||''),final:false};return;}
+  case 'message':{if(d.role==='user'&&d.client_id)m.items.delete('client:'+d.client_id);turnItem(m,key,e).message={role:d.role==='user'?'user':'assistant',text:String(d.text??''),final:true};return;}
+  case 'reasoning':turnItem(m,key,e).reasoning=String(d.text??'');return;
   case 'plan_update':item(m,'plan').plan=Array.isArray(d.steps)?d.steps:[];return;
   case 'tool_call':item(m,key).call=d;remember(m,d);return;
   case 'tool_output_delta':{const it=item(m,key);it.output=(it.output||'')+(d.text||'');return;}
@@ -256,9 +261,11 @@ function childChanged(id){
  const parent=parents.get(id),pm=parent&&tasks.get(parent),it=pm&&pm.items.get(pm.children.get(id));
  if(it?.expanded&&it.childBox)render(it.childBox,id);
 }
-// Reconciles cards in place, so focus, open details and scroll position survive new events.
+// Reconciles cards in place, so focus, open details and scroll position survive new events. The node cache belongs
+// to the task the container shows: a parent and its child share #agent-stream, and keys such as user_u1, seq:N and
+// cumulative repeat in every task, so another task starts a fresh cache.
 function render(container,taskId,options={}){
- const m=model(taskId);let cache=views.get(container);if(!cache){cache=new Map();views.set(container,cache);}
+ const m=model(taskId);let v=views.get(container);if(!v||v.task!==taskId){v={task:taskId,cache:new Map()};views.set(container,v);}const cache=v.cache;
  const focus=document.activeElement&&container.contains(document.activeElement)&&document.activeElement.id?document.activeElement.id:null;
  const shown=display(),shownKey=JSON.stringify(shown);
  let list=[...m.items.values()].filter(it=>visible(it,shown));

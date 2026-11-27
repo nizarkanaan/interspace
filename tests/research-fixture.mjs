@@ -20,6 +20,8 @@ export const RESEARCH_SCOPE={...scopeBase,task_id:null,projects:[],network:{defa
 let seq=0;
 export const ev=(task_id,kind,data,item_id=null)=>({v:1,task_id,seq:++seq,at:'2026-11-19T10:00:00.000Z',kind,turn_id:'t-1',item_id,data});
 export const resetSeq=()=>{seq=0;};
+// One task's events, numbered from 1 like a real log: ev() shares one counter across tasks, which leaves a gap row.
+export const evFor=task=>{let n=0;return (kind,data,item=null,turn='u1')=>({v:1,task_id:task,seq:++n,at:'2026-11-19T10:00:00.000Z',kind,turn_id:turn,item_id:item,data});};
 
 // Installs the fake bridge. opts: {projects, rows, researchRows, history:{task:[events]}, scopes:{task:scope}}.
 export async function install(page,url,opts={}){
