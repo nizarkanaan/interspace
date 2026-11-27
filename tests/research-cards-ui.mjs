@@ -32,7 +32,8 @@ export default async function check(page,url){
   ev('r1','research_usage',{calls:{semantic_scholar:3,arxiv:1},cached:{semantic_scholar:1}}),
   ev('r1','outputs',{outputs:[{name:'report.md',kind:'report',bytes:2048},{name:'references.bib',kind:'bibtex',bytes:512}]}),
   ev('r1','status',{state:'idle',detail:'',queue_position:null,reason:null})];
- await install(page,url,{display:{v:1,thinking:'full',searches:'full',tools:true,citations:true,plans:true,notes:true},researchRows:[{id:'r1',mode:'agent',kind:'research',project_id:null,title:'Synthetic related work',status:'idle',provider:'codex',model:null}],history:{r1:history},
+ // Detailed: this suite checks each card in full, which Simple's research chat view folds into the turn's work line.
+ await install(page,url,{display:{v:1,thinking:'full',searches:'full',tools:true,citations:true,plans:true,notes:true,detail:'detailed'},researchRows:[{id:'r1',mode:'agent',kind:'research',project_id:null,title:'Synthetic related work',status:'idle',provider:'codex',model:null}],history:{r1:history},
   scopes:{r1:{v:1,task_id:'r1',version:1,projects:[],network:{default:'deny',allow_hosts:[],deny_hosts:[]},apps:[],web_search:'deny',limits:{token_budget:250000,time_limit_s:3600},research:{sources:{semantic_scholar:'allow',arxiv:'allow',unpaywall:'off'}}}},
   outputs:{r1:[{name:'report.md',kind:'report',bytes:2048},{name:'references.bib',kind:'bibtex',bytes:512}]}});
  await page.evaluate(x=>{window.rFixture.blobs={'blob-c4':JSON.stringify({papers:[{title:'Synthetic full result',authors:[],year:2024,venue:null,citation_count:0,url:null,oa_url:null,sources:['arxiv']}],searched:['arxiv'],skipped:[]})};window.rFixture.readable={r1:{'report.md':'# Related work\n\nA paragraph with **bold**, *care*, `code` and '+x+'.\n\n- First point [a safe link](https://example.org/a)\n- Second point [an unsafe link](javascript:window.pwned=1)\n- Third point [https://doi.org/10.5555/x](https://evil.example/phish)\n\n1. Ordered\n\n> A quote\n\n```\n<script>window.pwned=1</script>\n```','references.bib':'@article{fixture2,\n  title={'+x+'}\n}'}};},XSS);
@@ -230,6 +231,8 @@ export default async function check(page,url){
  // The brief cards fit at narrow widths, in light and dark.
  await fit(page,'research-cards-brief',async()=>assert(await page.evaluate(()=>[...document.querySelectorAll('.test-card')].every(c=>c.scrollWidth<=c.clientWidth)),'Brief card overflows'),false,[320,390,600]);
  await page.evaluate(()=>document.querySelectorAll('.test-card').forEach(x=>x.remove()));
+ // Back at 1280 the split reader returns on the next frame, with the results pane holding the outputs.
+ await page.waitForFunction(()=>document.querySelector('#agent-view.split'));await page.locator('#agent-outputs').waitFor();
 
  // Research requests per source (Wave 2A: requests sent, and answers from the cache), never money.
  const head=await text(page.locator('#agent-head'));

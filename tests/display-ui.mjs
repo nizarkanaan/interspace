@@ -66,6 +66,9 @@ export default async function check(page,url){
  await page.waitForFunction(()=>window.scrollY===0);
  assert(await page.evaluate(()=>document.getElementById('agent-topbar').getBoundingClientRect().top>=0),'Top bar stays in view');
 
+ // Simple folds the turn's agent work into one line (2026-11-27-simple-chat-view-design.md); Details puts the
+ // per-step items back in place, and the line stays open for the session.
+ await page.locator('#agent-stream .work-line').getByRole('button',{name:/^Details/}).click();
  // Default display: one-line search summaries, reasoning summary, failed call in full.
  const s1=await text(stream.locator('[data-item=s1]'));
  assert(s1.startsWith('Searched “fallback '+XSS+'” in OpenAlex, Crossref: 3 papers'),'Search summary: '+s1);

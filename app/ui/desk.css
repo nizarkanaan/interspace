@@ -545,6 +545,14 @@ html:has(#agent-view.split:not([hidden])){overflow:hidden;height:100%;overscroll
 .view-switch button[aria-pressed=true]{background:var(--accent);color:var(--on-accent);font-weight:600}
 .agent-topbar .view-switch{margin:0}
 .agent-topbar .view-switch button{font-size:13px;padding:5px 12px}
+/* Simple as a chat (2026-11-27-simple-chat-view-design.md): one quiet work line per turn of a research task. Opened,
+   its folded items follow it, indented, in their original order, then the closing Hide details. */
+.card.work-line{display:block;border:0;border-left:2px solid var(--line);border-radius:0;padding:2px 0 2px 12px;background:transparent;font-size:13.5px;color:var(--muted);overflow-wrap:anywhere}
+.work-line .work-text{margin-right:10px}
+.work-line .work-open,.work-line .work-details,.work-end .work-hide{font-size:12.5px;padding:2px 0;margin:0 12px 0 0;border:0;background:transparent;color:var(--accent)}
+.work-line .work-open:hover,.work-line .work-details:hover,.work-end .work-hide:hover{background:transparent;text-decoration:underline}
+.stream>.in-work,.stream>.work-end{margin-left:14px}
+@media(max-width:600px){.stream>.in-work,.stream>.work-end{margin-left:8px}}
 
 /* Collapsible sidebar: a 44px rail with only the show button. Not applied when the layout stacks (600px and below). */
 .side-top{display:flex;align-items:center;justify-content:space-between;gap:6px;min-width:0}

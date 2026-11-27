@@ -53,7 +53,7 @@ function apply(m,e){
   case 'ask':{const it=item(m,key);it.ask=d;it.sending=false;it.answerError='';m.openAsk=key;if(d.request)remember(m,d.request);return;}
   case 'answer':{const it=item(m,key);it.answer=d;it.sending=false;if(m.openAsk===key)m.openAsk=null;return;}
   case 'budget':m.budget=d;if(d.charge_kind!=='reserved')row(m,e,'budget',{text:(d.charge_kind==='estimated'?'Estimated ':'Reported ')+tokens(d.tokens)+' tokens'+(d.charge_kind==='estimated'?' (no counts returned)':'')+' · '+tokens(d.used)+(d.budget==null?' used':' / '+tokens(d.budget)+' used')});return;
-  case 'scope':m.scopeEvent=d;row(m,e,'scope',{text:'Scope v'+d.scope_version+' '+({approved:'approved',edited:'edited: approve it before the next action',amended:'amended and approved'}[d.change]||String(d.change))+(d.summary?': '+d.summary:'')});return;
+  case 'scope':m.scopeEvent=d;row(m,e,'scope',{change:d.change,text:'Scope v'+d.scope_version+' '+({approved:'approved',edited:'edited: approve it before the next action',amended:'amended and approved'}[d.change]||String(d.change))+(d.summary?': '+d.summary:'')});return;
   case 'error':item(m,key).error=d;return;
   // Research (docs/superpowers/specs/research/tasks.md): a citation report card, call counts and the task's outputs.
   case 'citation_report':item(m,key).citation=d;return;
@@ -211,7 +211,85 @@ function reasoningCard(it,card,d){
  const p=el('p','reasoning-summary',null,card);el('span','footnote reasoning-label','Reasoning ',p);p.append(short);
  if(short!==text.trim()){const d2=el('details','reasoning',null,card);el('summary','','Show all',d2);markdown(text,d2);}
 }
-function build(m,it,compact){
+// Simple as a chat (2026-11-27-simple-chat-view-design.md): in a research task's main conversation each turn reads as
+// your message, one work line for the agent's work, then the reply. Code tasks, the Running view's compact copy and a
+// subagent's nested activity keep the Simple above.
+const LIVE=new Set(['queued','starting','running','waiting_lock','cancelling']);
+const safe=s=>String(s).replace(/[^A-Za-z0-9_-]/g,'_');
+const simpleOn=(m,options={})=>!options.compact&&!options.nested&&display().detail!=='detailed'&&!!window.interspaceAgent?.isResearch?.(m.id);
+// What folds into the work line; everything else stays in full, so nothing that needs the user, or went wrong, folds.
+// `interim` holds the turn's final assistant messages that a later assistant message follows; `newestScope` is the
+// last scope row, which stays while its change is still `edited`.
+function stays(m,it,{interim,newestScope}={}){
+ if(it.ask||it.error||it.blobError)return true;
+ if(it.message)return !(it.message.role==='assistant'&&it.message.final&&!!interim?.has(it));
+ if(it.call||it.result||it.output!=null)return !(it.call?.category==='research'&&(!it.result||it.result.status==='ok'));
+ if(it.reasoning!=null)return false;
+ if(it.row==='budget')return false;
+ if(it.row==='scope')return it===newestScope&&it.change==='edited';
+ if(it.team)return !it.team.answered;
+ if(it.sub){const s=childStatus(it.sub.task_id,it.sub.state).state;return !(s==='completed'||s==='idle'&&it.sub.finished);}
+ if(it.citation){const c=window.interspaceResearchCards?.citationCounts?.(it.citation);return !c||c.problems!==0;}
+ return true;
+}
+// Turns split at your messages (pending ones too); items before the first one join turn 1, whose lead key is `start`
+// when it has no message. Per turn: the lead, the work line when anything folded (then, opened, the folded items and
+// the closing Hide details), then the turn's other items in their original order, the reply included.
+function digest(m,list){
+ const R=window.interspaceResearchCards,turns=[];let newestScope=null;
+ for(const it of list){
+  if(it.row==='scope')newestScope=it;
+  if(!turns.length)turns.push({lead:null,items:[]});
+  const turn=turns.at(-1),user=it.message?.role==='user';
+  if(user&&!turn.lead)turn.lead=it;else if(user)turns.push({lead:it,items:[]});else turn.items.push(it);
+ }
+ const entries=[];let folded=0;
+ turns.forEach((turn,i)=>{
+  const lead=turn.lead?turn.lead.key:'start',interim=new Set();let later=false;
+  for(let j=turn.items.length-1;j>=0;j--){const msg=turn.items[j].message;if(msg?.role!=='assistant')continue;if(later&&msg.final)interim.add(turn.items[j]);later=true;}
+  const work=[],kept=[];for(const it of turn.items)(stays(m,it,{interim,newestScope})?kept:work).push(it);
+  if(turn.lead)entries.push({key:turn.lead.key,it:turn.lead});
+  if(work.length){
+   folded+=work.length;
+   const open=openWork.has(m.id+'|'+lead),live=i===turns.length-1&&LIVE.has(m.status?.state);
+   let text=R.workParts(work).join(' · ');
+   if(live){let run=null;for(const it of work)if(it.call?.category==='research'&&!it.result)run=it;text='Working'+(run?' · '+R.summaryText({call:run.call,result:null,output:''}):'')+' · '+text;}
+   const children=[];for(const it of work)if(it.sub&&children.length<2)children.push({id:it.sub.task_id,name:R.workerName(it.sub)});
+   entries.push({key:'work:'+lead,work:true,lead,items:work,open,live,text,children});
+   if(open){for(const it of work)entries.push({key:it.key,it,inWork:true});entries.push({key:'work-end:'+lead,end:true,lead});}
+  }
+  for(const it of kept)entries.push({key:it.key,it});
+ });
+ return {entries,folded};
+}
+// The digest's part of a cached node's version.
+const entryVersion=(m,entry)=>entry.work?entry.text+'|'+entry.open+'|'+entry.children.map(c=>c.id+'='+c.name).join(','):'';
+// Opened work lines stay open for the session, per task.
+const openWork=new Set();
+const workId=(m,entry)=>safe(String(m.id).slice(0,8))+'-'+safe(entry.lead);
+// "Searched 3 sources 2 times · 3 papers · 8 steps", up to 2 Open buttons for finished subagents, then Details ▸ or
+// Hide details ▾. The toggle keeps its id, so focus comes back to it after the render (render() restores it by id).
+function workLine(m,entry){
+ const line=el('div','card work-line');line.dataset.item=entry.key;line.setAttribute('role','group');line.setAttribute('aria-label','Agent work');
+ el('span','work-text',entry.text,line);
+ for(const c of entry.children){const b=el('button','work-open','Open '+c.name,line);b.type='button';b.id='work-open-'+safe(c.id);b.dataset.child=c.id;b.onclick=()=>open(c.id);}
+ const steps=entry.items.length,b=el('button','work-details',entry.open?'Hide details ':'Details ',line);b.type='button';b.id='work-'+workId(m,entry);
+ b.setAttribute('aria-expanded',String(entry.open));b.setAttribute('aria-label',(entry.open?'Hide details':'Details')+' of this work, '+tokens(steps)+' step'+(steps===1?'':'s'));
+ el('span','',entry.open?'▾':'▸',b).setAttribute('aria-hidden','true');
+ b.onclick=()=>{const k=m.id+'|'+entry.lead;if(openWork.has(k))openWork.delete(k);else openWork.add(k);changed(m.id);};
+ return line;
+}
+// The closing "Hide details ▴" after the opened items; focus goes back to the line's own toggle.
+function workEnd(m,entry){
+ const end=el('div','work-end');end.dataset.item=entry.key;const id=workId(m,entry);
+ const b=el('button','work-hide','Hide details ',end);b.type='button';b.id='work-end-'+id;b.setAttribute('aria-expanded','true');b.setAttribute('aria-label','Hide details of this work');
+ el('span','','▴',b).setAttribute('aria-hidden','true');
+ b.onclick=()=>{openWork.delete(m.id+'|'+entry.lead);changed(m.id);document.getElementById('work-'+id)?.focus();};
+ return end;
+}
+function build(m,it,compact,entry){
+ if(entry?.work)return workLine(m,entry);
+ if(entry?.end)return workEnd(m,entry);
  if(it.row){const r=el('p','row-event '+it.row,it.text);r.dataset.item=it.key;return r;}
  if(it.message){const msg=el('div','message '+it.message.role+(it.message.pending?' pending':''));msg.dataset.item=it.key;el('small','',it.message.role==='user'?'You':'Agent',msg);(it.message.role==='assistant'&&it.message.final&&window.interspaceAgent?.isResearch?.(m.id)?window.interspaceResearchCards.markdown:markdown)(it.message.text,msg);if(!it.message.final&&!it.message.pending)el('span','streaming footnote','Writing…',msg);if(it.message.pending&&!it.message.failed)el('span','footnote','Sending…',msg);if(it.message.failed)el('p','error-text','Not sent: '+it.message.failed,msg);return msg;}
  const card=el('article','card');card.dataset.item=it.key;
@@ -251,7 +329,7 @@ function subContext(m,it,compact){
  const child=it.sub.task_id,key=String(child).replace(/[^A-Za-z0-9_-]/g,'_');
  if(compact)return {sub:it.sub,key,compact:true,expanded:false,childBox:null,statusText,markdown,status:childStatus(child,it.sub.state),activity:activity(child),toggle:()=>{},open:()=>open(child)};
  if(it.expanded&&!it.childBox){it.childBox=el('div','stream nested');it.childBox.id='child-'+key;it.childBox.setAttribute('role','log');it.childBox.setAttribute('aria-label','Subagent activity');}
- if(it.expanded)render(it.childBox,child);
+ if(it.expanded)render(it.childBox,child,{nested:true});
  return {sub:it.sub,key,expanded:!!it.expanded,childBox:it.childBox,statusText,markdown,status:childStatus(child,it.sub.state),activity:activity(child),
   citation:citationOf(child),citationCard:window.interspaceResearchCards?.citationCard,bumpChild:()=>{const cm=model(child);cm.rev++;changed(child);},
   toggle:()=>{it.expanded=!it.expanded;it.version++;if(it.expanded)sync(model(child));changed(m.id);},
@@ -259,19 +337,27 @@ function subContext(m,it,compact){
 }
 function childChanged(id){
  const parent=parents.get(id),pm=parent&&tasks.get(parent),it=pm&&pm.items.get(pm.children.get(id));
- if(it?.expanded&&it.childBox)render(it.childBox,id);
+ if(it?.expanded&&it.childBox)render(it.childBox,id,{nested:true});
 }
 // Reconciles cards in place, so focus, open details and scroll position survive new events. The node cache belongs
 // to the task the container shows: a parent and its child share #agent-stream, and keys such as user_u1, seq:N and
-// cumulative repeat in every task, so another task starts a fresh cache.
+// cumulative repeat in every task, so another task starts a fresh cache. options: {compact} for the Running view's
+// copy, {nested} for a subagent's activity inside its card; neither is ever digested (simpleOn).
 function render(container,taskId,options={}){
  const m=model(taskId);let v=views.get(container);if(!v||v.task!==taskId){v={task:taskId,cache:new Map()};views.set(container,v);}const cache=v.cache;
  const focus=document.activeElement&&container.contains(document.activeElement)&&document.activeElement.id?document.activeElement.id:null;
  const shown=display(),shownKey=JSON.stringify(shown);
  let list=[...m.items.values()].filter(it=>visible(it,shown));
  if(options.compact){const open=m.openAsk&&m.items.get(m.openAsk);list=list.slice(-COMPACT_ITEMS);if(open&&!list.includes(open))list.push(open);}
- const nodes=list.map(it=>{const hit=cache.get(it.key),version=stamp(m,it)+'|'+shownKey;if(hit&&hit.version===version)return hit.node;const next=build(m,it,options.compact);if(hit){const was=hit.node.querySelector('details');const now=next.querySelector('details');if(was&&now)now.open=was.open;}cache.set(it.key,{version,node:next});return next;});
- for(const key of [...cache.keys()])if(!m.items.has(key))cache.delete(key);
+ const d=simpleOn(m,options)?digest(m,list):{entries:list.map(it=>({key:it.key,it})),folded:0};
+ if(!options.compact&&!options.nested)m.folded=d.folded;
+ // A reused node takes its in-work class from this render, so switching views never leaves a stale one.
+ const nodes=d.entries.map(entry=>{
+  const it=entry.it,hit=cache.get(entry.key),version=(it?stamp(m,it):'')+'|'+shownKey+'|'+entryVersion(m,entry);let node=hit&&hit.version===version?hit.node:null;
+  if(!node){node=build(m,it,options.compact,entry);if(hit){const was=hit.node.querySelector('details');const now=node.querySelector('details');if(was&&now)now.open=was.open;}cache.set(entry.key,{version,node});}
+  node.classList.toggle('in-work',!!entry.inWork);return node;});
+ const live=new Set(d.entries.map(e=>e.key));
+ for(const key of [...cache.keys()])if(!m.items.has(key)&&!live.has(key))cache.delete(key);
  nodes.forEach((n,i)=>{if(container.children[i]!==n)container.insertBefore(n,container.children[i]||null);});
  while(container.children.length>nodes.length)container.lastElementChild.remove();
  if(m.loadError&&!options.compact){const note=el('p','error-text',m.loadError,container);note.setAttribute('role','alert');}
@@ -292,6 +378,8 @@ window.interspaceStream={
  init(options){request=options.request;hostChanged=options.changed||hostChanged;open=options.open||open;rowStatus=options.rowStatus||rowStatus;stampOf=options.stamp||stampOf;changed=id=>{hostChanged(id);childChanged(id);};},
  receive,sync:id=>sync(model(id)),render,activity,childStatus,optimistic,failed,statusText,budgetText,
  has:id=>tasks.has(id)&&tasks.get(id).lastSeq>0,ids:()=>[...tasks.keys()],
+ // How many steps the task's last main-conversation render folded into work lines (0 outside Simple's chat view).
+ folded:id=>tasks.get(id)?.folded||0,
  parentOf:id=>parents.get(id)||null,
  children:id=>{const m=tasks.get(id);return m?[...m.children.values()].map(k=>m.items.get(k)?.sub).filter(Boolean):[];},
  status:id=>tasks.get(id)?.status||null,usage:id=>tasks.get(id)?.usage||null,outputs:id=>tasks.get(id)?.outputs||null,corpus:id=>tasks.get(id)?.corpus||null,claims:id=>tasks.get(id)?.claims||null,evidence:id=>tasks.get(id)?.evidence||null,budget:id=>tasks.get(id)?.budget||null,scopeEvent:id=>tasks.get(id)?.scopeEvent||null,workspace:id=>tasks.get(id)?.workspace||null,
