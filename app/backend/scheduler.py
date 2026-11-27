@@ -1744,11 +1744,7 @@ class Scheduler:
             task = self.store.task(task_id)
             if not task_rows.is_research(task) or task.get('parent_task_id'):
                 raise ValueError('Only research tasks have a claim check.')
-            try:
-                text = self._report_text(task_id)
-            except (OSError, ValueError):
-                text = None
-            return research_claims.public(research_claims.current_sentences(self._claims_load(task_id), text))
+            return research_claims.public(self._claims_load(task_id))
 
     def _claims_save(self, root_id, value):
         path = self._claims_path(root_id)
