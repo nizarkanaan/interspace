@@ -99,6 +99,9 @@ export default async function check(page,url){
  assert(await collapsed()&&shut.includes('["interspace.sidebarCollapsed","1"]'),'Sidebar collapsed and saved');
  await focusButton.click();
  assert(await focused()&&await aside.isHidden(),'Focus over a collapsed sidebar');
+ // The sidebar shortcut is ignored in Focus: it would change the saved choice with nothing to see.
+ await page.keyboard.press('ControlOrMeta+Backslash');
+ assert(await focused()&&await collapsed()&&await store()===shut,'Sidebar shortcut changed the sidebar in Focus');
  await focusButton.click();
  assert(!(await focused())&&await collapsed()&&await aside.isVisible()&&await store()===shut,'Collapsed sidebar kept and nothing saved');
  await page.locator('#sidebar-expand').click();
@@ -111,7 +114,23 @@ export default async function check(page,url){
  await page.evaluate(()=>{window.rFixture.research[0].status='paused_team';window.rFixture.setState();});
  await banner.waitFor();
  assert(await focused()&&(await text(banner)).includes('Approve the team'),'Banner: '+await text(banner));
+ // Scrolled down a long report, the banner and the whole tab row (Exit focus too) stay reachable, one under the other.
+ await page.setViewportSize({width:1280,height:600});
+ {const r=await page.evaluate(()=>{const x=document.getElementById('agent-results');x.scrollTop=x.scrollHeight;return {scroll:x.scrollHeight-x.clientHeight,top:x.scrollTop};});
+  assert(r.scroll>200&&r.top>200,'Report too short to scroll: '+JSON.stringify(r));}
+ {const hit=await page.evaluate(()=>{const at=e=>{const r=e.getBoundingClientRect(),h=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);return !!h&&(h===e||e.contains(h));};
+   const b=document.getElementById('agent-focus-banner').getBoundingClientRect(),t=document.getElementById('agent-tabs').getBoundingClientRect(),x=document.getElementById('agent-results').getBoundingClientRect();
+   return {exit:at(document.getElementById('agent-focus')),tab:at(document.querySelector('[data-agent-tab=corpus]')),go:at(document.getElementById('agent-focus-go')),bannerTop:Math.round(b.top),bannerBottom:Math.round(b.bottom),tabsTop:Math.round(t.top),pane:Math.round(x.top)};});
+  assert(hit.exit&&hit.tab&&hit.go&&hit.bannerBottom<=hit.tabsTop&&hit.bannerTop>=hit.pane,'Banner covers the tab row when scrolled: '+JSON.stringify(hit));}
+ await focusButton.click();
+ assert(!(await focused()),'Exit focus after scrolling');
+ await focusButton.click();
+ await page.setViewportSize({width:1280,height:1000});
+ assert(await focused()&&await banner.isVisible(),'Banner again in Focus');
+ // Go to conversation moves keyboard focus once, to the team card, never through the Focus button.
+ await page.evaluate(()=>{window.focusHops=0;document.getElementById('agent-focus').addEventListener('focus',()=>{window.focusHops++;});});
  await banner.getByRole('button',{name:'Go to conversation',exact:true}).click();
+ assert(await page.evaluate(()=>window.focusHops)===0,'Go to conversation focused the Focus button on the way');
  assert(!(await focused())&&await chat.isVisible()&&await banner.isHidden(),'Go to conversation exits Focus');
  {const seen=await page.evaluate(()=>{const c=document.querySelector('#agent-view .agent-main').getBoundingClientRect(),t=[...document.querySelectorAll('#agent-stream .card.team')].pop(),r=t.getBoundingClientRect();
    return {top:Math.round(r.top),chat:[Math.round(c.top),Math.round(c.bottom)],focus:document.activeElement===t||t.contains(document.activeElement)};});

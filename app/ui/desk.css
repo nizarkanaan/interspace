@@ -538,7 +538,10 @@ html:has(#agent-view.split:not([hidden])){overflow:hidden;height:100%;overscroll
 #agent-view.split.focus .agent-main,#agent-view.split.focus .split-handle,#agent-view.focus #agent-detail-toggle{display:none}
 body:has(#agent-view.focus:not([hidden])) .shell{grid-template-columns:minmax(0,1fr)}
 body:has(#agent-view.focus:not([hidden])) aside{display:none}
-/* What needs the user while in Focus stays in view at the top of the pane. */
-.focus-banner{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:10px 0 0;background:var(--surface);border-left-color:var(--warn);color:var(--ink)}
+/* What needs the user while in Focus stays in view at the top of the pane. The banner and the tab row share one sticky
+   header (the tab row alone is sticky outside the split), so a scrolled pane never puts one over the other. */
+.results-head{position:sticky;top:0;z-index:4;background:var(--leaf)}
+.results-head #agent-tabs{position:static}
+.focus-banner{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:10px 0 0;background:var(--surface);border-left-color:var(--warn);color:var(--ink)}
 .focus-banner #agent-focus-need{font-weight:600}
 .focus-banner button{font-size:13px;padding:5px 10px}

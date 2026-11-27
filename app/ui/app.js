@@ -121,6 +121,8 @@ document.addEventListener('keydown',e=>{
  if(e.key!=='\\'||e.altKey||e.shiftKey||(mac?!e.metaKey||e.ctrlKey:!e.ctrlKey||e.metaKey))return;
  const t=e.target;if(t&&(/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)||t.isContentEditable))return;
  if(matchMedia('(max-width:600px)').matches)return;
+ // Focus hides the sidebar; toggling it then would only change the saved choice, unseen.
+ if(window.interspaceAgent.isFocused())return;
  e.preventDefault();window.interspaceSidebar.set(!window.interspaceSidebar.collapsed());
 });
 $('sidebar-new').onclick=()=>navigate('new',mode==='research'?'research':'project');

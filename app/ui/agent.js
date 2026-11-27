@@ -185,25 +185,27 @@ function place(split){
  if(!split)setFocus(false);
  if(split===placed)return;placed=split;
  const main=document.querySelector('#agent-view .agent-main'),results=$('agent-results'),layout=document.querySelector('#agent-view .agent-layout');
- const parts=['agent-tabs','agent-scope-editor','agent-report','agent-corpus','agent-evidence','agent-details'].map(x=>$(x));
+ const parts=['agent-scope-editor','agent-report','agent-corpus','agent-evidence','agent-details'].map(x=>$(x));
  $('agent-view').classList.toggle('split',split);results.hidden=!split;$('agent-topbar').hidden=!split;$('split-handle').hidden=!split;if(split)splitWidth(null);
- if(split){$('agent-topbar').prepend($('agent-back'));$('agent-topbar-status').after($('agent-detail-toggle'));results.append(...parts);}
+ // The tab row shares one sticky header with Focus's banner, so neither covers the other when the pane scrolls.
+ if(split){$('agent-topbar').prepend($('agent-back'));$('agent-topbar-status').after($('agent-detail-toggle'));$('agent-results-head').append($('agent-tabs'));results.append(...parts);}
  else{main.prepend($('agent-back'));$('agent-back').after($('agent-tabs'));$('agent-scope-note').after($('agent-scope-editor'));$('agent-stream').before($('agent-report'),$('agent-corpus'),$('agent-evidence'),$('agent-detail-toggle'));layout.append($('agent-details'));}
  focusControls();
 }
 // Focus mode (2026-11-27-readable-workspace-design.md): in the split reader the results pane takes the whole window.
 // The sidebar is hidden without saving that choice and comes back as it was. Esc or Exit focus returns.
 let focused=false,focusTask=null,sidebarWas=false;
-function setFocus(on){
+// `restore` puts keyboard focus back on the Focus button when it was in the banner; Go to conversation moves it itself.
+function setFocus(on,{restore=true}={}){
  const next=!!on&&placed&&!!current;if(next===focused)return;
  const Side=window.interspaceSidebar,banner=$('agent-focus-banner'),lost=banner.contains(document.activeElement);
  focused=next;focusTask=next?current:null;
  $('agent-view').classList.toggle('focus',next);
  if(next){sidebarWas=Side.collapsed();Side.set(true,{persist:false});}
- // A sidebar shown meanwhile (⌘\) stays shown.
+ // ⌘\ is ignored in Focus (app.js); a sidebar something else showed meanwhile stays shown.
  else if(Side.collapsed())Side.set(sidebarWas,{persist:false});
  focusControls();
- if(lost&&!next)$('agent-focus').focus();
+ if(lost&&!next&&restore)$('agent-focus').focus();
 }
 // The Focus button, and the banner that names what needs the user (the sidebar's words for the task row's state).
 function focusControls(){
@@ -214,7 +216,7 @@ function focusControls(){
 // Go to conversation: leave Focus and show what needs the user: the latest team or question card, or the scope note.
 function goToConversation(){
  const st=row(current)?.status,stream=$('agent-stream'),chat=document.querySelector('#agent-view .agent-main');
- setFocus(false);
+ setFocus(false,{restore:false});
  const last=sel=>[...stream.querySelectorAll(sel)].pop()||null,note=$('agent-scope-note');
  const target=st==='paused_team'?last('.card.team'):st==='paused_ask'?last('.card.ask'):st==='paused_scope'&&!note.hidden?note:null;
  if(!target){if(chat)chat.scrollTop=chat.scrollHeight;$('agent-message').focus({preventScroll:true});return;}
