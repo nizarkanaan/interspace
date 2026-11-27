@@ -77,6 +77,15 @@ export default async function check(page,url){
  await push(page,[ev('r1','corpus',{papers:59,unverified:2})]);
  await page.waitForFunction(n=>window.rFixture.requests.filter(r=>r.method==='task_corpus').length>n,before,{timeout:5000});
 
+ // A corpus event that lands while a fetch is still out triggers a fresh fetch afterwards (the live run showed 0 papers).
+ {const n=(await requests(page,'task_corpus')).length;
+  await page.evaluate(()=>{window.rFixture.hold.task_corpus=true;});
+  await push(page,[ev('r1','corpus',{papers:60,unverified:2})]);
+  await page.waitForFunction(k=>window.rFixture.requests.filter(r=>r.method==='task_corpus').length>k,n,{timeout:5000});
+  await push(page,[ev('r1','corpus',{papers:61,unverified:2})]);
+  await page.waitForTimeout(1500);
+  await page.evaluate(()=>{const f=window.rFixture;f.hold.task_corpus=false;for(const r of f.held.splice(0))f.respond(r,{v:1,papers:[],unverified:0,full:[]});});
+  await page.waitForFunction(k=>window.rFixture.requests.filter(r=>r.method==='task_corpus').length>k+1,n,{timeout:5000});}
  // The tab row stays pinned while the list scrolls, and a switch made there starts the new tab at its top.
  await page.evaluate(()=>scrollTo(0,document.documentElement.scrollHeight));
  assert(Math.abs(await page.evaluate(()=>document.getElementById('agent-tabs').getBoundingClientRect().top))<=1,'Tabs pinned');

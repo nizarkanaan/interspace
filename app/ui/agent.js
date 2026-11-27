@@ -243,16 +243,17 @@ function evidenceArea(id){
   onResolve:(row,column,value)=>{host.request('table_resolve',{task_id:id,row,column,value},{manual:true}).then(x=>{t.data=x;}).catch(e=>{t.error=e.message;}).finally(()=>{t.rev++;refresh();});},
   onExport:()=>{t.note='';host.request('table_export',{task_id:id},{manual:true}).then(()=>host.request('task_output_save',{task_id:id,name:'evidence.csv'},{manual:true})).then(r=>{t.note=r?.saved?'Saved evidence.csv.':'Not saved.';}).catch(e=>{t.error=e.message;}).finally(()=>{t.rev++;refresh();});}});
 }
-function corpusInfo(id){if(!corpora.has(id))corpora.set(id,{data:null,loading:false,error:'',seen:null,timer:null,ui:{q:'',filter:'all',sort:'found',all:false},rev:0});return corpora.get(id);}
+function corpusInfo(id){if(!corpora.has(id))corpora.set(id,{data:null,loading:false,error:'',loadedFor:undefined,timer:null,ui:{q:'',filter:'all',sort:'found',all:false},rev:0});return corpora.get(id);}
 function loadCorpus(id){
- const c=corpusInfo(id);if(c.loading)return;c.loading=true;c.rev++;
+ const c=corpusInfo(id);if(c.loading)return;c.loading=true;c.rev++;c.loadedFor=JSON.stringify(S.corpus(id));
  host.request('task_corpus',{task_id:id},{manual:true}).then(r=>{c.data=r&&typeof r==='object'?r:null;c.error='';}).catch(e=>{c.error=e.message||'The corpus could not be loaded.';}).finally(()=>{c.loading=false;c.rev++;refresh();});
 }
 function corpusArea(id){
  const c=corpusInfo(id),ev=JSON.stringify(S.corpus(id));
  if(!c.data&&!c.loading&&!c.error)loadCorpus(id);
- else if(c.seen!==null&&ev!==c.seen&&!c.timer)c.timer=setTimeout(()=>{c.timer=null;if(current===id&&tabs.get(id)==='corpus')loadCorpus(id);},1000);
- c.seen=ev;
+ // Refetch (debounced) whenever the latest corpus event differs from the one the shown data was fetched for, so an
+ // event that lands while a fetch is still out is not lost.
+ else if(!c.loading&&ev!==c.loadedFor&&!c.timer)c.timer=setTimeout(()=>{c.timer=null;if(current===id&&tabs.get(id)==='corpus')loadCorpus(id);},1000);
  const box=$('agent-corpus'),key=id+':'+c.rev;if(box.dataset.key===key)return;box.dataset.key=key;
  window.interspaceCorpus.render(box,c.data,c.ui,{loading:c.loading,error:c.error,refresh:()=>{c.rev++;refresh();}});
 }
