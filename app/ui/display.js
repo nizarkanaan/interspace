@@ -2,7 +2,8 @@
    shows. It comes from `state.display` and is changed with `display_update`. Every event is still recorded; your
    messages, agent replies, questions for you, team cards, subagents and errors always show. */
 (()=>{
-const DEFAULT={v:1,thinking:'summary',searches:'summary',tools:true,citations:true,plans:true,notes:true};
+const DEFAULT={v:1,thinking:'summary',searches:'summary',tools:true,citations:true,plans:true,notes:true,detail:'simple'};
+const DETAIL=[['simple','Simple'],['detailed','Detailed']];
 const LEVEL=[['summary','Summary'],['full','Full'],['hidden','Hidden']];
 const LEVELS=[
  ['thinking','Thinking','Summary shows the start of each reasoning note; you can open the rest.'],
@@ -15,6 +16,7 @@ function valid(d){
  if(!d||typeof d!=='object')return {...DEFAULT};
  const out={...DEFAULT};
  for(const k of ['thinking','searches'])if(LEVEL.some(([v])=>v===d[k]))out[k]=d[k];
+ if(DETAIL.some(([v])=>v===d.detail))out.detail=d.detail;
  for(const [k] of SWITCHES)if(typeof d[k]==='boolean')out[k]=d[k];
  return out;
 }
@@ -32,6 +34,15 @@ function renderSettings(container){
  el('h2','','Conversation display',container);
  el('p','footnote','Choose what the conversation shows. Everything is still recorded. Your messages, agent replies, questions for you, team proposals and errors always show.',container);
  const form=el('form','display-form',null,container);form.onsubmit=e=>e.preventDefault();
+ {
+  const fs=el('fieldset','display-choice',null,form);el('legend','','Conversation detail',fs);
+  const row=el('div','display-options',null,fs);
+  for(const [value,text] of DETAIL){
+   const l=el('label','display-option',null,row),input=el('input',null,null,l);input.type='radio';input.name='display-detail';input.value=value;input.id='display-detail-'+value;
+   input.checked=current.detail===value;input.onchange=()=>save({detail:value},container);l.append(' '+text);
+  }
+  el('p','footnote','Simple folds team and subagent details into one line you can open. Detailed shows everything.',fs);
+ }
  for(const [key,label,help] of LEVELS){
   const fs=el('fieldset','display-choice',null,form);el('legend','',label,fs);
   const row=el('div','display-options',null,fs);
@@ -53,6 +64,6 @@ function renderSettings(container){
 
 window.interspaceDisplay={
  init(options){request=options.request;onChange=options.changed||onChange;},
- get:()=>current,set,renderSettings,DEFAULT
+ get:()=>current,set,setDetail(value){if(DETAIL.some(([v])=>v===value))save({detail:value},document.getElementById('display-settings'));},renderSettings,DEFAULT
 };
 })();

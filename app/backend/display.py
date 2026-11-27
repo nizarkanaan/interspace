@@ -6,12 +6,13 @@ every event is still recorded in full.
 import copy
 
 LEVELS = ('summary', 'full', 'hidden')
+DETAILS = ('simple', 'detailed')
 SWITCHES = ('tools', 'citations', 'plans', 'notes')
 
 
 def default():
     return {'v': 1, 'thinking': 'summary', 'searches': 'summary', 'tools': True, 'citations': True, 'plans': True,
-            'notes': True}
+            'notes': True, 'detail': 'simple'}
 
 
 def validate(value):
@@ -26,6 +27,10 @@ def validate(value):
             if value[key] not in LEVELS:
                 raise ValueError(key.capitalize() + ' must be summary, full or hidden.')
             checked[key] = value[key]
+    if 'detail' in value:
+        if value['detail'] not in DETAILS:
+            raise ValueError('Detail must be simple or detailed.')
+        checked['detail'] = value['detail']
     for key in SWITCHES:
         if key in value:
             if not isinstance(value[key], bool):

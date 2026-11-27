@@ -81,6 +81,20 @@ export default async function check(page,url){
  await stream.locator('[data-item=s1]').getByRole('button',{name:'Show less'}).click();
  assert(await stream.locator('[data-item=s1] .paper').count()===0,'Show less');
 
+ // Conversation detail: Simple by default (also when the saved display has no `detail`), Detailed saves.
+ assert(await page.evaluate(()=>window.interspaceDisplay.get().detail)==='simple','Detail defaults to simple');
+ await page.locator('[data-view=settings]').click();
+ const detail=page.locator('#display-settings fieldset',{hasText:'Conversation detail'});
+ assert(await detail.count()===1&&(await detail.getByLabel('Simple').isChecked())&&!(await detail.getByLabel('Detailed').isChecked()),'Simple checked by default');
+ assert((await text(detail)).includes('Simple folds team and subagent details into one line you can open. Detailed shows everything.'),'Detail help text');
+ await detail.getByLabel('Detailed').check();
+ await page.waitForFunction(()=>window.rFixture.requests.some(r=>r.method==='display_update'&&r.params.display.detail==='detailed'));
+ assert((await requests(page,'display_update')).at(-1).display.detail==='detailed','Detailed sent');
+ await page.evaluate(()=>window.interspaceDisplay.setDetail('simple'));
+ await page.waitForFunction(()=>window.rFixture.requests.filter(r=>r.method==='display_update').at(-1).params.display.detail==='simple');
+ await page.locator('[data-view=research]').click();await page.locator('[data-open-task=r1]').click();
+ await page.waitForFunction(()=>document.querySelectorAll('#agent-stream .message').length===2);
+
  // Settings: hide searches, thinking, plans and notes; replies and the failed call stay.
  await page.locator('[data-view=settings]').click();
  const settings=page.locator('#display-settings');

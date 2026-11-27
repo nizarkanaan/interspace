@@ -46,6 +46,14 @@ class DisplayTests(unittest.TestCase):
         self.assertFalse(app.state['display']['plans'])
         self.assertEqual(app.published, 0)
 
+    def test_detail_defaults_to_simple_and_validates(self):
+        self.assertEqual(display.default()['detail'], 'simple')
+        self.assertEqual(display.validate({'detail': 'detailed'})['detail'], 'detailed')
+        self.assertEqual(display.validate({'thinking': 'full'})['detail'], 'simple')
+        with self.assertRaises(ValueError) as caught:
+            display.validate({'detail': 'loud'})
+        self.assertEqual(str(caught.exception), 'Detail must be simple or detailed.')
+
 
 if __name__ == '__main__':
     unittest.main()
