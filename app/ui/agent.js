@@ -238,11 +238,12 @@ function topbar(id,split){
  scope.className=info.scope&&!Scope.approved(info)?'scope-waiting':'';
  $('agent-topbar-stop').hidden=!stoppable(id);
 }
-// Simple or Detailed conversation (2026-11-27-readable-workspace-design.md): one click beside the conversation, the
-// same setting as Settings → Conversation display. Its text says the current view, so it carries no aria-pressed.
+// Simple or Detailed conversation (2026-11-27-readable-workspace-design.md): a two-option switch beside the
+// conversation, the same setting as Settings → Conversation display. Both labels stay put and the current one is
+// filled and pressed, so the view in use is never read from a label that flips.
 function detailToggle(talk){
- const b=$('agent-detail-toggle'),detailed=window.interspaceDisplay?.get?.()?.detail==='detailed';
- b.hidden=!talk;b.textContent=detailed?'Detailed view':'Simple view';b.classList.toggle('is-on',detailed);
+ const box=$('agent-detail-toggle'),now=window.interspaceDisplay?.get?.()?.detail==='detailed'?'detailed':'simple';
+ box.hidden=!talk;for(const b of box.querySelectorAll('button[data-detail]'))b.setAttribute('aria-pressed',String(b.dataset.detail===now));
 }
 function scopeNote(id,talk){
  const info=scopeInfo(id),waiting=!!info.scope&&!Scope.approved(info)&&!info.editing;
@@ -368,7 +369,7 @@ window.interspaceAgent={
   // shifted the whole view up and left a blank band; any such scroll is undone at once.
   addEventListener('scroll',()=>{if(placed&&(scrollX||scrollY))scrollTo(0,0);},{passive:true});
   $('agent-stop').onclick=()=>cancel(current);
-  $('agent-detail-toggle').onclick=()=>{const D=window.interspaceDisplay;D.setDetail(D.get().detail==='detailed'?'simple':'detailed');};
+  $('agent-detail-toggle').onclick=e=>{const b=e.target.closest('button[data-detail]');if(b&&b.getAttribute('aria-pressed')!=='true')window.interspaceDisplay.setDetail(b.dataset.detail);};
   $('agent-focus').onclick=()=>setFocus(!focused);
   $('agent-focus-go').onclick=goToConversation;
   // One Esc listener: it closes the evidence drawer first (evidence.js, once it has one), then leaves Focus.

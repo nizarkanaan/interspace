@@ -37,7 +37,7 @@ export default async function check(page,url){
  // approval the results open on Scope and outputs, which holds status, scope and outputs.
  const panel=page.locator('#agent-details');
  assert(await page.locator('#agent-view.split').count()===1&&await page.locator('#agent-topbar').isVisible(),'Split reader with a top bar');
- assert(await page.locator('#agent-topbar #agent-detail-toggle').isVisible()&&(await text(page.locator('#agent-detail-toggle')))==='Simple view'&&await page.locator('#agent-detail-toggle').getAttribute('aria-pressed')===null,'Simple/Detailed toggle in the top bar, its text the only state');
+ assert(await page.locator('#agent-topbar #agent-detail-toggle').isVisible()&&await page.locator('#agent-detail-toggle [data-detail=simple]').getAttribute('aria-pressed')==='true'&&await page.locator('#agent-detail-toggle [data-detail=detailed]').getAttribute('aria-pressed')==='false','Simple | Detailed switch in the top bar, Simple marked current');
  assert(await panel.isVisible()&&(await text(page.locator('[data-agent-tab=details]')))==='Scope and outputs'&&(await page.locator('[data-agent-tab=details]').getAttribute('aria-pressed'))==='true','Scope and outputs open first');
  for(const id of ['agent-head','agent-scope'])assert(await panel.locator('#'+id).count()===1,id+' in the panel');
  assert(await page.locator('[data-agent-tab=conversation]').isHidden(),'No Conversation tab beside the conversation');
@@ -136,5 +136,5 @@ export default async function check(page,url){
  await page.setViewportSize({width:1280,height:1000});
  assert(!errors.length,'Page errors: '+errors.join('; '));
  assert(!(await page.evaluate(()=>window.pwned)),'Script ran');
- return {checks:'Simple/Detailed toggle in the split top bar and above the narrow conversation, details panel beside the conversation (Details tab when narrow), one-line search summaries with Show details/less by keyboard, reasoning summary, failed calls always shown, settings hide searches/thinking/plans/notes with replies kept, full mode, literal text, no sideways scroll'};
+ return {checks:'Simple | Detailed switch (current view pressed) in the split top bar and above the narrow conversation, details panel beside the conversation (Details tab when narrow), one-line search summaries with Show details/less by keyboard, reasoning summary, failed calls always shown, settings hide searches/thinking/plans/notes with replies kept, full mode, literal text, no sideways scroll'};
 }

@@ -211,7 +211,7 @@ function build(m,it,compact){
  if(it.message){const msg=el('div','message '+it.message.role+(it.message.pending?' pending':''));msg.dataset.item=it.key;el('small','',it.message.role==='user'?'You':'Agent',msg);(it.message.role==='assistant'&&it.message.final&&window.interspaceAgent?.isResearch?.(m.id)?window.interspaceResearchCards.markdown:markdown)(it.message.text,msg);if(!it.message.final&&!it.message.pending)el('span','streaming footnote','Writing…',msg);if(it.message.pending&&!it.message.failed)el('span','footnote','Sending…',msg);if(it.message.failed)el('p','error-text','Not sent: '+it.message.failed,msg);return msg;}
  const card=el('article','card');card.dataset.item=it.key;
  // Simple folds team and subagent cards until they are opened; the compact copy (Running view) never folds.
- const simple=!compact&&display().detail!=='detailed',fold={simple,folded:simple&&!unfolded.has(m.id+'|'+it.key),unfold:()=>unfold(m,it,card)};
+ const simple=!compact&&display().detail!=='detailed',fold={simple,folded:simple&&!unfolded.has(m.id+'|'+it.key),unfold:()=>unfold(m,it,card,true),refold:()=>unfold(m,it,card,false)};
  if(it.team){const row=rowStatus(m.id),late=!BUSY.has(m.status?.state)&&TERMINAL.has(row);
   window.interspaceTeam.teamCard(card,{...fold,taskId:m.id,team:it.team,request,compact:!!compact,open:()=>open(m.id),closed:!!it.team.closed||terminal(m.status)||late,
    closedText:it.team.closed||(terminal(m.status)||!late?statusText(m.status).toLowerCase():statusText({state:row}).toLowerCase()),bump:()=>{it.version++;changed(m.id);}});}
@@ -227,13 +227,16 @@ function build(m,it,compact){
  return card;
 }
 const terminal=s=>!!s&&TERMINAL.has(s.state);
-// Cards opened from Simple stay open for the session. Opening replaces the button that did it, so focus moves to
-// the opened card.
+// Cards opened from Simple stay open for the session, until Hide details folds them again. Either replaces the
+// button that did it, so focus moves to the opened card, or back to its Details button.
 const unfolded=new Set();
-function unfold(m,it,card){
- const box=card.parentNode;unfolded.add(m.id+'|'+it.key);it.version++;changed(m.id);
+function unfold(m,it,card,open){
+ const box=card.parentNode,key=m.id+'|'+it.key;
+ if(open)unfolded.add(key);else{unfolded.delete(key);it.expanded=false;}
+ it.version++;changed(m.id);
  const now=box&&[...box.children].find(c=>c.dataset.item===it.key);
- if(now&&now!==card){now.tabIndex=-1;now.focus();}
+ if(!now||now===card)return;
+ if(open){now.tabIndex=-1;now.focus();}else now.querySelector('.sub-details,.team-details')?.focus();
 }
 // A subagent card also changes with its child's own stream, the child's task row and host state (a merge).
 const stamp=(m,it)=>it.sub?it.version+'|'+(tasks.get(it.sub.task_id)?.rev||0)+'|'+(rowStatus(it.sub.task_id)||'')+'|'+stampOf(it.sub.task_id):it.version;

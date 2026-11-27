@@ -53,7 +53,8 @@ export default async function check(page,url){
  // the Detailed one does; Edit team opens today's editors; the answered team and orchestration calls fold away.
  await page.locator('[data-open-task="U"]').click();
  const toggle=page.locator('#agent-detail-toggle'),uStream=page.locator('#agent-view #agent-stream');
- assert(await toggle.isVisible()&&(await text(toggle))==='Simple view'&&await toggle.getAttribute('aria-pressed')===null,'Header toggle not showing Simple, or carries aria-pressed beside its changing text ('+await toggle.count()+' found)');
+ const simpleBtn=toggle.getByRole('button',{name:'Simple',exact:true}),detailedBtn=toggle.getByRole('button',{name:'Detailed',exact:true});
+ assert(await toggle.isVisible()&&await toggle.getAttribute('role')==='group'&&await toggle.getAttribute('aria-label')==='Conversation view'&&await simpleBtn.getAttribute('aria-pressed')==='true'&&await detailedBtn.getAttribute('aria-pressed')==='false','Header switch does not show Simple as the current view ('+await toggle.count()+' found)');
  const sMembers=[{member_id:'s1',role:'researcher',brief:'Read the docs folder',provider:'codex',model:null,access:'read',default:true},
   {member_id:'s2',role:'implementer',brief:'Fix the typo',provider:'claude',model:null,access:'write',default:true}];
  const sTeam=id=>({team_id:id,summary:'Check the docs <b>first</b>.',budget:{used:10,budget:250000},members:sMembers});
@@ -88,18 +89,34 @@ export default async function check(page,url){
  await edit.click();
  assert(await sCard2.getByLabel('Researcher brief').inputValue()==='Read the docs folder'&&await sCard2.getByLabel('Implementer provider').isVisible()&&await sCard2.getByRole('button',{name:'Remove Researcher',exact:true}).isVisible(),'Edit team did not show the member editors');
  assert(await sCard2.getByRole('button',{name:'Approve team',exact:true}).isVisible(),'Approve gone after Edit team');
+ // Hide details folds the untouched editors back to the short card, and focus returns to Edit team.
+ const editHide=sCard2.locator('button.team-details.is-open');
+ assert((await text(editHide))==='Hide details ▾'&&await editHide.getAttribute('aria-label')==='Hide Proposed team details'&&await editHide.getAttribute('aria-expanded')==='true','Edit team has no Hide details');
+ await editHide.click();
+ assert(await sCard2.locator('textarea,select,input').count()===0&&await sCard2.locator('.team-lines').count()===1,'Hide details did not fold the editors: '+await text(sCard2));
+ assert(await page.evaluate(()=>document.activeElement?.matches('.card.team button.team-edit')),'Focus not back on Edit team');
+ await edit.click();
  // Details opens today's answered card in place, and it stays open as events arrive.
  await teamDetails.click();
  assert((await text(sLine)).includes('You approved this team.')&&!(await sLine.evaluate(n=>n.classList.contains('is-line'))),'Details did not open the answered card');
  await push([ev('U',10,'message',{role:'assistant',text:'Waiting for the team.',final:true},{item_id:'u10'})]);
  assert((await text(sLine)).includes('You approved this team.'),'Opened answered card folded again');
+ // Hide details folds the answered card back to its line, and focus returns to Details.
+ const teamHide=sLine.locator('button.team-details.is-open');
+ assert((await text(teamHide))==='Hide details ▾'&&await teamHide.getAttribute('aria-label')==='Hide Team details'&&await teamHide.getAttribute('aria-expanded')==='true','Opened team card has no Hide details');
+ await teamHide.click();
+ assert(await sLine.evaluate(n=>n.classList.contains('is-line'))&&!(await text(sLine)).includes('You approved this team.'),'Hide details did not fold the answered team');
+ assert(await page.evaluate(()=>document.activeElement?.matches('.card.team button.team-details:not(.is-open)')),'Focus not back on team Details');
+ // Clicking the view already shown changes nothing; Detailed switches every card to full (saved with display_update).
+ await simpleBtn.click();
  // The header toggle switches to Detailed (saved with display_update): every card is in full again.
- await toggle.click();
+ await detailedBtn.click();
  await page.waitForFunction(()=>window.teamFixture.requests.some(r=>r.method==='display_update'));
  const updates=await req('display_update');
  assert(updates.length===1&&updates[0].display.detail==='detailed','Toggle did not save Detailed: '+JSON.stringify(updates));
- await page.waitForFunction(()=>document.querySelector('#agent-detail-toggle')?.textContent==='Detailed view');
- assert(await toggle.getAttribute('aria-pressed')===null,'Toggle carries aria-pressed in Detailed');
+ await page.waitForFunction(()=>document.querySelector('#agent-detail-toggle [data-detail=detailed]')?.getAttribute('aria-pressed')==='true');
+ assert(await simpleBtn.getAttribute('aria-pressed')==='false','Simple still marked as the current view in Detailed');
+ assert(await uStream.locator('button.is-open').count()===0,'Hide details shown in Detailed');
  assert((await text(uStream)).includes('Orchestration')&&await uStream.locator('.card.team.is-line,.card.team.is-simple').count()===0,'Detailed did not restore the full cards');
  await sCard2.getByRole('button',{name:'Approve team',exact:true}).click();
  const detailedAnswer=(await req('team_answer')).at(-1);
@@ -161,11 +178,11 @@ export default async function check(page,url){
  assert((await text(card)).includes('Removed')&&await card.getByRole('button',{name:'Keep Reviewer',exact:true}).count()===1,'Removed member not marked');
  assert(await card.getByLabel('Implementer brief').inputValue()==='Add input validation to parse()\nwith tests','Edit lost after a rebuild');
  // Edits made in Detailed stay in view in Simple: the edited proposal keeps its editors and says it was changed.
- await toggle.click();
- await page.waitForFunction(()=>document.querySelector('#agent-detail-toggle')?.textContent==='Simple view');
+ await simpleBtn.click();
+ await page.waitForFunction(()=>document.querySelector('#agent-detail-toggle [data-detail=simple]')?.getAttribute('aria-pressed')==='true');
  assert(await card.getByLabel('Implementer brief').inputValue()==='Add input validation to parse()\nwith tests'&&await card.locator('.team-lines').count()===0&&(await text(card)).includes('You changed this team'),'Simple folded an edited team: '+await text(card));
- await toggle.click();
- await page.waitForFunction(()=>document.querySelector('#agent-detail-toggle')?.textContent==='Detailed view');
+ await detailedBtn.click();
+ await page.waitForFunction(()=>document.querySelector('#agent-detail-toggle [data-detail=detailed]')?.getAttribute('aria-pressed')==='true');
  await card.getByLabel('Researcher model').selectOption('claude-haiku-5-5');
  await card.getByRole('button',{name:'Approve team',exact:true}).click();
  const answers=(await req('team_answer')).filter(p=>p.task_id==='T');
@@ -261,5 +278,5 @@ export default async function check(page,url){
  }}
  await page.emulateMedia({colorScheme:'light'});await page.setViewportSize({width:1280,height:1000});
  assert(!errors.length,'Page errors: '+errors.join(' | '));
- return {checks:'Simple by default: short team card (one line per member, literal summary, no editors) whose approve equals the Detailed one, Edit team opens the editors, answered team as one line with Details kept open, orchestration calls hidden; header toggle saves Detailed and restores full cards, visible at every width; child rows hidden from the desk, header provider badge, team_proposed card (roles, briefs, badges, default vs suggested reason, budget, literal text), paused_team gate, write disabled for providers without write, edits (provider/model/brief/remove) with model validation, exact team_answer approve and decline-with-note by keyboard, failed answer recovery, closed proposal, subagent cards (badge/role/state/tokens), child stream via task_events with live events, finished diff summary and literal report, Review changes hook, Running view grouped by parent with child rows and parent link, light/dark 320-1280 fit',responsiveStates:fits.length};
+ return {checks:'Simple by default: short team card (one line per member, literal summary, no editors) whose approve equals the Detailed one, Edit team opens the editors and Hide details folds them, answered team as one line with Details kept open until Hide details, orchestration calls hidden; Simple | Detailed switch saves Detailed and restores full cards, visible at every width; child rows hidden from the desk, header provider badge, team_proposed card (roles, briefs, badges, default vs suggested reason, budget, literal text), paused_team gate, write disabled for providers without write, edits (provider/model/brief/remove) with model validation, exact team_answer approve and decline-with-note by keyboard, failed answer recovery, closed proposal, subagent cards (badge/role/state/tokens), child stream via task_events with live events, finished diff summary and literal report, Review changes hook, Running view grouped by parent with child rows and parent link, light/dark 320-1280 fit',responsiveStates:fits.length};
 }

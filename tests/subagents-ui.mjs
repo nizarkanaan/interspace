@@ -80,8 +80,16 @@ export default async function check(page,url){
  assert(await line.getByRole('button',{name:'Open Researcher subagent',exact:true}).isVisible(),'Open missing after Details');
  await push([ev('S',9,'subagent_status',{team_id:'teamS',member_id:'s1',task_id:'SC1',state:'running',tokens_used:900},{item_id:'sub_SC1'})]);
  assert((await text(line)).includes('900 tokens')&&(await text(line)).includes('Survey the'),'Opened subagent card folded again');
+ // Hide details folds it back to its line, focus returns to Details, and it stays folded as events arrive.
+ const hide=line.locator('button.sub-details.is-open');
+ assert((await text(hide))==='Hide details ▾'&&await hide.getAttribute('aria-expanded')==='true'&&await hide.getAttribute('aria-label')==='Hide Researcher details','Opened subagent card has no Hide details');
+ await hide.click();
+ assert(await line.evaluate(n=>n.classList.contains('is-line'))&&!(await text(line)).includes('Survey the'),'Hide details did not fold the subagent card: '+await text(line));
+ assert(await page.evaluate(()=>document.activeElement?.matches('.card.subagent[data-child="SC1"] button.sub-details:not(.is-open)')),'Focus not back on Details');
+ await push([ev('S',10,'subagent_status',{team_id:'teamS',member_id:'s1',task_id:'SC1',state:'running',tokens_used:950},{item_id:'sub_SC1'})]);
+ assert(await line.evaluate(n=>n.classList.contains('is-line')),'Folded subagent card opened again on an event');
  // Detailed through the header toggle: the orchestration calls come back.
- await page.locator('#agent-detail-toggle').click();
+ await page.locator('#agent-detail-toggle').getByRole('button',{name:'Detailed',exact:true}).click();
  await page.waitForFunction(()=>window.subFixture.requests.some(r=>r.method==='display_update'));
  assert((await req('display_update')).at(-1).display.detail==='detailed','Toggle did not save Detailed');
  await page.waitForFunction(()=>document.querySelector('#agent-view #agent-stream')?.textContent.includes('Still waiting'));
@@ -226,5 +234,5 @@ export default async function check(page,url){
  }}
  await page.emulateMedia({colorScheme:'light'});await page.setViewportSize({width:1280,height:1000});
  assert(!errors.length,'Page errors: '+errors.join(' | '));
- return {checks:'Simple by default: subagent as one line (badge, role, state, Details) that opens to the full card and stays open, ok and waiting orchestration calls hidden, failed one shown, no overflow at 320; header toggle saves Detailed; suggested reason and missing-reason flag, your-change marker, unedited approve exact, two children streaming with state/tokens/latest activity without expanding, literal activity text, duplicate start/seq ignored, expanded child stream ordered under interleaving and gap recovery, unfillable gap noted, focus kept while a sibling streams, Review changes → Merge by keyboard with project and reviewed head, Back returns focus, merged state on the child card, restart: interrupted parent/child/proposal shown, no resume button, new turn keeps the old proposal closed, Running view child state, light/dark 320-1280 fit',responsiveStates:fits.length};
+ return {checks:'Simple by default: subagent as one line (badge, role, state, Details) that opens to the full card and stays open, Hide details folds it back with focus on Details, ok and waiting orchestration calls hidden, failed one shown, no overflow at 320; Simple | Detailed switch saves Detailed; suggested reason and missing-reason flag, your-change marker, unedited approve exact, two children streaming with state/tokens/latest activity without expanding, literal activity text, duplicate start/seq ignored, expanded child stream ordered under interleaving and gap recovery, unfillable gap noted, focus kept while a sibling streams, Review changes → Merge by keyboard with project and reviewed head, Back returns focus, merged state on the child card, restart: interrupted parent/child/proposal shown, no resume button, new turn keeps the old proposal closed, Running view child state, light/dark 320-1280 fit',responsiveStates:fits.length};
 }

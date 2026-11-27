@@ -96,6 +96,11 @@ function detailsButton(parent,cls,name,onclick){
  const b=el('button',cls,'Details ',parent);b.type='button';b.setAttribute('aria-label',name+' details');b.setAttribute('aria-expanded','false');
  el('span','','▸',b).setAttribute('aria-hidden','true');b.onclick=onclick;return b;
 }
+// "Hide details ▾" on an opened card folds it back to its Simple line. Its name starts with what it shows.
+function hideButton(parent,cls,name,onclick){
+ const b=el('button',cls+' is-open','Hide details ',parent);b.type='button';b.setAttribute('aria-label','Hide '+name+' details');b.setAttribute('aria-expanded','true');
+ el('span','','▾',b).setAttribute('aria-hidden','true');b.onclick=onclick;return b;
+}
 // The answered team on one line; Details opens today's answered card in place.
 function answeredLine(card,ctx,team,answered){
  card.classList.add('is-line');
@@ -110,6 +115,12 @@ function reveal(card,ctx,d){
  const now=box&&[...box.children].find(c=>c.dataset.item===key);if(!now)return;
  const first=now.querySelector('.team-member textarea:not(:disabled)');if(first)first.focus();else{now.tabIndex=-1;now.focus();}
 }
+// Hide details on an untouched proposal folds the editors away again; focus goes back to the button that opens them.
+function conceal(card,ctx,d){
+ const box=card.parentNode,key=card.dataset.item;d.editing=false;ctx.bump();
+ const now=box&&[...box.children].find(c=>c.dataset.item===key);
+ now?.querySelector('.team-edit,.team-details')?.focus();
+}
 // A team_proposed card, open until team_answered arrives or the task ends.
 function teamCard(card,ctx){
  const t=ctx.team,team=t.proposal,answered=t.answered;
@@ -122,6 +133,9 @@ function teamCard(card,ctx){
  if(!answered&&!ctx.compact&&ctx.simple)card.classList.add('is-simple');
  const head=el('div','card-head',null,card);el('span','badge','Team',head);el('strong','','Proposed team',head);
  el('span','state',answered?(answered.decision==='approve'?'Approved':'Declined'):ctx.closed?'Closed':'Needs your approval',head);
+ // Opened from Simple: the answered card folds back to its line, an untouched proposal back to its short card.
+ if(ctx.simple&&answered)hideButton(head,'team-details','Team',ctx.refold);
+ else if(ctx.simple&&!ctx.compact&&!folded&&draft.editing&&!edited(team,draft))hideButton(head,'team-details','Proposed team',()=>conceal(card,ctx,draft));
  if(team.summary)el('p','team-summary',team.summary,card);
  const bl=budgetLine(team.budget);if(bl&&!folded)el('p','footnote',bl,card);
  const list=el('ul','team-members',null,card);
@@ -173,6 +187,7 @@ function subagentCard(card,ctx){
  el('span','state '+(finished?'finished':st.state||''),finished?'Finished':ctx.statusText({state:st.state}),head);
  // Simple: provider, role and state on one line; Details opens the full card in place.
  if(ctx.folded){card.classList.add('is-line');detailsButton(head,'sub-details',label,ctx.unfold);return;}
+ if(ctx.simple)hideButton(head,'sub-details',label,ctx.refold);
  const facts=[(s.model||'default model'),ACCESS[s.access]||s.access];if(s.tokens_used!=null)facts.push(tokens(s.tokens_used)+' tokens');
  el('p','footnote',facts.filter(Boolean).join(' · '),card);
  if(s.brief)el('p','',s.brief,card);
