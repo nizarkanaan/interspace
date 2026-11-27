@@ -38,7 +38,7 @@ export default async function check(page,url){
   ...team(rEv,'tm1',[member('m1','citation_checker','codex')],'u2'),
   ...sub(rEv,'C','citation_checker','codex','u2'),
   rEv('citation_report',report(ref('verified'),ref('verified'),ref('verified')),'cite_1','u2'),
-  reply(rEv,'msg_c',para(1500,'One long paragraph'),'u2'),
+  reply(rEv,'msg_c',para(700,'One long paragraph')+' with a [late link](https://example.org/late) and '+para(760,'more of the same paragraph'),'u2'),
   user(rEv,'user_u3','Fill the evidence table.','u3'),
   ...team(rEv,'tm2',[member('m2','extractor','claude'),member('m3','extractor','codex'),member('m4','reviewer','codex')],'u3'),
   ...sub(rEv,'E','extractor','claude','u3'),...sub(rEv,'F','extractor','codex','u3'),...sub(rEv,'G','reviewer','codex','u3'),
@@ -106,6 +106,47 @@ export default async function check(page,url){
  await hide.focus();await page.keyboard.press('Enter');
  assert(await details.getAttribute('aria-expanded')==='false'&&await active()==='work-R-user_u1','Hide details: focus on '+await active());
  assert(same(await keys(),SIMPLE_R)&&await stream.locator('.in-work').count()===0,'Hide details left items: '+JSON.stringify(await keys()));
+
+ // Earlier long messages: an earlier turn's message over 600 characters shows its first 240 characters, an earlier
+ // reply its first 300. The block that crosses the cut keeps showing, clamped (a list is cut per item); blocks past
+ // it are hidden, and nothing past the cut takes focus.
+ const top=k=>page.locator('#agent-stream>[data-item="'+k+'"]');
+ const B=(hidden,cut,items=null)=>({hidden,cut,shown:!hidden,items});
+ const cutOf=k=>top(k).locator('.md').evaluate(md=>[...md.children].map(c=>({hidden:c.hidden,cut:c.classList.contains('is-cut'),shown:c.getClientRects().length>0,
+  items:c.matches('ul,ol')?[...c.children].map(li=>({hidden:li.hidden,cut:li.classList.contains('is-cut'),shown:li.getClientRects().length>0,items:null})):null})));
+ const more=async(k,want,open)=>{const b=page.locator('#more-R-'+k),md=await top(k).locator('.md').getAttribute('id');
+  const s=await b.evaluate(b=>({type:b.type,expanded:b.getAttribute('aria-expanded'),controls:b.getAttribute('aria-controls'),arrow:b.querySelector('span[aria-hidden=true]')?.textContent}));
+  assert((await text(b))===want&&s.type==='button'&&s.expanded===String(open)&&s.controls===md&&md==='msg-R-'+k&&s.arrow===want.at(-1),k+' toggle: '+JSON.stringify({text:await text(b),md,...s}));};
+ const whole=async k=>{const s=await top(k).evaluate(n=>({hidden:n.querySelectorAll('[hidden]').length,cut:n.querySelectorAll('.is-cut').length,more:n.querySelectorAll('.more').length}));return s.hidden===0&&s.cut===0?s:null;};
+ const B_CUT=[B(false,false),B(false,false,[B(false,false),B(false,true),B(true,false)]),B(true,false),B(true,false)];
+ assert(same(await cutOf('user_u1'),[B(false,false),B(false,true)]),'Earlier message cut: '+JSON.stringify(await cutOf('user_u1')));
+ await more('user_u1','Show whole message ▾',false);
+ assert(same(await cutOf('msg_b'),B_CUT),'Earlier reply cut: '+JSON.stringify(await cutOf('msg_b')));
+ const item=await top('msg_b').locator('li.is-cut').evaluate(li=>({display:getComputedStyle(li).display,clamp:getComputedStyle(li.firstElementChild).webkitLineClamp}));
+ assert(item.display==='list-item'&&item.clamp==='3','A cut list item lost its bullet or clamp: '+JSON.stringify(item));
+ await more('msg_b','Show whole reply ▾',false);
+ const unreachable=k=>top(k).locator('a').evaluateAll(as=>as.length>0&&as.every(a=>!!a.closest('[hidden]')||a.tabIndex===-1));
+ assert(await unreachable('msg_b'),'A link past the cut takes focus');
+ // Enter shows the whole reply with its link reachable, and keeps focus on the toggle; Enter again cuts it again.
+ const moreB=page.locator('#more-R-msg_b');
+ await moreB.focus();await page.keyboard.press('Enter');
+ assert((await whole('msg_b'))&&await active()==='more-R-msg_b','Whole reply: '+JSON.stringify(await cutOf('msg_b'))+' focus on '+await active());
+ await more('msg_b','Show less ▴',true);
+ assert(await top('msg_b').locator('a').evaluate(a=>a.tabIndex)===0,'Link in the whole reply not reachable');
+ await page.keyboard.press('Enter');
+ assert(same(await cutOf('msg_b'),B_CUT)&&await active()==='more-R-msg_b','Show less: '+JSON.stringify(await cutOf('msg_b'))+' focus on '+await active());
+ await more('msg_b','Show whole reply ▾',false);
+ // Review Focus 4: one long paragraph keeps its first lines (clamped, never hidden), and its link takes no focus.
+ assert(same(await cutOf('msg_c'),[B(false,true)]),'One-paragraph reply: '+JSON.stringify(await cutOf('msg_c')));
+ await more('msg_c','Show whole reply ▾',false);
+ assert(await unreachable('msg_c'),'A link in the clamped paragraph takes focus');
+ // The newest turn is never cut.
+ assert((await whole('msg_d'))?.more===0,'Newest reply cut');
+ // Kept for the session: a whole reply stays whole after the Research list and back.
+ await moreB.focus();await page.keyboard.press('Enter');
+ await openTask('R',R_TITLE);
+ await page.waitForFunction(()=>document.querySelector('#agent-stream>[data-item=msg_b]'));
+ assert(await whole('msg_b')&&await page.locator('#more-R-msg_b').getAttribute('aria-expanded')==='true','Whole reply not kept: '+JSON.stringify(await cutOf('msg_b')));
 
  // Per task: an opened line is kept for the session under its own task, so L's line with the same lead stays closed.
  await details.click();
@@ -186,26 +227,44 @@ export default async function check(page,url){
  await openTask('X',X_TITLE);
  await page.waitForFunction(()=>document.querySelector('#agent-stream>[data-item="msg_1@u4"]'));
  assert(same(await keys(),['user_u1','msg_1','user_u4','msg_1@u4'])&&await stream.locator('.work-line').count()===0,'Collision in Simple: '+JSON.stringify(await keys()));
+ // A reply of exactly 600 characters is not long, and a pending or failed message is never cut.
+ assert((await whole('msg_1'))?.more===0,'A 600-character reply was cut');
+ await page.evaluate(t=>window.interspaceStream.optimistic('X',t,'c1'),'y'.repeat(700));
+ await page.waitForFunction(()=>document.querySelector('#agent-stream>[data-item="client:c1"]'));
+ assert((await whole('client:c1'))?.more===0,'A pending message was cut');
+ assert((await whole('msg_1@u4'))?.more===0,'A short earlier reply was cut');
+ await page.evaluate(()=>window.interspaceStream.failed('X','c1','Offline'));
+ await page.waitForFunction(()=>/Not sent: Offline/.test(document.querySelector('#agent-stream>[data-item="client:c1"]').textContent));
+ assert((await whole('client:c1'))?.more===0,'A failed message was cut');
 
- // T9 and Review Focus 5: Detailed shows every step with no work line and no stale in-work class; Simple comes back
- // with the opened line still open.
+ // T9 and Review Focus 5: Detailed shows every step with no work line and no stale in-work class, and every message
+ // whole; Simple comes back with the opened line and the whole reply still open.
  await openTask('R',R_TITLE);
  await page.waitForFunction(()=>document.querySelector('#work-R-user_u1')?.getAttribute('aria-expanded')==='true');
+ assert(await whole('msg_b')&&await page.locator('#more-R-msg_b').getAttribute('aria-expanded')==='true','Whole reply closed');
  await page.evaluate(()=>window.interspaceDisplay.setDetail('detailed'));
  await page.waitForFunction(()=>!document.querySelector('#agent-stream .work-line'));
  assert(await page.locator('#agent-stream .in-work').count()===0,'Stale in-work in Detailed');
  assert(same(await keys(),DETAILED_R),'Detailed items: '+JSON.stringify(await keys()));
+ for(const k of ['user_u1','msg_b','msg_c'])assert((await whole(k))?.more===0,k+' cut in Detailed');
  await page.evaluate(()=>window.interspaceDisplay.setDetail('simple'));
  await page.waitForFunction(()=>document.querySelector('#agent-stream .work-line'));
  assert(await details.getAttribute('aria-expanded')==='true','Opened line not kept across Detailed');
+ assert(await whole('msg_b')&&await page.locator('#more-R-msg_b').getAttribute('aria-expanded')==='true','Whole reply not kept across Detailed');
+ assert(same(await cutOf('user_u1'),[B(false,false),B(false,true)]),'Earlier message not cut again in Simple');
 
- // Layout: a long unbroken query in the live line never overflows.
+ // Layout: a long unbroken query in the live line never overflows, and a long reply still being written is never cut.
  await openTask('L',L_TITLE);
+ await push(page,[lEv('message_delta',{role:'assistant',text_delta:para(900,'Streaming reply')},'md1')]);
+ await page.waitForFunction(()=>document.querySelector('#agent-stream>[data-item=md1]'));
+ assert((await whole('md1'))?.more===0,'A streaming reply was cut');
  await push(page,[call(lEv,'l9','research_search',{query:'q'.repeat(150)})]);
  await page.waitForFunction(()=>document.querySelector('#agent-stream>[data-item=l9]'));
  const fits=await fit(page,'simple-view-live',async()=>{if(await heading()!==L_TITLE)await openTask('L',L_TITLE);},false,[320,390,600]);
+ // Previews: clamped blocks and the Show whole toggles never overflow either.
+ const fitsR=await fit(page,'simple-view-previews',async()=>{if(await heading()!==R_TITLE)await openTask('R',R_TITLE);},false,[320,390,600]);
 
  assert(!(await page.evaluate(()=>window.pwned)),'Script ran');
  assert(!errors.length,'Page errors: '+errors.join(' | '));
- return {checks:'research turns as your message, one work line and the reply; work-line counts (sources, papers, look-ups, report, team, subagents, all-verified citations, values, steps); folded count; at most 2 Open buttons; Details and Hide details by keyboard with focus kept; opened items in order with their own controls; open lines kept per task; asks, errors, failed calls, open teams, running and paused subagents, status rows and an edited scope never fold; Approve team sends team_answer; settled scope rows fold; a live line stays open with the new step last and focus kept; Working with the running search; Open from the line and Back to it with focus and position; compact and nested copies untouched; collision in Simple; Detailed parity without stale in-work and the line kept open across it; long query fits 320/390/600',responsiveStates:fits.length};
+ return {checks:'research turns as your message, one work line and the reply; work-line counts (sources, papers, look-ups, report, team, subagents, all-verified citations, values, steps); folded count; at most 2 Open buttons; Details and Hide details by keyboard with focus kept; opened items in order with their own controls; open lines kept per task; asks, errors, failed calls, open teams, running and paused subagents, status rows and an edited scope never fold; Approve team sends team_answer; settled scope rows fold; a live line stays open with the new step last and focus kept; Working with the running search; Open from the line and Back to it with focus and position; compact and nested copies untouched; collision in Simple; earlier long messages and replies cut to their first lines (crossing block clamped, a list cut per item, later blocks hidden, links past the cut unreachable) with Show whole message, Show whole reply and Show less by keyboard with focus kept; the newest turn, a 600-character reply, pending, failed and streaming messages never cut; whole replies kept for the session and across Detailed; Detailed parity without stale in-work and the line kept open across it; long query and previews fit 320/390/600',responsiveStates:fits.length+fitsR.length};
 }

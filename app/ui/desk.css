@@ -553,6 +553,12 @@ html:has(#agent-view.split:not([hidden])){overflow:hidden;height:100%;overscroll
 .work-line .work-open:hover,.work-line .work-details:hover,.work-end .work-hide:hover{background:transparent;text-decoration:underline}
 .stream>.in-work,.stream>.work-end{margin-left:14px}
 @media(max-width:600px){.stream>.in-work,.stream>.work-end{margin-left:8px}}
+/* An earlier turn's long message or reply shows its first lines: the block that crosses the cut is clamped to 3 lines,
+   later blocks are hidden, then Show whole message / Show whole reply. A cut list item clamps an inner box, so it
+   keeps its bullet. */
+.message .is-cut:not(li),.message li.is-cut>.cut-text{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
+.message .more{display:block;margin-top:6px;font-size:12.5px;padding:2px 0;border:0;background:transparent;color:var(--accent);white-space:normal}
+.message .more:hover{background:transparent;text-decoration:underline}
 
 /* Collapsible sidebar: a 44px rail with only the show button. Not applied when the layout stacks (600px and below). */
 .side-top{display:flex;align-items:center;justify-content:space-between;gap:6px;min-width:0}

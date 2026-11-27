@@ -248,7 +248,10 @@ function digest(m,list){
   const lead=turn.lead?turn.lead.key:'start',interim=new Set();let later=false;
   for(let j=turn.items.length-1;j>=0;j--){const msg=turn.items[j].message;if(msg?.role!=='assistant')continue;if(later&&msg.final)interim.add(turn.items[j]);later=true;}
   const work=[],kept=[];for(const it of turn.items)(stays(m,it,{interim,newestScope})?kept:work).push(it);
-  if(turn.lead)entries.push({key:turn.lead.key,it:turn.lead});
+  // An earlier turn's long message and reply show their first lines (preview); the newest turn is always whole.
+  let reply=null;for(const it of turn.items)if(it.message?.role==='assistant')reply=it;
+  const earlier=i<turns.length-1,long=msg=>earlier&&msg.final&&!msg.pending&&!msg.failed&&String(msg.text).length>LONG;
+  if(turn.lead)entries.push({key:turn.lead.key,it:turn.lead,preview:long(turn.lead.message)?'message':null});
   if(work.length){
    folded+=work.length;
    const open=openWork.has(m.id+'|'+lead),live=i===turns.length-1&&LIVE.has(m.status?.state);
@@ -258,14 +261,14 @@ function digest(m,list){
    entries.push({key:'work:'+lead,work:true,lead,items:work,open,live,text,children});
    if(open){for(const it of work)entries.push({key:it.key,it,inWork:true});entries.push({key:'work-end:'+lead,end:true,lead});}
   }
-  for(const it of kept)entries.push({key:it.key,it});
+  for(const it of kept)entries.push({key:it.key,it,preview:it===reply&&long(it.message)?'reply':null});
  });
  return {entries,folded};
 }
 // The digest's part of a cached node's version.
-const entryVersion=(m,entry)=>entry.work?entry.text+'|'+entry.open+'|'+entry.children.map(c=>c.id+'='+c.name).join(','):'';
-// Opened work lines stay open for the session, per task.
-const openWork=new Set();
+const entryVersion=(m,entry)=>entry.work?entry.text+'|'+entry.open+'|'+entry.children.map(c=>c.id+'='+c.name).join(','):entry.preview?entry.preview+'|'+openMsgs.has(m.id+'|'+entry.key):'';
+// Opened work lines and whole messages stay open for the session, per task.
+const openWork=new Set(),openMsgs=new Set();
 const workId=(m,entry)=>safe(String(m.id).slice(0,8))+'-'+safe(entry.lead);
 // "Searched 3 sources 2 times · 3 papers · 8 steps", up to 2 Open buttons for finished subagents, then Details ▸ or
 // Hide details ▾. The toggle keeps its id, so focus comes back to it after the render (render() restores it by id).
@@ -287,11 +290,44 @@ function workEnd(m,entry){
  b.onclick=()=>{openWork.delete(m.id+'|'+entry.lead);changed(m.id);document.getElementById('work-'+id)?.focus();};
  return end;
 }
+// Long messages: over 600 characters, an earlier turn's message shows about its first 240 characters and its reply
+// about its first 300.
+const LONG=600,PREVIEW={message:240,reply:300};
+// Cuts a rendered message to about its first `limit` characters: blocks past the cut get `hidden`, the block that
+// crosses it keeps showing, clamped to 3 lines (.is-cut), with its links out of the tab order, and a list that crosses
+// it is cut per item. A cut item clamps its text in an inner box, so it keeps its bullet or number. Returns whether
+// anything was cut.
+function cut(box,limit){
+ let total=0,cutting=false;
+ const walk=node=>{
+  if(cutting||total>=limit){node.hidden=true;cutting=true;return;}
+  const n=node.textContent.length;
+  if(total+n<=limit){total+=n;return;}
+  if(node.matches('ul,ol')){for(const li of node.children)walk(li);return;}
+  if(node.tagName==='LI'){const text=el('div','cut-text');text.append(...node.childNodes);node.append(text);}
+  node.classList.add('is-cut');for(const a of node.querySelectorAll('a'))a.tabIndex=-1;total+=n;cutting=true;
+ };
+ for(const node of box.children)walk(node);
+ return cutting;
+}
+// Show whole message ▾ / Show whole reply ▾, then Show less ▴. The toggle keeps its id, so render() gives focus back.
+function preview(m,it,entry,box,msg){
+ const key=m.id+'|'+it.key,open=openMsgs.has(key),id=safe(String(m.id).slice(0,8))+'-'+safe(it.key);
+ if(!cut(open?box.cloneNode(true):box,PREVIEW[entry.preview]))return;
+ box.id='msg-'+id;
+ const b=el('button','more',open?'Show less ':entry.preview==='reply'?'Show whole reply ':'Show whole message ',msg);b.type='button';b.id='more-'+id;
+ b.setAttribute('aria-expanded',String(open));b.setAttribute('aria-controls',box.id);
+ el('span','',open?'▴':'▾',b).setAttribute('aria-hidden','true');
+ b.onclick=()=>{if(openMsgs.has(key))openMsgs.delete(key);else openMsgs.add(key);it.version++;changed(m.id);};
+}
 function build(m,it,compact,entry){
  if(entry?.work)return workLine(m,entry);
  if(entry?.end)return workEnd(m,entry);
  if(it.row){const r=el('p','row-event '+it.row,it.text);r.dataset.item=it.key;return r;}
- if(it.message){const msg=el('div','message '+it.message.role+(it.message.pending?' pending':''));msg.dataset.item=it.key;el('small','',it.message.role==='user'?'You':'Agent',msg);(it.message.role==='assistant'&&it.message.final&&window.interspaceAgent?.isResearch?.(m.id)?window.interspaceResearchCards.markdown:markdown)(it.message.text,msg);if(!it.message.final&&!it.message.pending)el('span','streaming footnote','Writing…',msg);if(it.message.pending&&!it.message.failed)el('span','footnote','Sending…',msg);if(it.message.failed)el('p','error-text','Not sent: '+it.message.failed,msg);return msg;}
+ if(it.message){const msg=el('div','message '+it.message.role+(it.message.pending?' pending':''));msg.dataset.item=it.key;el('small','',it.message.role==='user'?'You':'Agent',msg);
+  const box=(it.message.role==='assistant'&&it.message.final&&window.interspaceAgent?.isResearch?.(m.id)?window.interspaceResearchCards.markdown:markdown)(it.message.text,msg);
+  if(entry?.preview)preview(m,it,entry,box,msg);
+  if(!it.message.final&&!it.message.pending)el('span','streaming footnote','Writing…',msg);if(it.message.pending&&!it.message.failed)el('span','footnote','Sending…',msg);if(it.message.failed)el('p','error-text','Not sent: '+it.message.failed,msg);return msg;}
  const card=el('article','card');card.dataset.item=it.key;
  // Simple folds team and subagent cards until they are opened; the compact copy (Running view) never folds.
  const simple=!compact&&display().detail!=='detailed',fold={simple,folded:simple&&!unfolded.has(m.id+'|'+it.key),unfold:()=>unfold(m,it,card,true),refold:()=>unfold(m,it,card,false)};
