@@ -1,5 +1,6 @@
 /* Research tool cards, the citation report, research call counts and the outputs panel, from fixture events only
    (docs/superpowers/specs/research/tools.md, tasks.md): no backend, network or model. All strings are synthetic. */
+import {isDeepStrictEqual} from 'node:util';
 import {install,requests,push,assert,text,fit,ev,resetSeq} from './research-fixture.mjs';
 const XSS='<img src=x onerror="window.pwned=1">';
 const paper=(i,extra={})=>({v:1,title:'Synthetic paper '+i,authors:['Ada Example','Bo Sample','Cy Placeholder','Di Fixture'],year:2020+(i%5),venue:'Fixture Conference',doi:'10.5555/fixture.'+i,arxiv_id:null,s2_id:null,openalex_id:null,abstract:null,citation_count:1234+i,url:'https://example.org/paper/'+i,oa_url:null,retracted:false,sources:['semantic_scholar','openalex'],...extra});
@@ -106,6 +107,38 @@ export default async function check(page,url){
  await rep.getByRole('button',{name:'Show all 12 references',exact:true}).click();
  await page.waitForFunction(()=>document.querySelectorAll('#agent-stream .citation-report .reference').length===12);
 
+ // Helpers for Simple's work line and citation pointer (2026-11-27-simple-chat-view-design.md): one-line summaries,
+ // counts of what a turn folded, and one shared citation count.
+ const same=(got,want,m)=>assert(isDeepStrictEqual(got,want),m+': '+JSON.stringify(got));
+ const sq={tool:'research_search',category:'research',input:{tool:'research_search',query:'x'}};
+ same(await page.evaluate(c=>window.interspaceResearchCards.summaryText({call:c}),sq),'Searching “x”','Running summary');
+ same(await page.evaluate(c=>window.interspaceResearchCards.summaryText({call:c,result:{status:'ok'},output:JSON.stringify({searched:['semantic_scholar'],papers:[{title:'A'},{title:'B'}]})}),sq),'Searched “x” in Semantic Scholar: 2 papers','Done summary');
+ same(await page.evaluate(r=>window.interspaceResearchCards.citationCounts(r),report),{total:12,counts:{verified:7,mismatch:1,not_found:1,retracted:1,unchecked:1},other:1,problems:5},'citationCounts');
+ same(await page.evaluate(r=>window.interspaceResearchCards.citationPointerText(r),report),'Citations: 7 of 12 verified · 1 mismatch · 1 not found · 1 unchecked · 1 unknown · 1 retracted: do not cite','citationPointerText');
+ const ok=(tool,input,data,extra={})=>({call:{tool,category:'research',input:{tool,...input}},result:{status:'ok',output:{text:JSON.stringify(data),truncated:false,blob_id:null,...extra}}});
+ const s1=ok('research_search',{query:'a'},{searched:['semantic_scholar','arxiv'],papers:[{doi:'10.1/A',title:'A'},{doi:'10.1/b',title:'B'}]});
+ const s2=extra=>ok('research_search',{query:'b'},{searched:['arxiv','openalex'],papers:[{doi:'10.1/a',title:'A again'},{arxiv_id:'2401.1',title:'C'}]},extra);
+ const rest=[ok('research_paper',{id:'doi:10.1/a'},{paper:{title:'A'}}),ok('save_report',{},{saved:'report.md',characters:10}),
+  {sub:{task_id:'c1',provider:'codex',role:'citation_checker'}},{team:{answered:{decision:'approve'}}},
+  {citation:{references:[{status:'verified'},{status:'verified'},{status:'verified'}]}},{reasoning:'x'},{row:'budget',text:'t'}];
+ const parts=items=>page.evaluate(list=>window.interspaceResearchCards.workParts(list),items);
+ same(await parts([s1,s2(),...rest]),['Team approved','Codex citation checker finished','Searched 3 sources 2 times','3 papers','looked up 1','saved report.md','3 references checked: all verified','9 steps'],'workParts');
+ same(await parts([s1,s2({truncated:true}),...rest]),['Team approved','Codex citation checker finished','Searched 3 sources 2 times','looked up 1','saved report.md','3 references checked: all verified','9 steps'],'workParts with a cut search');
+ same(await parts([s1]),['Searched 2 sources once','2 papers','1 step'],'workParts with one search');
+ same(await parts([ok('record_claim_support',{},{recorded:4}),ok('record_table_cells',{},{recorded:12})]),['recorded 4 claim verdicts','recorded 12 evidence values','2 steps'],'workParts with records');
+ same(await page.evaluate(()=>window.interspaceResearchCards.workerName({provider:'codex',role:'citation_checker'})),'Codex citation checker','workerName');
+ // The brief card (Simple's Show citation report): counts, the retracted alert and only the problem rows, problems first.
+ await page.evaluate(r=>{const box=document.createElement('div');box.id='brief-card';box.className='card';document.body.append(box);const state={};
+  const draw=()=>{box.replaceChildren();window.interspaceResearchCards.citationCard(box,r,{state,bump:draw,brief:true});};draw();},report);
+ const brief=page.locator('#brief-card');
+ assert(await brief.locator('.reference').count()===5,'Brief rows: '+await brief.locator('.reference').count());
+ assert((await text(brief.locator('.reference').first())).includes('Retracted: do not cite'),'Brief retracted row first');
+ same(await brief.locator(':scope > p.footnote').allTextContents(),['5 references are not verified.'],'Brief footnote');
+ assert(!(await text(brief)).includes('Checked at')&&(await text(brief.locator('.retracted-alert'))).includes('1 reference is retracted. Do not cite it.'),'Brief card text: '+await text(brief));
+ await brief.getByRole('button',{name:'Show all 12 references',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelectorAll('#brief-card .reference').length===12);
+ await page.evaluate(()=>document.getElementById('brief-card').remove());
+
  // Research requests per source (Wave 2A: requests sent, and answers from the cache), never money.
  const head=await text(page.locator('#agent-head'));
  assert(head.includes('Research requests: Semantic Scholar 3 sent, 1 answered from cache · arXiv 1 sent')&&!head.includes('calls'),'Usage line: '+head);
@@ -152,5 +185,5 @@ export default async function check(page,url){
  const fits=await fit(page,'research-cards',null,true);
  assert(!(await page.evaluate(()=>window.pwned)),'Script ran');
  assert(!errors.length,'Page errors: '+errors.join(' | '));
- return {checks:'research tool cards (search with title/authors/year/venue/source badges/citations/retracted flag, searched and skipped, paper with abstract, BibTeX, open copy, denied call, cut result then full blob), https-only links, collapsible long lists by keyboard, citation report counts from rows with verified/mismatch fields/not found/retracted/unchecked reason/unknown, problem rows first with reference numbers, retracted callout, honest Verified meaning, nothing else looks verified, per-source requests sent and cache answers without money, link host shown after markdown links, BibTeX output note, no every-citation claim, no Review for research tasks, outputs panel with text-safe Markdown report and plain BibTeX, task_output_read per file, Save and cancelled save, live update keeps open view, literal text everywhere, light/dark 320-1280 fit',responsiveStates:fits.length};
+ return {checks:'research tool cards (search with title/authors/year/venue/source badges/citations/retracted flag, searched and skipped, paper with abstract, BibTeX, open copy, denied call, cut result then full blob), https-only links, collapsible long lists by keyboard, citation report counts from rows with verified/mismatch fields/not found/retracted/unchecked reason/unknown, problem rows first with reference numbers, retracted callout, honest Verified meaning, nothing else looks verified, per-source requests sent and cache answers without money, link host shown after markdown links, BibTeX output note, work-line helpers (summaryText, workParts with distinct papers and a cut search, workerName), citationCounts and the citation pointer text, brief citation card with problem rows only then Show all, no every-citation claim, no Review for research tasks, outputs panel with text-safe Markdown report and plain BibTeX, task_output_read per file, Save and cancelled save, live update keeps open view, literal text everywhere, light/dark 320-1280 fit',responsiveStates:fits.length};
 }

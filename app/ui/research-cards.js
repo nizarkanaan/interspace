@@ -119,23 +119,39 @@ function referenceRow(ref,list){
  const facts=[];if(ref?.source)facts.push('checked with '+R.title(ref.source));if(typeof ref?.similarity==='number')facts.push('title similarity '+Math.round(ref.similarity*100)+'%');
  if(facts.length)el('p','footnote',facts.join(' · '),li);
 }
-function citationCard(card,report,{state,bump}){
+// One count of a report's rows, shared by the card and Simple's citation pointer. `other` is any status the card does
+// not know, and `problems` is every row that is not verified, unknown ones included.
+function citationCounts(report){
+ const refs=Array.isArray(report?.references)?report.references:[];
+ const counts=Object.fromEntries(ORDER.map(k=>[k,0]));let other=0;for(const r of refs)if(r&&Object.hasOwn(counts,r.status))counts[r.status]++;else other++;
+ return {total:refs.length,counts,other,problems:refs.length-counts.verified};
+}
+// Simple's one warn line for a report with problems: `Citations: 7 of 12 verified · 1 mismatch · … · 1 retracted: do
+// not cite`. A count of zero is left out; retracted always comes last.
+function citationPointerText(report){
+ const {total,counts,other}=citationCounts(report);
+ const extra=[[counts.mismatch,'mismatch'],[counts.not_found,'not found'],[counts.unchecked,'unchecked'],[other,'unknown'],[counts.retracted,'retracted: do not cite']];
+ return 'Citations: '+count(counts.verified)+' of '+count(total)+' verified'+extra.filter(x=>x[0]).map(([n,what])=>' · '+count(n)+' '+what).join('');
+}
+// `brief` is the card Simple opens from the citation pointer: until Show all, the footnote keeps its first sentence,
+// only the problem rows show (at most 10, problems first) and Checked at is left out.
+function citationCard(card,report,{state,bump,brief=false}){
  card.classList.add('citation-report');card.setAttribute('role','group');card.setAttribute('aria-label','Citation report');
  const refs=Array.isArray(report?.references)?report.references:[];
- const counts=Object.fromEntries(ORDER.map(k=>[k,0]));let other=0;for(const r of refs)if(r&&r.status in counts)counts[r.status]++;else other++;
+ const {counts,other,problems:unverified}=citationCounts(report),short=brief&&!state.refs;
  const head=el('div','card-head',null,card);el('span','badge','Citations',head);el('strong','','Citation report',head);
  el('span','state',plural(refs.length,'reference'),head);
  const sum=el('ul','citation-summary',null,card);sum.setAttribute('aria-label','Citation summary');
  for(const k of ORDER){const li=el('li',STATUS[k].cls,null,sum);el('strong','',count(counts[k]),li);li.append(' '+SUMMARY[k]);}
  if(other){const li=el('li','unknown',null,sum);el('strong','',count(other),li);li.append(' unknown');}
- const unverified=refs.length-counts.verified;
  if(counts.retracted)el('p','retracted-alert',plural(counts.retracted,'reference')+(counts.retracted===1?' is retracted. Do not cite it.':' are retracted. Do not cite them.'),card);
  const meaning='Verified means a published record matched: title at least 90% similar, plus the year (within one) and the first author when the reference gives them.';
- el('p','footnote',(unverified?plural(unverified,'reference')+(unverified===1?' is':' are')+' not verified. ':refs.length?'Every reference is verified. ':'No references were checked. ')+(refs.length?meaning:''),card);
+ const first=unverified?plural(unverified,'reference')+(unverified===1?' is':' are')+' not verified.':refs.length?'Every reference is verified.':'No references were checked.';
+ el('p','footnote',short?first:first+' '+(refs.length?meaning:''),card);
  const rank=r=>r&&r.status in RANK?RANK[r.status]:3;
  const sorted=refs.map((r,i)=>[r,i]).sort((a,b)=>rank(a[0])-rank(b[0])||a[1]-b[1]).map(x=>x[0]);
- if(refs.length)collapsible(card,sorted,ROWS_SHOWN,state,'refs',bump,{cls:'reference-list',noun:'references'},referenceRow);
- if(report?.checked_at)el('p','footnote','Checked at '+str(report.checked_at),card);
+ if(refs.length)collapsible(card,sorted,short?Math.min(unverified,ROWS_SHOWN):ROWS_SHOWN,state,'refs',bump,{cls:'reference-list',noun:'references'},referenceRow);
+ if(report?.checked_at&&!short)el('p','footnote','Checked at '+str(report.checked_at),card);
 }
 
 // Text-safe Markdown for report.md: headings, lists, quotes, fenced code, `code`, **bold**, *italic* and
@@ -222,8 +238,12 @@ function usageText(u){
 // One line for a research call (Settings → Conversation display → Paper searches: Summary). Counts come from the
 // result itself; nothing is guessed when the result cannot be read.
 function toolSummary(card,{call,result,output}){
- const c=call||{},r=result,input=c.input&&typeof c.input==='object'?c.input:{},tool=str(input.tool||c.tool);
  card.classList.add('tool','research','research-line');
+ el('p','research-line-text',summaryText({call,result,output}),card);
+}
+// The text of that line, also used by Simple's work line while a call runs.
+function summaryText({call,result,output}){
+ const c=call||{},r=result,input=c.input&&typeof c.input==='object'?c.input:{},tool=str(input.tool||c.tool);
  const what=input.query?'“'+str(input.query)+'”':input.id?str(input.id):'';
  const data=r&&output?parse(output):null;
  const n=list=>Array.isArray(list)?list.length:null;
@@ -244,8 +264,54 @@ function toolSummary(card,{call,result,output}){
  else if(tool==='research_corpus'){const which={unchecked:' not checked',checked:' checked'}[data.status]||'';text=data.status==='unverified'?'Read the corpus: '+plural(Number(data.matched)||0,'reference')+' not verified':'Read the corpus: '+plural(Number(data.matched)||0,(which?which.trim()+' paper':'paper'),(which?which.trim()+' papers':'papers'));}
  else if(tool==='verify_citations')text='Checked '+plural(n(data.references)||0,'reference')+'. The citation report has the result for each one.';
  else text=(TOOL[tool]||'Research')+(what?' '+what:'');
- el('p','research-line-text',text,card);
+ return text;
 }
 
-window.interspaceResearchCards={toolTitle:name=>TOOL[name]||'',paper,toolSummary,toolCard,citationCard,outputsPanel,usageText,markdown,paperList};
+// Simple's work line (docs/superpowers/specs/2026-11-27-simple-chat-view-design.md): what one turn's folded items did,
+// as parts in a fixed order, with the step count last. The caller passes only folded items, so every subagent here
+// has finished, every team is answered and every citation report is all verified. Counts come from ok results only;
+// papers are left out when any result that lists them cannot be read in full.
+function workerName(sub){const P=window.interspaceProviders;return P.title(sub?.provider)+' '+P.roleTitle(sub?.role||'subagent').toLowerCase();}
+const PAPER_TOOLS=new Set(['research_search','research_citations']);
+function paperKey(p){
+ if(!p||typeof p!=='object')return null;
+ const doi=str(p.doi).trim().toLowerCase(),arxiv=str(p.arxiv_id).trim(),title=str(p.title).trim().toLowerCase();
+ return doi||(arxiv?'arxiv:'+arxiv:title)||null;
+}
+function workParts(items){
+ const list=Array.isArray(items)?items.filter(Boolean):[],parts=[];
+ const team=list.filter(it=>it.team?.answered).at(-1),subs=list.filter(it=>it.sub),cite=list.filter(it=>it.citation).at(-1);
+ if(team)parts.push(team.team.answered.decision==='approve'?'Team approved':'Team declined');
+ if(subs.length)parts.push(subs.map(it=>workerName(it.sub)).join(', ')+' finished');
+ let searches=0,lookups=0,saved=false,verdicts=0,values=0,listed=0,readable=true,unnamed=0;
+ const sources=new Set(),papers=new Set();
+ for(const it of list){
+  if(!it.call||it.result?.status!=='ok')continue;
+  const c=it.call,input=c.input&&typeof c.input==='object'?c.input:{},tool=str(input.tool||c.tool);
+  const data=parse(it.fullOutput??it.result?.output?.text??'');
+  const recorded=Number.isSafeInteger(data?.recorded)&&data.recorded>0?data.recorded:0;
+  if(tool==='research_search'){searches++;if(Array.isArray(data?.searched))for(const s of data.searched)if(typeof s==='string'&&s)sources.add(s);}
+  if(PAPER_TOOLS.has(tool)){
+   listed++;
+   if((it.result.output?.truncated&&it.fullOutput==null)||!Array.isArray(data?.papers))readable=false;
+   else for(const p of data.papers){const k=paperKey(p);if(k)papers.add(k);else unnamed++;}
+  }
+  else if(tool==='research_paper')lookups++;
+  else if(tool==='save_report')saved=true;
+  else if(tool==='record_claim_support')verdicts+=recorded;
+  else if(tool==='record_table_cells')values+=recorded;
+ }
+ if(searches)parts.push('Searched '+(sources.size?plural(sources.size,'source')+' ':'')+(searches===1?'once':count(searches)+' times'));
+ if(listed&&readable)parts.push(plural(papers.size+unnamed,'paper'));
+ if(lookups)parts.push('looked up '+count(lookups));
+ if(saved)parts.push('saved report.md');
+ if(verdicts)parts.push('recorded '+plural(verdicts,'claim verdict'));
+ if(values)parts.push('recorded '+plural(values,'evidence value'));
+ const checked=cite?citationCounts(cite.citation).total:0;
+ if(checked)parts.push(plural(checked,'reference')+' checked: all verified');
+ parts.push(plural(list.length,'step'));
+ return parts;
+}
+
+window.interspaceResearchCards={toolTitle:name=>TOOL[name]||'',paper,toolSummary,summaryText,toolCard,citationCard,citationCounts,citationPointerText,workParts,workerName,outputsPanel,usageText,markdown,paperList};
 })();
