@@ -15,6 +15,8 @@ Scenario keys:
                 "complete_after": seconds (default 0.2; null = never), "success": true,
                 "account": {...} (saved on success)}
   thread_start  fields merged into the `thread/start` result (to break the sandbox echo, for example)
+  effort_refused  true: `turn/start` is answered with a JSON-RPC error naming the reasoning effort (every
+                `turn/start` params are in the log, as for any message)
   exit_on       a request method after which the process exits at once
   turns         a list, one entry per `turn/start`, each a list of steps:
   by_input      [{"contains": "<text>", "turns": [...]}, ...]: the first entry whose text is in the first
@@ -257,6 +259,10 @@ def handle(message):
         turn_count[0] += 1
         turn_id = 'turn-%d' % (index + 1)
         interrupted.clear()
+        if scenario.get('effort_refused'):
+            send({'id': request_id, 'error': {'code': -32600, 'message': 'Unsupported reasoning effort: ' +
+                                              str(params.get('effort'))}})
+            return
         send({'id': request_id, 'result': {'turn': {'id': turn_id, 'status': 'inProgress', 'items': []}}})
         send({'method': 'turn/started', 'params': {'threadId': THREAD, 'turn': {'id': turn_id, 'status': 'inProgress'}}})
         if not chosen:

@@ -359,6 +359,45 @@ class TurnTests(CodexCase):
         second = session.run_turn('Again', ctx)
         self.assertEqual((second['usage']['input_tokens'], second['usage']['output_tokens']), (2000, 80))
 
+    def test_effort_is_sent_only_when_chosen(self):
+        for effort, wanted in (('xhigh', {'effort': 'xhigh'}), (None, {}), ('', {})):
+            with self.subTest(effort=effort):
+                ctx = self.ctx()
+                ctx.effort = effort
+                session, ctx = self.open({}, ctx)
+                self.assertEqual(session.run_turn('Hi', ctx)['status'], 'completed')
+                params = self.sent('turn/start')[-1]['params']
+                self.assertEqual({k: v for k, v in params.items() if k == 'effort'}, wanted)
+
+    EFFORT_MESSAGE = ('This Codex model does not support the chosen effort. '
+                      'Choose another in Settings \u2192 Providers.')
+
+    def test_refused_effort_fails_the_turn_once_with_a_clear_message(self):
+        ctx = self.ctx()
+        ctx.effort = 'turbo'
+        session, ctx = self.open({'effort_refused': True}, ctx)
+        result = session.run_turn('Hi', ctx)
+        self.assertEqual(result['status'], 'failed')
+        self.assertEqual(result['error'], {'code': 'runtime_unavailable', 'message': self.EFFORT_MESSAGE})
+        self.assertEqual(len(self.sent('turn/start')), 1)  # Never retried.
+
+    def test_turn_failed_for_an_unlisted_effort_is_mapped_the_same_way(self):
+        # The shape the real CLI sends: turn/start is accepted, then the turn fails with codexErrorInfo "other".
+        raw = ('{"type":"error","error":{"message":"Invalid response.create payload: Invalid value: \'turbo\'. '
+               'Supported values are: \'low\', \'medium\'.","type":"invalid_request_error"},"status":400}')
+        ctx = self.ctx()
+        ctx.effort = 'turbo'
+        session, ctx = self.open({'turns': [[{'complete': 'failed', 'error': {
+            'message': raw, 'codexErrorInfo': 'other'}}]]}, ctx)
+        result = session.run_turn('Hi', ctx)
+        self.assertEqual(result['error'], {'code': 'runtime_unavailable', 'message': self.EFFORT_MESSAGE})
+        self.assertEqual(len(self.sent('turn/start')), 1)
+
+    def test_other_failed_turn_without_effort_keeps_its_generic_message(self):
+        session, ctx = self.open({'turns': [[{'complete': 'failed', 'error': {
+            'message': 'Invalid value: x. Supported values are: y', 'codexErrorInfo': 'other'}}]]})
+        self.assertEqual(session.run_turn('Hi', ctx)['error']['message'], 'The Codex turn failed. Try again.')
+
     def test_command_approval_runs_through_authorize(self):
         ws = str(self.workspace)
         session, ctx = self.open({'turns': [[

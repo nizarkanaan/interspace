@@ -399,6 +399,16 @@ class LaunchTests(ClaudeCase):
         args = self.main_launches()[0]['launch']
         self.assertEqual(args[args.index('--model') + 1], 'claude-opus-5-5')
 
+    def test_effort_from_context_or_the_default(self):
+        for effort, wanted in (('high', 'high'), (None, 'low')):
+            with self.subTest(effort=effort):
+                ctx = FakeContext(self.root)
+                ctx.effort = effort
+                _, _, outcome = self.turn({'turns': [simple_turn()]}, ctx=ctx)
+                self.assertEqual(outcome['status'], 'completed', outcome)
+                args = self.main_launches()[-1]['launch']
+                self.assertEqual(args[args.index('--effort') + 1], wanted)
+
     def test_unknown_model_fails_before_launch(self):
         for model in ('sonnet', 'claude-sonnet-4-5', 'gpt-6'):
             self.log.unlink(missing_ok=True)

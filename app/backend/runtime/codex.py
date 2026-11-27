@@ -63,6 +63,8 @@ FAILED_TURNS = {
     'usageLimitExceeded': ('runtime_unavailable', 'The Codex account reached its usage limit.'),
     'contextWindowExceeded': ('runtime_exited', 'The conversation is too long for the model. Start a new task.'),
 }
+EFFORT_REFUSED = ('runtime_unavailable',
+                  'This Codex model does not support the chosen effort. Choose another in Settings \u2192 Providers.')
 SHELL_DEVELOPER_INSTRUCTIONS = (
     'You are working inside Interspace, on a task the user started. Your working directory is an isolated '
     'clone of the user\'s project; your changes appear in the user\'s repository as a branch they merge '
@@ -99,6 +101,31 @@ def developer_instructions(ctx):
         base = READ_DEVELOPER_INSTRUCTIONS if access_of(ctx) == 'read' else SHELL_DEVELOPER_INSTRUCTIONS
     extra = getattr(ctx, 'instructions', None)
     return base + '\n\n' + extra if isinstance(extra, str) and extra.strip() else base
+
+
+def _effort_refused(detail, effort_sent):
+    """True when Codex's refusal text blames the reasoning effort that was sent.
+
+    Observed against the real CLI (codex app-server from the ChatGPT Mac app, 2026-11-26): `turn/start` with an
+    unlisted effort ("turbo") is accepted (a normal result with the turn in progress), then `turn/completed`
+    arrives with status "failed" and error {"message": "{\\"type\\":\\"error\\",\\"error\\":{\\"message\\":
+    \\"Invalid response.create payload: Invalid value: 'turbo'. Supported values are: 'none', 'minimal', ...\\",
+    \\"type\\":\\"invalid_request_error\\"...},\\"status\\":400}", "codexErrorInfo": "other"}. The text names
+    the value and the supported list but not the word "effort", so when an effort was sent a 400 "Invalid value"
+    counts too. A JSON-RPC error on `turn/start` (what the fake server sends) is matched on "effort".
+    """
+    text = str(detail).lower()
+    if 'effort' in text:
+        return True
+    return effort_sent and 'invalid value' in text and 'supported values' in text
+
+
+class _Refused(RuntimeFailure):
+    """A JSON-RPC error reply; `detail` is Codex's own text and is never shown."""
+
+    def __init__(self, detail):
+        super().__init__('runtime_exited', 'Codex refused a request.')
+        self.detail = detail
 
 
 class ProtocolError(Exception):
@@ -439,7 +466,8 @@ class CodexSession:
                 raise RuntimeFailure('runtime_exited', 'The Codex session stopped unexpectedly.')
         message = slot['message']
         if 'error' in message:
-            raise RuntimeFailure('runtime_exited', 'Codex refused a request.')
+            error = message.get('error')
+            raise _Refused(error.get('message') if isinstance(error, dict) else error)
         return message.get('result')
 
     def _reply(self, request_id, result=None, error=None):
@@ -509,12 +537,22 @@ class CodexSession:
             self.bridge.bind(ctx)
         try:
             try:
-                started = self._request('turn/start', {'threadId': self.thread_id, 'input': [
-                    {'type': 'text', 'text': text, 'text_elements': []}]})
+                params = {'threadId': self.thread_id, 'input': [{'type': 'text', 'text': text, 'text_elements': []}]}
+                effort = getattr(ctx, 'effort', None)
+                if isinstance(effort, str) and effort:
+                    params['effort'] = effort
+                started = self._request('turn/start', params)
                 _need(isinstance(started, dict) and isinstance(started.get('turn'), dict))
                 _need(_text(started['turn'].get('id')))
             except ProtocolError:
                 return self._protocol_failure(turn)
+            except _Refused as refused:
+                if self._killed:
+                    return {'status': 'cancelled', 'usage': turn.usage, 'error': None}
+                if _effort_refused(refused.detail, 'effort' in params):
+                    code, message = EFFORT_REFUSED  # Never retried, never sent again without the effort.
+                    return {'status': 'failed', 'usage': turn.usage, 'error': {'code': code, 'message': message}}
+                raise
             except RuntimeFailure:
                 if self._killed:
                     return {'status': 'cancelled', 'usage': turn.usage, 'error': None}
@@ -567,6 +605,10 @@ class CodexSession:
         if status == 'interrupted':
             return {'status': 'cancelled', 'usage': turn.usage, 'error': None}
         info = turn.error.get('codexErrorInfo') if isinstance(turn.error, dict) else None
+        if isinstance(turn.error, dict) and _effort_refused(
+                json.dumps(turn.error), bool(getattr(turn.ctx, 'effort', None))):
+            code, message = EFFORT_REFUSED
+            return {'status': 'failed', 'usage': turn.usage, 'error': {'code': code, 'message': message}}
         code, message = FAILED_TURNS.get(info if isinstance(info, str) else '', (
             'runtime_exited', 'The Codex turn failed. Try again.'))
         return {'status': 'failed', 'usage': turn.usage, 'error': {'code': code, 'message': message}}

@@ -412,6 +412,7 @@ class ClaudeSession:
         self.bridge = None
         self.bridge_tools = ()
         self.model = None
+        self.effort = None
         self.access = None
         self.closed = False
         self._state = threading.RLock()
@@ -448,6 +449,8 @@ class ClaudeSession:
             model = registry.check_model('claude', ctx.model)
         except ValueError:
             return self._failed('runtime_unavailable', 'Claude model ' + str(ctx.model)[:80] + ' is not supported here.')
+        effort = getattr(ctx, 'effort', None)
+        effort = effort if isinstance(effort, str) and effort else DEFAULT_EFFORT
         access = 'read' if READ_ONLY or getattr(ctx, 'access', 'write') != 'write' else 'write'
         if not self.runtime.binary or not os.access(self.runtime.binary, os.X_OK):
             return self._failed('runtime_unavailable', 'Install Claude Code to run Claude tasks.')
@@ -458,9 +461,9 @@ class ClaudeSession:
         self._killed.clear()
         try:
             if self.process is None or self.process.poll() is not None or model != self.model \
-                    or access != self.access:
+                    or effort != self.effort or access != self.access:
                 self._stop()
-                self._start(ctx, model, access)
+                self._start(ctx, model, access, effort)
             self._turn_bytes = 0
             if self.bridge is not None:
                 self.bridge.bind(_BridgeTarget(self, ctx))
@@ -502,9 +505,10 @@ class ClaudeSession:
 
     # ---------------------------------------------------------------------------------------- process
 
-    def _start(self, ctx, model, access='read'):
+    def _start(self, ctx, model, access='read', effort=DEFAULT_EFFORT):
         self._reset_stream()
         self.model = model
+        self.effort = effort
         self.access = access
         tools = ctx.tools() if callable(getattr(ctx, 'tools', None)) else []
         no_project = runtime.research_only(ctx)
@@ -538,7 +542,7 @@ class ClaudeSession:
                                 # The sandbox limits writes, not reads (0B-8): deny what Codex's profile denies.
                                 'filesystem': {'denyRead': self._deny_reads(ctx)}}}
         command = [self.runtime.binary, '-p', '--input-format', 'stream-json', '--output-format', 'stream-json',
-                   '--verbose', '--model', model, '--effort', DEFAULT_EFFORT, '--system-prompt', prompt,
+                   '--verbose', '--model', model, '--effort', effort, '--system-prompt', prompt,
                    '--tools', ','.join(self.builtin_tools), '--permission-mode', PERMISSION_MODE,
                    '--permission-prompt-tool', 'stdio', '--permission-prompts', 'host',
                    '--setting-sources', '', '--settings', json.dumps(settings), '--safe-mode',
