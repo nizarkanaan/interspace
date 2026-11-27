@@ -84,7 +84,7 @@ def registry():
         pass
     providers = {
         'claude': {'name': 'claude', 'title': 'Claude', 'default_model': 'claude-sonnet-5-5',
-                   'models': ('claude-sonnet-5-5', 'claude-opus-5-5', 'claude-haiku-5-5'),
+                   'models': ('claude-sonnet-5-5', 'claude-opus-5-5', 'claude-haiku-5-5', 'claude-fable-5-2'),
                    'capabilities': {'write': True, 'web_search': True, 'approvals': True}},
         'codex': {'name': 'codex', 'title': 'Codex', 'default_model': None, 'models': (),
                   'capabilities': {'write': True, 'web_search': True, 'approvals': True}}}

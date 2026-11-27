@@ -129,7 +129,7 @@ class ProvidersApiTests(unittest.TestCase):
         self.assertEqual(set(result), {'provider', 'models', 'error'})
         self.assertEqual(result['provider'], 'claude')
         self.assertEqual(result['error'], '')
-        self.assertEqual([m['id'] for m in result['models']], ['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-haiku-5-5'])
+        self.assertEqual([m['id'] for m in result['models']], ['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-haiku-5-5', 'claude-fable-5-2'])
         for model in result['models']:
             self.assertEqual(set(model), {'id', 'is_default', 'default_effort', 'efforts'})
             self.assertEqual(model['default_effort'], 'low')

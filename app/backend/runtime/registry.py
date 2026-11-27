@@ -17,7 +17,7 @@ CAPABILITIES = ('write', 'web_search', 'approvals')
 PROVIDERS = {
     'claude': {
         'name': 'claude', 'title': 'Claude',
-        'models': ('claude-sonnet-5-5', 'claude-opus-5-5', 'claude-haiku-5-5'),  # Full IDs only, never aliases.
+        'models': ('claude-sonnet-5-5', 'claude-opus-5-5', 'claude-haiku-5-5', 'claude-fable-5-2'),  # Full IDs only, never aliases.
         'default_model': 'claude-sonnet-5-5',
         'efforts': ('low', 'medium', 'high', 'xhigh', 'max'),
         'capabilities': {'write': True, 'web_search': True, 'approvals': True},

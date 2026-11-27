@@ -32,7 +32,7 @@ class RegistryTests(unittest.TestCase):
 
     def test_claude_models_are_full_ids(self):
         claude = registry.get('claude')
-        self.assertEqual(claude['models'], ('claude-sonnet-5-5', 'claude-opus-5-5', 'claude-haiku-5-5'))
+        self.assertEqual(claude['models'], ('claude-sonnet-5-5', 'claude-opus-5-5', 'claude-haiku-5-5', 'claude-fable-5-2'))
         self.assertEqual(claude['default_model'], 'claude-sonnet-5-5')
         self.assertEqual(claude['charge_fields'], ('input_tokens', 'cache_creation_input_tokens',
                                                    'cache_read_input_tokens', 'output_tokens'))
@@ -55,7 +55,7 @@ class RegistryTests(unittest.TestCase):
         json.dumps(public)
         self.assertEqual([p['name'] for p in public], ['claude', 'codex'])
         self.assertEqual(set(public[0]), {'name', 'title', 'models', 'default_model', 'capabilities'})
-        self.assertEqual(public[0]['models'], ['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-haiku-5-5'])
+        self.assertEqual(public[0]['models'], ['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-haiku-5-5', 'claude-fable-5-2'])
         self.assertEqual(public[1]['models'], [])
         self.assertIsNone(public[1]['default_model'])
 
