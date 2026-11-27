@@ -545,7 +545,7 @@ class ClaudeSession:
                    '--verbose', '--model', model, '--effort', effort, '--system-prompt', prompt,
                    '--tools', ','.join(self.builtin_tools), '--permission-mode', PERMISSION_MODE,
                    '--permission-prompt-tool', 'stdio', '--permission-prompts', 'host',
-                   '--setting-sources', '', '--settings', json.dumps(settings), '--safe-mode',
+                   '--setting-sources', '', '--settings', json.dumps(settings), '--restricted',
                    '--strict-mcp-config', '--disable-slash-commands', '--no-session-persistence',
                    '--max-turns', str(MAX_TURNS)]
         for path in others:

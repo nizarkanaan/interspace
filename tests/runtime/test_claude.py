@@ -229,9 +229,11 @@ class LaunchTests(ClaudeCase):
         self.assertEqual(outcome['status'], 'completed', outcome)
         launch = self.main_launches()[0]
         args = launch['launch']
-        for flag in ('-p', '--verbose', '--safe-mode', '--strict-mcp-config', '--disable-slash-commands',
+        for flag in ('-p', '--verbose', '--restricted', '--strict-mcp-config', '--disable-slash-commands',
                      '--no-session-persistence'):
             self.assertIn(flag, args)
+        # Claude Code 2.1.325's --safe-mode also drops --mcp-config servers, which removes the bridge tools.
+        self.assertNotIn('--safe-mode', args)
         pairs = {args[i]: args[i + 1] for i in range(len(args) - 1)}
         self.assertEqual(pairs['--input-format'], 'stream-json')
         self.assertEqual(pairs['--output-format'], 'stream-json')
