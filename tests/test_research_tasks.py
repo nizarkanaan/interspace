@@ -627,6 +627,22 @@ class ClaimCheckTests(ResearchCase):
         self.assertNotIn('source', claim)
         self.assertEqual(self.events_of('r1', 'claims')[-1]['data']['supported'], 1)
 
+    def test_a_check_saved_before_tables_split_per_row_shows_the_rows(self):
+        report = ('# Review\n\n| Ref | Finding |\n|---|---|\n| [1] | Deep learning reshaped speech recognition |\n\n'
+                  '## References\n\n1. LeCun, Y., Bengio, Y. and Hinton, G. (2015). Deep learning. Nature. doi:10.1038/nature14539\n')
+        self.make(answering(self.results, [('research_search', {'query': 'deep learning'}), saving(report)]))
+        self.store.add_research_task('r1')
+        self.run_task()
+        self.sched.claims_start('r1')
+        path = self.root / 'tasks' / 'r1' / 'claims.json'
+        saved = json.loads(path.read_text())
+        saved['claims'][0]['sentence'] = '| Ref | Finding | |---|---| | [1] | Deep learning reshaped speech recognition |'
+        path.write_text(json.dumps(saved))
+        self.assertEqual(self.sched.claims('r1')['claims'][0]['sentence'], '[1] · Deep learning reshaped speech recognition')
+        self.assertIn('|---|', json.loads(path.read_text())['claims'][0]['sentence'])  # Shown, not rewritten.
+        (self.root / 'tasks' / 'r1' / 'outputs' / 'report.md').unlink()
+        self.assertIn('|---|', self.sched.claims('r1')['claims'][0]['sentence'])  # No report: the stored sentence.
+
     def test_full_text_is_fetched_after_permission_and_judged_from_its_passages(self):
         body = ('Methods. We trained deep networks on large speech corpora.\n\nResults. Word error rates fell by '
                 'a third once deep networks replaced older acoustic models.')

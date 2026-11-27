@@ -309,6 +309,19 @@ def record(value, report_text, results, by, at):
     return {'recorded': recorded, 'rejected': rejected, 'counts': counts(value)}
 
 
+def current_sentences(value, report_text):
+    """The check with each claim's sentence from today's split of the same report. A check started before tables split per
+    row holds a whole table as one sentence; while the report is unchanged and the ids line up, the row is shown instead.
+    The stored check, and what the checker was given, are not changed."""
+    if not value or report_text is None or value.get('report_sha') != report_hash(report_text):
+        return value
+    stored = value.get('claims') or []
+    fresh = split(report_text)
+    if [c.get('id') for c in stored] != [c['id'] for c in fresh]:
+        return value
+    return dict(value, claims=[dict(c, sentence=f['sentence']) for c, f in zip(stored, fresh)])
+
+
 def public(value):
     """The claims file for the UI: verdicts, reasons and quotes, without the source text."""
     if not value:

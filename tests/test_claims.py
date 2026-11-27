@@ -97,6 +97,22 @@ class SplitTests(unittest.TestCase):
                 + ''.join('%d. Author. (2020). Paper number %d about the topic.\n' % (n, n) for n in range(1, 6)))
         self.assertEqual([c['id'] for c in claims.split(text)], ['1:1', '2:1', '3:1', '2:2', '4:1', '5:1'])  # As tests/reader-ui.mjs.
 
+    def test_a_check_split_before_tables_shows_each_rows_sentence_while_the_report_is_unchanged(self):
+        text = ('# Gains\n\n| Ref | Method | Gain |\n|---|---|---|\n| [1] | Federated | Higher |\n| [2] | Transfer | Lower |\n'
+                '\n## References\n[1] Author. (2020). Paper one about the topic.\n[2] Author. (2021). Paper two about the topic.\n')
+        stored = {'v': claims.V, 'report_sha': claims.report_hash(text), 'started_at': 't0', 'claims': [
+            {'id': '1:1', 'n': 1, 'k': 1, 'sentence': '| Ref | Method | Gain | |---|---|---| | [1] | Federated |', 'verdict': 'partly'},
+            {'id': '2:1', 'n': 2, 'k': 1, 'sentence': '| Ref | Method | Gain | |---|---|---| | [1] | Federated |', 'verdict': 'supported'}]}
+        shown = claims.current_sentences(stored, text)
+        self.assertEqual([c['sentence'] for c in shown['claims']], ['[1] · Federated · Higher', '[2] · Transfer · Lower'])
+        self.assertEqual([c['verdict'] for c in shown['claims']], ['partly', 'supported'])
+        self.assertIn('|---|', stored['claims'][0]['sentence'])  # The stored check is not changed.
+        self.assertIs(claims.current_sentences(stored, text + 'x'), stored)  # A changed report keeps the stored sentences.
+        moved = dict(stored, claims=stored['claims'][::-1])
+        self.assertIs(claims.current_sentences(moved, text), moved)  # So do ids that no longer line up.
+        self.assertIsNone(claims.current_sentences(None, text))
+        self.assertIs(claims.current_sentences(stored, None), stored)
+
 
 class CheckTests(unittest.TestCase):
     def started(self):
