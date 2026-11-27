@@ -66,7 +66,7 @@
 .routing-form>*{margin:0}
 .routing-form .actions{justify-content:flex-start}
 .route-grid{display:grid;gap:10px}
-.route-row{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(0,1fr);gap:8px 12px;align-items:end;border-top:1px solid var(--line);padding-top:10px}
+.route-row{display:grid;grid-template-columns:minmax(0,1.2fr) repeat(3,minmax(0,1fr));gap:8px 12px;align-items:end;border-top:1px solid var(--line);padding-top:10px}
 .route-role{display:grid;align-self:center}
 @media(max-width:700px){.route-row{grid-template-columns:minmax(0,1fr)}}
 .marker.changed{color:var(--ink);font-weight:600}

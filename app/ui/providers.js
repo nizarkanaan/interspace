@@ -12,6 +12,8 @@ const roleTitle=role=>role==='orchestrator'?'Orchestrator':(s=>s.charAt(0).toUpp
 let request=()=>Promise.reject(Error('No bridge')),changed=()=>{};
 let providers=[],status=new Map(),routing=null,loadError='',loading=null,rev=0,listSeq=0;
 const signIn=new Map(),busy=new Set(),signingOut=new Set();
+// provider_models answers, kept until the app quits or the user signs in or out of that provider.
+const modelCache=new Map(),modelDone=new Map();
 let draft=null,dirty=false,saving=false,saveNote='',saveError='';
 
 const get=name=>providers.find(p=>p.name===name)||null;
@@ -46,12 +48,94 @@ function checkModel(provider,model){
 }
 function modelPlaceholder(provider){const p=get(provider);return p?.default_model?'Default: '+p.default_model:'The provider’s default';}
 function fillModels(list,provider){list.replaceChildren();for(const m of get(provider)?.models||[]){const o=document.createElement('option');o.value=m;list.append(o);}}
-function modelInput(parent,{id,label,provider,value}){
+function opt(select,value,text){const o=el('option','',text,select);o.value=value;return o;}
+
+// The provider's own model list (provider_models): {models:[{id,is_default,default_effort,efforts}], error}.
+// A failed call is an empty list with one sentence, so callers fall back to a typed model name.
+function models(provider){
+ if(!provider)return Promise.resolve({models:[],error:''});
+ const known=modelCache.get(provider);if(known)return known;
+ const p=request('provider_models',{provider},{manual:true}).then(r=>({
+  models:(Array.isArray(r?.models)?r.models:[]).filter(m=>m&&typeof m.id==='string').map(m=>({id:m.id,is_default:!!m.is_default,default_effort:typeof m.default_effort==='string'?m.default_effort:null,efforts:(Array.isArray(m.efforts)?m.efforts:[]).filter(x=>typeof x==='string')})),
+  error:typeof r?.error==='string'?r.error:''
+ }),e=>{if(modelCache.get(provider)===p)modelCache.delete(provider);return {models:[],error:e?.message||'The model list could not be loaded.'};})
+  .then(res=>{if(modelCache.get(provider)===p)modelDone.set(provider,res);return res;});
+ modelCache.set(provider,p);return p;
+}
+function forgetModels(name){modelCache.delete(name);modelDone.delete(name);}
+const defaultModelId=(r,provider)=>r?.models.find(m=>m.is_default)?.id||get(provider)?.default_model||'';
+// A select with the provider's models when it has a list; otherwise the typed box with the error sentence under it.
+// The element returned first is replaced in place if the answer needs the other kind; it keeps its id,
+// class, disabled state, oninput and onchange, and every element exposes .value and .setProvider. The replaced
+// element forwards .value, .disabled and validity calls to its successor, so callers holding it still work.
+function modelInput(parent,{id,label,provider,value,defaultLabel}){
  const wrap=el('div','field',null,parent),l=el('label','',label,wrap);l.htmlFor=id;
- const input=el('input','',null,wrap);input.id=id;input.maxLength=64;input.autocomplete='off';input.spellcheck=false;input.value=value||'';input.placeholder=modelPlaceholder(provider);
- const list=el('datalist','',null,wrap);list.id=id+'-list';input.setAttribute('list',list.id);fillModels(list,provider);
- input.setProvider=next=>{input.placeholder=modelPlaceholder(next);fillModels(list,next);};
- return input;
+ let prov=provider,node=null,note=null,list=null,seq=0;
+ const mount=kind=>{
+  if(node&&node.tagName.toLowerCase()===kind)return node;
+  const n=document.createElement(kind);n.id=id;
+  if(kind==='input'){n.maxLength=64;n.autocomplete='off';n.spellcheck=false;}
+  if(node){n.className=node.className;n.disabled=node.disabled;n.oninput=node.oninput;n.onchange=node.onchange;node.replaceWith(n);
+   // Anything still holding the replaced element reads and writes the new one.
+   for(const k of ['value','disabled'])Object.defineProperty(node,k,{configurable:true,get:()=>n[k],set:v=>{n[k]=v;}});
+   for(const k of ['setCustomValidity','reportValidity','focus'])node[k]=(...a)=>n[k](...a);
+  }else l.after(n);
+  n.setProvider=setProvider;node=n;return n;
+ };
+ const setNote=text=>{
+  if(text){if(!note)note=el('p','footnote model-error',null,wrap);note.textContent=text;}
+  else if(note){note.remove();note=null;}
+ };
+ const render=(r,keep)=>{
+  if(r&&r.models.length){
+   const n=mount('select');n.replaceChildren();list?.remove();list=null;
+   const def=defaultModelId(r,prov);opt(n,'',defaultLabel||(def?'Default ('+def+')':'Default'));
+   const ids=r.models.map(m=>m.id);for(const m of ids)opt(n,m,m);
+   if(keep&&!ids.includes(keep))opt(n,keep,keep+' (not available)');
+   n.value=keep;setNote('');return;
+  }
+  if(!r){const n=mount('select');n.replaceChildren();opt(n,'',defaultLabel||'Default');if(keep)opt(n,keep,keep);n.value=keep;setNote('');return;}
+  const n=mount('input');n.value=keep;n.placeholder=modelPlaceholder(prov);
+  if(!list){list=el('datalist','',null,wrap);list.id=id+'-list';}n.setAttribute('list',list.id);fillModels(list,prov);
+  setNote(r.error);
+ };
+ const fetch=()=>{const my=++seq,asked=prov;return models(asked).then(r=>{if(my===seq&&asked===prov)render(r,node.value);});};
+ function setProvider(next){
+  if(next===prov)return Promise.resolve();
+  prov=next;const r=modelDone.get(next);
+  if(r){seq++;render(r,node.value);return Promise.resolve();}
+  render(null,node.value);return fetch();
+ }
+ const first=modelDone.get(prov);
+ if(first)render(first,value||'');else{render(null,value||'');fetch();}
+ return node;
+}
+// Effort choices for the selected model (or the provider's default model when none is chosen).
+function effortSelect(parent,{id,label,provider,model,value,defaultLabel}){
+ const wrap=el('div','field',null,parent),l=el('label','',label,wrap);l.htmlFor=id;
+ const select=el('select','',null,wrap);select.id=id;
+ let prov=provider,mod=model||'',seq=0;
+ const render=(r,keep,reset)=>{
+  select.replaceChildren();
+  const hasList=!!(r&&r.models.length),m=hasList?(mod?r.models.find(x=>x.id===mod):r.models.find(x=>x.is_default)):null;
+  const efforts=m?m.efforts:[],def=m?.default_effort||(hasList&&prov==='claude'?'low':'');
+  opt(select,'',defaultLabel||(def?'Default ('+def+')':'Default'));
+  for(const e of efforts)opt(select,e,e);
+  if(keep&&!efforts.includes(keep)){
+   if(hasList&&reset)keep='';
+   else opt(select,keep,hasList?keep+' (not available)':keep);
+  }
+  select.value=keep;
+ };
+ const fetch=reset=>{const my=++seq,asked=prov;return models(asked).then(r=>{if(my===seq&&asked===prov)render(r,select.value,reset);});};
+ select.setModel=(nextProvider,nextModel)=>{
+  prov=nextProvider;mod=nextModel||'';const r=modelDone.get(prov);
+  if(r){seq++;render(r,select.value,true);return Promise.resolve();}
+  render(null,select.value,false);return fetch(true);
+ };
+ const first=modelDone.get(prov);
+ if(first)render(first,value||'',false);else{render(null,value||'',false);fetch(false);}
+ return select;
 }
 function providerOptions(select,{value,needsWrite,defaultLabel}){
  select.replaceChildren();
@@ -76,7 +160,7 @@ function statusLine(name){
 }
 function refreshStatus(name){
  busy.add(name);touch();
- request('provider_status',{provider:name},{manual:true}).then(r=>{if(r?.provider===name)status.set(name,r);if(r?.state==='signed_in')signIn.delete(name);})
+ request('provider_status',{provider:name},{manual:true}).then(r=>{if(r?.provider===name){if(status.get(name)?.state!==r.state)forgetModels(name);status.set(name,r);}if(r?.state==='signed_in')signIn.delete(name);})
   .catch(e=>{signIn.set(name,{error:e.message});}).finally(()=>{busy.delete(name);touch();});
 }
 // Sign-in completion arrives in the normal state message (state.provider_status[provider], auth_status shape),
@@ -87,17 +171,17 @@ function fromState(map){
  for(const [name,s] of Object.entries(map)){
   if(!s||typeof s!=='object'||s.provider!==name||!STATES.has(s.state))continue;
   const was=status.get(name);if(was&&was.state===s.state&&was.account===s.account&&was.detail===s.detail)continue;
-  status.set(name,s);if(s.state==='signed_in')signIn.delete(name);moved=true;
+  forgetModels(name);status.set(name,s);if(s.state==='signed_in')signIn.delete(name);moved=true;
  }
  if(moved)touch();
 }
 function signOut(name){
  signingOut.delete(name);busy.add(name);touch();
- request('provider_sign_out',{provider:name},{manual:true}).then(r=>{if(r?.provider===name&&STATES.has(r.state))status.set(name,r);else status.set(name,{provider:name,state:'signed_out',account:null,detail:''});signIn.delete(name);})
+ request('provider_sign_out',{provider:name},{manual:true}).then(r=>{forgetModels(name);if(r?.provider===name&&STATES.has(r.state))status.set(name,r);else status.set(name,{provider:name,state:'signed_out',account:null,detail:''});signIn.delete(name);})
   .catch(e=>{signIn.set(name,{error:e.message});}).finally(()=>{busy.delete(name);touch();});
 }
 function beginSignIn(name){
- busy.add(name);touch();
+ forgetModels(name);busy.add(name);touch();
  request('provider_sign_in',{provider:name},{manual:true}).then(r=>{signIn.set(name,r||{});}).catch(e=>{signIn.set(name,{error:e.message});}).finally(()=>{busy.delete(name);touch();});
 }
 function secureUrl(value){if(typeof value!=='string'||value.length>2048||/\s/.test(value))return false;try{const u=new URL(value);return u.protocol==='https:'&&!!u.hostname&&!u.username&&!u.password;}catch{return false;}}
@@ -117,27 +201,45 @@ function signInBox(name,parent){
  el('p','footnote',s.detail||'Sign-in started.',box);
 }
 function routingRow(grid,role){
- const target=role==='orchestrator'?draft.orchestrator:(draft.roles[role]=draft.roles[role]||{provider:'',model:null});
+ const target=role==='orchestrator'?draft.orchestrator:(draft.roles[role]=draft.roles[role]||{provider:'',model:null,effort:null});
+ target.effort=target.effort||null;
  const row=el('div','route-row',null,grid);row.dataset.role=role;
  const head=el('div','route-role',null,row);el('strong','',roleTitle(role),head);
  el('span','footnote',role==='orchestrator'?'Runs every new task':WRITE_ROLES.has(role)?'Write role: needs a provider that can write':role==='citation_checker'?'Read role: checks references against scholarly sources':'Read role',head);
  const needsWrite=WRITE_ROLES.has(role);
  const select=providerSelect(row,{id:'route-'+role+'-provider',label:roleTitle(role)+' provider',value:target.provider,needsWrite});
  const model=modelInput(row,{id:'route-'+role+'-model',label:roleTitle(role)+' model',provider:target.provider,value:target.model||''});
- select.onchange=()=>{target.provider=select.value;model.setProvider(select.value);dirty=true;saveNote='Unsaved changes';saveError='';noteUpdate(grid);};
- model.oninput=()=>{model.setCustomValidity('');target.model=model.value.trim()||null;dirty=true;saveNote='Unsaved changes';saveError='';noteUpdate(grid);};
+ const effort=effortSelect(row,{id:'route-'+role+'-effort',label:roleTitle(role)+' effort',provider:target.provider,model:target.model||'',value:target.effort||''});
+ // The model box can be replaced when the provider's answer arrives, so it is always looked up again.
+ const current=()=>row.querySelector('#route-'+role+'-model');
+ const mark=()=>{dirty=true;saveNote='Unsaved changes';saveError='';noteUpdate(grid);};
+ const refit=()=>{target.effort=effort.value||null;return effort.setModel(target.provider,target.model||'').then(()=>{target.effort=effort.value||null;});};
+ select.onchange=()=>{target.provider=select.value;target.model=null;target.effort=null;const m=current();m.value='';effort.value='';m.setProvider(select.value);refit();mark();};
+ model.oninput=()=>{const m=current();m.setCustomValidity('');target.model=m.value.trim()||null;refit();mark();};
+ effort.onchange=()=>{target.effort=effort.value||null;mark();};
 }
 function noteUpdate(grid){const form=grid.closest('form');if(!form)return;form.querySelector('.route-status').textContent=saveNote;form.querySelector('.route-error').textContent=saveError;}
+function unavailable(role,target){
+ // Only a provider with a list can say what is offered; a typed box accepts whatever the registry pattern allows.
+ const r=modelDone.get(target.provider);if(!r?.models.length)return '';
+ if(target.model&&!r.models.some(m=>m.id===target.model))return roleTitle(role)+': '+target.model+' is not available on '+title(target.provider)+'. Choose another model.';
+ const m=target.model?r.models.find(x=>x.id===target.model):r.models.find(x=>x.is_default);
+ if(target.effort&&!(m?.efforts||[]).includes(target.effort))return roleTitle(role)+': the effort '+target.effort+' is not available for '+(m?.id||'this model')+'. Choose another effort.';
+ return '';
+}
 function save(form){
  if(saving||!draft)return;
  for(const role of ['orchestrator',...ROLES]){
   const target=role==='orchestrator'?draft.orchestrator:draft.roles[role];if(!target)continue;
   const input=form.querySelector('#route-'+role+'-model'),problem=checkModel(target.provider,target.model||'');
   if(problem){input.setCustomValidity(problem);input.reportValidity();return;}
+  const gone=unavailable(role,target);
+  if(gone){saveError=gone;saveNote='Unsaved changes';noteUpdate(form);return;}
   if(WRITE_ROLES.has(role)&&get(target.provider)&&!canWrite(target.provider)){saveError=roleTitle(role)+' needs a provider that can write.';noteUpdate(form);return;}
  }
  saving=true;saveError='';saveNote='Saving…';touch();
- const sent=copy(draft);
+ const sent=copy(draft),full=t=>({...t,provider:t.provider,model:t.model||null,effort:t.effort||null});
+ sent.orchestrator=full(sent.orchestrator);for(const role of Object.keys(sent.roles||{}))sent.roles[role]=full(sent.roles[role]);
  request('routing_update',{routing:sent},{manual:true}).then(r=>{routing=r&&typeof r==='object'?r:sent;draft=copy(routing);dirty=false;saveNote='Saved';})
   .catch(e=>{saveError=e.message||'The defaults were not saved.';saveNote='Unsaved changes';}).finally(()=>{saving=false;touch();});
 }
@@ -186,7 +288,7 @@ function renderSettings(container){
 
 window.interspaceProviders={
  init(options){request=options.request;changed=options.changed||changed;},
- load,fromState,loaded:()=>!!providers.length,list:()=>providers.slice(),get,title,canWrite,badge,checkModel,modelInput,providerSelect,providerOptions,
+ load,fromState,loaded:()=>!!providers.length,list:()=>providers.slice(),get,title,canWrite,badge,checkModel,models,modelInput,effortSelect,providerSelect,providerOptions,
  routing:()=>routing,routeFor:role=>role==='orchestrator'?routing?.orchestrator||null:routing?.roles?.[role]||null,
  roleTitle,ROLES,isWriteRole:role=>WRITE_ROLES.has(role),renderSettings
 };

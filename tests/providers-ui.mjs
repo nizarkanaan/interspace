@@ -16,7 +16,10 @@ export default async function check(page,url){
    {name:'gemini',title:'Gemini',models:[],default_model:null,capabilities:{write:false,web_search:true,approvals:false}}],
    status:[{provider:'claude',state:'signed_out',account:null,detail:'Not signed in'},{provider:'codex',state:'signed_out',account:null,detail:''},{provider:'gemini',state:'missing_cli',account:null,detail:'Literal <img src=x onerror="window.pwned=1"> not found'}],routing};
   const scope={v:1,task_id:null,version:1,projects:[{project_id:'p1',access:'write',read:['**'],write:['**'],deny:[]}],commands:{workspace:'allow',allow:[],deny:[]},network:{default:'deny',allow_hosts:[],deny_hosts:[]},apps:[],web_search:'deny',limits:{token_budget:250000,time_limit_s:3600}};
-  const f=window.provFixture={requests:[],hold:{},held:[],failNext:{},
+  const eff=['low','medium','high','xhigh','max'];
+  const models={claude:[{id:'claude-sonnet-5-5',is_default:true,default_effort:'low',efforts:eff},{id:'claude-opus-5-5',is_default:false,default_effort:'low',efforts:eff},{id:'claude-haiku-5-5',is_default:false,default_effort:'low',efforts:eff}],
+   codex:[{id:'codex-fixture-1',is_default:true,default_effort:'medium',efforts:['low','medium','high','xhigh']},{id:'codex-fixture-2',is_default:false,default_effort:'low',efforts:['low','medium','high']}],gemini:[]};
+  const f=window.provFixture={requests:[],hold:{},held:[],failNext:{},modelError:{},
    respond(r,result){window.interspaceReceive({id:r.id,result});},fail(r,error){window.interspaceReceive({id:r.id,error});}};
   window.webkit={messageHandlers:{interspace:{postMessage(r){
    f.requests.push(r);const p=r.params||{};if(f.hold[r.method]){f.held.push(r);return;}
@@ -27,6 +30,7 @@ export default async function check(page,url){
    else if(r.method==='provider_sign_in')result=p.provider==='codex'?{provider:'codex',kind:'device',url:'https://auth.example.invalid/device',code:'ABCD-1234',detail:'The code expires in 15 minutes.'}:{provider:p.provider,kind:'terminal',command:'claude auth login'};
    else if(r.method==='provider_status'){const s={provider:p.provider,state:'signed_in',account:'Ada <b>Lovelace</b>',detail:''};list.status=list.status.map(x=>x.provider===p.provider?s:x);result=s;}
    else if(r.method==='provider_sign_out'){const s={provider:p.provider,state:'signed_out',account:null,detail:''};list.status=list.status.map(x=>x.provider===p.provider?s:x);result=s;}
+   else if(r.method==='provider_models')result=f.modelError[p.provider]?{provider:p.provider,models:[],error:f.modelError[p.provider]}:{provider:p.provider,models:models[p.provider]||[],error:''};
    else if(r.method==='routing_update'){list.routing=p.routing;result=p.routing;}
    else if(r.method==='scope_default')result={scope};
    else if(r.method==='agent_create'){rows.push({id:'N'+rows.length,mode:'agent',title:p.title,status:'idle',provider:p.provider||list.routing.orchestrator.provider,model:'provider' in p?p.model:list.routing.orchestrator.model});result={task_id:'N'+(rows.length-1)};queueMicrotask(()=>window.interspaceReceive({type:'state',state:state()}));}
@@ -102,14 +106,12 @@ export default async function check(page,url){
  for(const role of ['Implementer','Tester'])assert(await routing.getByLabel(role+' provider').locator('option[value=gemini]').isDisabled(),role+' offers a provider without write');
  assert(!(await routing.getByLabel('Reviewer provider').locator('option[value=gemini]').isDisabled()),'Read role refuses a read-only provider');
  await routing.getByLabel('Researcher provider').selectOption('gemini');
- await routing.getByLabel('Reviewer model').fill('codex-fixture-1');
- await routing.getByLabel('Orchestrator model').fill('bad model');
+ await routing.getByLabel('Reviewer model').selectOption('codex-fixture-1');
+ await routing.getByLabel('Researcher model').fill('bad model');
  await routing.getByRole('button',{name:'Save defaults',exact:true}).click();
  assert((await req('routing_update')).length===0,'Invalid model reached the backend');
- await routing.getByLabel('Orchestrator model').fill('claude-nope');
- await routing.getByRole('button',{name:'Save defaults',exact:true}).click();
- assert((await req('routing_update')).length===0,'Model outside the provider list reached the backend');
- await routing.getByLabel('Orchestrator model').fill('claude-opus-5-5');
+ await routing.getByLabel('Researcher model').fill('');
+ await routing.getByLabel('Orchestrator model').selectOption('claude-opus-5-5');
  assert((await text(routing)).includes('Unsaved changes'),'Unsaved state not shown');
  await page.evaluate(()=>{window.provFixture.failNext.routing_update='Implementer needs a provider that can write.';});
  await routing.getByRole('button',{name:'Save defaults',exact:true}).click();
@@ -118,8 +120,57 @@ export default async function check(page,url){
  await settings.locator('.routing-form').getByRole('button',{name:'Save defaults',exact:true}).click();
  await page.waitForFunction(()=>document.querySelector('#providers-settings .route-status').textContent==='Saved');
  const updates=await req('routing_update');
- const expected={v:1,orchestrator:{provider:'claude',model:'claude-opus-5-5'},roles:{researcher:{provider:'gemini',model:null},implementer:{provider:'claude',model:null},reviewer:{provider:'codex',model:'codex-fixture-1'},tester:{provider:'claude',model:null},writer:{provider:'claude',model:null}}};
+ const expected={v:1,orchestrator:{provider:'claude',model:'claude-opus-5-5',effort:null},roles:{researcher:{provider:'gemini',model:null,effort:null},implementer:{provider:'claude',model:null,effort:null},reviewer:{provider:'codex',model:'codex-fixture-1',effort:null},tester:{provider:'claude',model:null,effort:null},writer:{provider:'claude',model:null,effort:null}}};
  assert(updates.length===2&&JSON.stringify(updates[1])===JSON.stringify({routing:expected}),'routing_update not exact: '+JSON.stringify(updates));
+
+
+ // Model and effort pickers: lists come from provider_models; the effort follows the model.
+ const optionsOf=async sel=>(await settings.locator(sel+' option').allTextContents());
+ await routing.getByLabel('Researcher provider').selectOption('codex');
+ await page.waitForFunction(()=>document.querySelectorAll('select#route-researcher-model option').length===3);
+ assert(JSON.stringify(await optionsOf('select#route-researcher-model'))==='["Default (codex-fixture-1)","codex-fixture-1","codex-fixture-2"]','Codex model options: '+await optionsOf('select#route-researcher-model'));
+ assert(JSON.stringify(await optionsOf('select#route-researcher-effort'))==='["Default (medium)","low","medium","high","xhigh"]','Effort options for the default model: '+await optionsOf('select#route-researcher-effort'));
+ await routing.getByLabel('Researcher model').selectOption('codex-fixture-1');
+ await routing.getByLabel('Researcher effort').selectOption('xhigh');
+ await routing.getByLabel('Researcher model').selectOption('codex-fixture-2');
+ assert(await routing.getByLabel('Researcher effort').inputValue()==='','Effort not reset when the model lacks it');
+ assert(JSON.stringify(await optionsOf('select#route-researcher-effort'))==='["Default (low)","low","medium","high"]','Effort options follow the model');
+ await routing.getByLabel('Researcher effort').selectOption('high');
+ await routing.getByLabel('Researcher model').selectOption('codex-fixture-1');
+ assert(await routing.getByLabel('Researcher effort').inputValue()==='high','Effort dropped though the new model offers it');
+ // Switching provider refills both lists and resets the effort; each provider's list is asked for once.
+ const claudeAsks=(await req('provider_models')).filter(x=>x.provider==='claude').length;
+ await routing.getByLabel('Researcher provider').selectOption('claude');
+ await page.waitForFunction(()=>document.querySelectorAll('select#route-researcher-model option').length===4);
+ assert(JSON.stringify(await optionsOf('select#route-researcher-model'))==='["Default (claude-sonnet-5-5)","claude-sonnet-5-5","claude-opus-5-5","claude-haiku-5-5"]','Claude model options');
+ assert(await routing.getByLabel('Researcher effort').inputValue()===''&&JSON.stringify(await optionsOf('select#route-researcher-effort'))==='["Default (low)","low","medium","high","xhigh","max"]','Claude effort options or reset wrong: '+await optionsOf('select#route-researcher-effort'));
+ assert((await req('provider_models')).filter(x=>x.provider==='claude').length===claudeAsks,'Claude model list asked for again');
+ // Save sends provider, model and effort for every role.
+ await routing.getByLabel('Researcher model').selectOption('claude-opus-5-5');
+ await routing.getByLabel('Researcher effort').selectOption('max');
+ await routing.getByLabel('Orchestrator effort').selectOption('high');
+ await routing.getByLabel('Reviewer effort').selectOption('xhigh');
+ await routing.getByRole('button',{name:'Save defaults',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelector('#providers-settings .route-status').textContent==='Saved');
+ const sentRouting=(await req('routing_update'))[2].routing;
+ assert(JSON.stringify(sentRouting)===JSON.stringify({v:1,orchestrator:{provider:'claude',model:'claude-opus-5-5',effort:'high'},roles:{researcher:{provider:'claude',model:'claude-opus-5-5',effort:'max'},implementer:{provider:'claude',model:null,effort:null},reviewer:{provider:'codex',model:'codex-fixture-1',effort:'xhigh'},tester:{provider:'claude',model:null,effort:null},writer:{provider:'claude',model:null,effort:null}}}),'Routing with effort not exact: '+JSON.stringify(sentRouting));
+ // A failed list gives the typed box and the error sentence; signing out clears the remembered list.
+ await page.evaluate(()=>{window.provFixture.modelError.codex='Sign in to Codex to see its models.';});
+ await item('codex').getByRole('button',{name:'Sign out of Codex',exact:true}).click();
+ await item('codex').getByRole('button',{name:'Sign out',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelector('input#route-reviewer-model'));
+ assert((await text(settings.locator('.route-row[data-role=reviewer]'))).includes('Sign in to Codex to see its models.'),'Model error sentence not shown');
+ assert(await settings.locator('select#route-reviewer-model').count()===0&&await settings.locator('input#route-reviewer-model').inputValue()==='codex-fixture-1','Typed box missing or lost its value');
+ // A saved model the list no longer has is kept visible and blocks Save with a warning naming it.
+ await settings.locator('input#route-reviewer-model').fill('gpt-5-old');
+ await page.evaluate(()=>{window.provFixture.modelError.codex='';});
+ await item('codex').getByRole('button',{name:'Check Codex status',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelector('select#route-reviewer-model'));
+ const old=settings.locator('select#route-reviewer-model');
+ assert(await old.inputValue()==='gpt-5-old'&&(await old.locator('option:checked').textContent())==='gpt-5-old (not available)','Unavailable model not shown: '+await old.inputValue());
+ const before=(await req('routing_update')).length;
+ await settings.locator('.routing-form').getByRole('button',{name:'Save defaults',exact:true}).click();
+ assert((await text(settings.locator('.route-error'))).includes('gpt-5-old')&&(await req('routing_update')).length===before,'Unavailable model not refused with a warning');
 
  // New task: the Orchestrator defaults to the routing choice and can be overridden; no old runtime picker.
  await page.getByRole('button',{name:'New task',exact:true}).click();
