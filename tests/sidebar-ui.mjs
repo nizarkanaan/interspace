@@ -128,5 +128,5 @@ export default async function check(page,url){
  }
  assert(!errors.length,'Page errors: '+errors.join('; '));
  assert(!(await page.evaluate(()=>window.pwned)),'Script ran');
- return {checks:'Research | Code switch with aria-pressed, mode New button and kind, project picker only in Code, groups Needs you/Working/Done with words, approved draft, children left out, literal titles, Report ready, Show all by keyboard, open task marked'};
+ return {checks:'Research | Code switch with aria-pressed, mode New button and kind, project picker only in Code, groups Needs you/Working/Done with words, approved draft, children left out, literal titles, Report ready, Show all by keyboard, open task marked, collapsed rail counting the tasks that need you (both modes, no archived tasks or subagents, singular and plural label), keyboard focus moving between Hide sidebar and the rail button'};
 }
