@@ -73,6 +73,8 @@ function renderSidebar(){
  const rows=research?A.researchRows():(state.tasks||[]).filter(t=>t.kind!=='research');
  window.interspaceSidebar.renderUsage($('sidebar-usage'),state.provider_limits||{});
  window.interspaceSidebar.render($('sidebar-tasks'),{mode,rows,currentId:current,open:id=>openTask(id),stateOf:id=>A.stateOf(id),menu:(id,at)=>window.interspaceTaskMenu.open(id,at)});
+ // The collapsed rail counts what needs you in both modes, so hiding the sidebar never hides it.
+ window.interspaceSidebar.renderRail($('sidebar-expand'),{rows:[...A.researchRows(),...(state.tasks||[]).filter(t=>t.kind!=='research')],stateOf:id=>A.stateOf(id)});
 }
 // The sidebar's Research entry: tasks without a project (research/tasks.md), next to the projects.
 function renderResearch(){

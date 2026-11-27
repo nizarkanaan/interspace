@@ -105,6 +105,19 @@ export default async function check(page,url){
  await focusButton.click();
  assert(!(await focused())&&await collapsed()&&await aside.isVisible()&&await store()===shut,'Collapsed sidebar kept and nothing saved');
  await page.locator('#sidebar-expand').click();
+ // Showing or hiding the sidebar fits the saved conversation width to the window again, but never saves what it fitted.
+ {
+  const before=await page.evaluate(()=>localStorage.getItem('interspace.splitWidth'));
+  const width=()=>page.evaluate(()=>parseInt(document.getElementById('agent-view').style.getPropertyValue('--chat-width')));
+  await page.evaluate(()=>{localStorage.setItem('interspace.splitWidth','900');dispatchEvent(new Event('resize'));});
+  const wide=await width();
+  await page.locator('#sidebar-collapse').click();
+  const wider=await width();
+  await page.locator('#sidebar-expand').click();
+  const r={wide,wider,back:await width(),saved:await page.evaluate(()=>localStorage.getItem('interspace.splitWidth'))};
+  assert(r.saved==='900'&&r.wide<900&&r.wider>r.wide&&r.back===r.wide,'Sidebar toggle saved a fitted split width: '+JSON.stringify(r));
+  await page.evaluate(b=>{if(b==null)localStorage.removeItem('interspace.splitWidth');else localStorage.setItem('interspace.splitWidth',b);dispatchEvent(new Event('resize'));},before);
+ }
  // Something that needs you while in Focus: Focus stays on, a banner names it, Go to conversation exits and shows it.
  const said=(tag,n)=>Array.from({length:n},(_,i)=>ev('r1','message',{role:'assistant',text:'Progress note '+tag+i+'. '+'Searching more sources about outage fallback. '.repeat(4),final:false},tag+i));
  await push(page,[...said('a',20),ev('r1','team_proposed',{team_id:'tm1',summary:'Check every reference.',budget:null,members:[{member_id:'m1',role:'citation_checker',brief:'Check every reference.',provider:'codex',model:null,access:'read',default:true}]}),...said('b',20)]);

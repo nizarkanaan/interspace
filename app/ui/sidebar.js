@@ -92,14 +92,30 @@ const SIDEBAR_KEY='interspace.sidebarCollapsed';
 const read=()=>{try{return localStorage.getItem(SIDEBAR_KEY)==='1';}catch{return false;}};
 function collapsed(){return document.body.classList.contains('sidebar-collapsed');}
 function set(value,{persist=true}={}){
- const next=!!value,changed=next!==collapsed();
+ const next=!!value,changed=next!==collapsed(),active=document.activeElement;
+ const inside=!!active&&!!document.querySelector('.shell>aside')?.contains(active);
  document.body.classList.toggle('sidebar-collapsed',next);
  if(persist){try{localStorage.setItem(SIDEBAR_KEY,next?'1':'0');}catch{}}
+ // Keyboard focus on a control the rail hides moves to the rail's button, and from that button back to Hide sidebar.
+ if(changed&&inside){
+  if(next&&active.id!=='sidebar-expand'&&!active.getClientRects().length)document.getElementById('sidebar-expand')?.focus();
+  else if(!next&&active.id==='sidebar-expand')document.getElementById('sidebar-collapse')?.focus();
+ }
  // The split reader measures its layout on resize.
  if(changed)window.dispatchEvent(new Event('resize'));
 }
 set(read(),{persist:false});
 // What a task state asks of the user, in the sidebar's words ('' when nothing); Focus mode's banner uses it too.
 const needs=state=>typeof state==='string'&&Object.hasOwn(NEEDS,state)?NEEDS[state]:'';
-window.interspaceSidebar={render,place,renderUsage,collapsed,set,needs};
+// The rail still says how many tasks need the user: open root tasks of both modes waiting on an answer or an approval.
+function renderRail(button,{rows,stateOf}){
+ const seen=new Set();let n=0;
+ for(const r of Array.isArray(rows)?rows:[]){
+  if(!r||typeof r.id!=='string'||r.parent_task_id||r.archived||seen.has(r.id))continue;seen.add(r.id);
+  if(needs((typeof stateOf==='function'&&stateOf(r.id))||r.status))n++;
+ }
+ button.textContent='☰'+(n?' '+n:'');
+ button.setAttribute('aria-label','Show sidebar'+(n?', '+n+(n===1?' task needs':' tasks need')+' you':''));
+}
+window.interspaceSidebar={render,place,renderUsage,renderRail,collapsed,set,needs};
 })();

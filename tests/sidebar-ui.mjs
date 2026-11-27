@@ -64,14 +64,33 @@ export default async function check(page,url){
   assert(!(await collapsed())&&await page.locator('#sidebar-expand').isHidden(),'Starts expanded, no rail button');
   assert((await page.locator('#sidebar-collapse').getAttribute('aria-label'))==='Hide sidebar'&&(await text(page.locator('#sidebar-collapse')))==='\u25C0','Collapse button');
   const w0=await wide(main);
+  const activeId=()=>page.evaluate(()=>document.activeElement?.id||document.activeElement?.tagName);
   await page.locator('#sidebar-collapse').click();
   assert(await collapsed(),'Click collapses');
   assert(await wide(aside)<=48,'Rail width '+await wide(aside));
   assert(await wide(main)-w0>=150,'Main grows '+(await wide(main)-w0));
   assert((await page.evaluate(k=>localStorage.getItem(k),KEY))==='1','Saved as 1');
   const ex=page.locator('#sidebar-expand');
-  assert(await ex.isVisible()&&(await ex.getAttribute('aria-label'))==='Show sidebar'&&(await text(ex))==='\u2630','Expand button');
+  // The rail keeps what needs you in view: t1 (a question, Code) and r4 (a team, Research).
+  assert(await ex.isVisible()&&(await ex.getAttribute('aria-label'))==='Show sidebar, 2 tasks need you'&&(await text(ex))==='\u2630 2','Expand button with the count: '+await text(ex)+' / '+await ex.getAttribute('aria-label'));
   assert(await page.locator('.mode-switch').isHidden()&&await page.locator('#sidebar-collapse').isHidden(),'Rail hides the rest');
+  // Keyboard focus follows the control that replaces the one it was on.
+  assert(await activeId()==='sidebar-expand','Collapse moves focus to the rail button: '+await activeId());
+  {
+   const rail=()=>page.evaluate(()=>{const b=document.getElementById('sidebar-expand');return b.textContent+' | '+b.getAttribute('aria-label');});
+   // Another task waits on a team approval; archived tasks and subagents are not counted.
+   await page.evaluate(()=>{const f=window.rFixture;f.rows.find(x=>x.id==='t1').status='idle';
+    f.research.push({id:'r9',mode:'agent',kind:'research',project_id:null,title:'Archived question',status:'paused_ask',provider:'codex',archived:true},{id:'r4c',mode:'agent',kind:'research',project_id:null,title:'Researcher',status:'paused_team',provider:'codex',parent_task_id:'r4'});f.setState();});
+   assert(await rail()==='\u2630 1 | Show sidebar, 1 task needs you','One other task needs you: '+await rail());
+   await page.evaluate(()=>{window.rFixture.research.find(x=>x.id==='r4').status='running';window.rFixture.setState();});
+   assert(await rail()==='\u2630 | Show sidebar','Nothing needs you: '+await rail());
+   await page.evaluate(()=>{const f=window.rFixture;f.research.find(x=>x.id==='r4').status='paused_scope';f.rows.find(x=>x.id==='t1').status='paused_ask';f.setState();});
+   assert(await rail()==='\u2630 2 | Show sidebar, 2 tasks need you','A scope change counts too: '+await rail());
+  }
+  await ex.click();
+  assert(!(await collapsed())&&await activeId()==='sidebar-collapse','Expand moves focus to the collapse button: '+await activeId());
+  await page.locator('#sidebar-collapse').click();
+  assert(await collapsed(),'Collapsed again');
   await page.reload();
   assert(await collapsed(),'Still collapsed after reload');
   await ex.click();
@@ -81,7 +100,14 @@ export default async function check(page,url){
   await page.keyboard.press('ControlOrMeta+Backslash');
   assert(await collapsed(),'Shortcut collapses');
   await page.keyboard.press('ControlOrMeta+Backslash');
-  assert(!(await collapsed()),'Shortcut expands');
+  assert(!(await collapsed())&&await activeId()==='BODY','Shortcut expands, focus outside the sidebar stays: '+await activeId());
+  // The shortcut from a control the rail hides puts focus on the rail button, then back on the collapse button.
+  await page.locator('.mode-switch button').first().focus();
+  await page.keyboard.press('ControlOrMeta+Backslash');
+  assert(await collapsed()&&await activeId()==='sidebar-expand','Shortcut from inside the sidebar: '+await activeId());
+  await page.keyboard.press('ControlOrMeta+Backslash');
+  assert(!(await collapsed())&&await activeId()==='sidebar-collapse','Shortcut from the rail button: '+await activeId());
+  await page.evaluate(()=>document.activeElement?.blur());
   // Typing: the shortcut is ignored in a text field.
   await page.evaluate(()=>{const t=document.createElement('textarea');t.id='agent-message';document.body.append(t);t.focus();});
   await page.keyboard.press('ControlOrMeta+Backslash');

@@ -178,7 +178,9 @@ function splitHandle(){
   if(e.key in map){e.preventDefault();splitWidth(map[e.key]);}
   else if(e.key==='Enter'){e.preventDefault();splitWidth(SPLIT_DEFAULT);try{localStorage.removeItem('interspace.splitWidth');}catch{}}
  });
- addEventListener('resize',()=>{if(placed)splitWidth(now());});
+ // A new window or sidebar width fits the saved width again (splitWidth(null) reads it and saves nothing), so a
+ // width clamped for a narrower layout is never kept.
+ addEventListener('resize',()=>{if(placed)splitWidth(null);});
 }
 function place(split){
  // Focus is a state on top of the split: leaving the split (a narrow window, a hidden reader) leaves Focus first.
