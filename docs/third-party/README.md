@@ -11,3 +11,5 @@ The Code reviewer adapts the evidence-oriented review gate in ECC 2.2.3. Its req
 - skills/eval-harness/SKILL.md: SHA-256 `3a5339a5a80099a5c9d55da9b6c8e05a690f5befc6f78d779c75dd79d818ca07`
 
 Upstream: https://github.com/affaan-m/ECC. Agency Agents (https://github.com/msitarzewski/agency-agents) was inspected as comparison material; none of its prompt prose was imported. OpenAI/Anthropic guides informed the common architecture and evaluation approach. PRISMA was considered as reporting guidance; no compliance or endorsement is asserted.
+
+The agent skill in `.claude/skills/graphify/` comes from graphify 0.9.106 (https://github.com/Graphify-Labs/graphify) and stays under the Apache License 2.0, not the project's MIT license. Its license and notice are in GRAPHIFY-LICENSE.txt and GRAPHIFY-NOTICE.txt; portions contributed before graphify's relicensing remain under the MIT terms in GRAPHIFY-LICENSE-MIT.txt.

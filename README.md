@@ -95,3 +95,7 @@ The preview build regenerates both the standalone preview and the bundled `desig
 ### Multi-project workspaces
 
 The native app keeps a local project registry. Each project has its own tasks, and its name, brief and priority are saved locally. Several tasks, in one project or across projects, can run at once. Existing single-project state migrates with a backup. See [the Mac app guide](app/README.md#projects-and-tasks).
+
+## License
+
+[MIT](LICENSE). Third-party files keep their own licenses; see [docs/third-party](docs/third-party/README.md).
