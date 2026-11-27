@@ -118,15 +118,25 @@ export default async function check(page,url){
   assert(await collapsed()&&(await page.evaluate(k=>localStorage.getItem(k),KEY))==='0'&&await page.evaluate(()=>window.interspaceSidebar.collapsed()),'set(true,{persist:false}) leaves the saved choice');
   await page.evaluate(()=>window.interspaceSidebar.set(false,{persist:false}));
   assert(!(await collapsed()),'Restored');
-  // Narrow layout: no rail controls, sidebar stacks as before even if saved collapsed.
+  // The sidebar's own rules keep their old weight: the New button keeps its fill and sidebar buttons still light up on hover.
+  {const bg=sel=>page.evaluate(s=>getComputedStyle(document.querySelector(s)).backgroundColor,sel),clear=c=>c==='rgba(0, 0, 0, 0)'||c==='transparent';
+   assert(!clear(await bg('#sidebar-new')),'New button background: '+await bg('#sidebar-new'));
+   await page.locator('#sidebar-collapse').hover();
+   const lit=await page.waitForFunction(()=>{const c=getComputedStyle(document.getElementById('sidebar-collapse')).backgroundColor;return c!=='rgba(0, 0, 0, 0)'&&c!=='transparent';},null,{timeout:2000}).then(()=>true,()=>false);
+   assert(lit,'Hide sidebar has no hover background: '+await bg('#sidebar-collapse'));
+   await page.mouse.move(900,600);}
+  // Narrow layout: no rail controls, sidebar stacks as before even if saved collapsed, and the task list stays hidden.
   await page.evaluate(()=>window.interspaceSidebar.set(true));
   await page.setViewportSize({width:390,height:800});
   assert(await page.locator('#sidebar-collapse').isHidden()&&await ex.isHidden(),'No buttons at 390px');
   assert(await page.locator('.mode-switch').isVisible(),'Narrow sidebar content stays');
+  assert(await page.evaluate(()=>getComputedStyle(document.getElementById('sidebar-tasks')).display)==='none','Task list shown at 390px: '+await page.evaluate(()=>getComputedStyle(document.getElementById('sidebar-tasks')).display));
+  await page.evaluate(()=>window.interspaceSidebar.set(false));
+  assert(await page.evaluate(()=>getComputedStyle(document.getElementById('sidebar-tasks')).display)==='none','Task list shown at 390px with the sidebar open');
   await page.setViewportSize({width:1280,height:1000});
   await page.evaluate(()=>window.interspaceSidebar.set(false));
  }
  assert(!errors.length,'Page errors: '+errors.join('; '));
  assert(!(await page.evaluate(()=>window.pwned)),'Script ran');
- return {checks:'Research | Code switch with aria-pressed, mode New button and kind, project picker only in Code, groups Needs you/Working/Done with words, approved draft, children left out, literal titles, Report ready, Show all by keyboard, open task marked, collapsed rail counting the tasks that need you (both modes, no archived tasks or subagents, singular and plural label), keyboard focus moving between Hide sidebar and the rail button'};
+ return {checks:'Research | Code switch with aria-pressed, mode New button and kind, project picker only in Code, groups Needs you/Working/Done with words, approved draft, children left out, literal titles, Report ready, Show all by keyboard, open task marked, collapsed rail counting the tasks that need you (both modes, no archived tasks or subagents, singular and plural label), keyboard focus moving between Hide sidebar and the rail button, New button fill and hover background kept, task list hidden at 390px'};
 }
