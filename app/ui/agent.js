@@ -389,7 +389,8 @@ function refresh(){if(!state)return;renderAgent();renderRunning();}
 
 window.interspaceAgent={
  init(options){
-  host=options;S.init({request:options.request,open:id=>host.openAgent(id),rowStatus:id=>row(id)?.status||null,stamp:id=>{const m=window.interspaceReview?.merged?.(id);return m?m.into+':'+m.merge_commit:'';},changed:id=>{if(view==='agent'&&(id===current||parentOf(id)===current)||view==='running')refresh();}});
+  host=options;S.init({request:options.request,open:id=>host.openAgent(id),rowStatus:id=>row(id)?.status||null,stamp:id=>{const m=window.interspaceReview?.merged?.(id);return m?m.into+':'+m.merge_commit:'';},changed:id=>{if(view==='agent'&&(id===current||parentOf(id)===current)||view==='running')refresh();},
+   showTab:tab=>{const b=$('agent-tabs').querySelector('[data-agent-tab='+tab+']');b?.click();b?.focus();},isRoot:id=>isResearch(id)&&!parentOf(id)});
   window.interspaceComposer.attach({input:$('agent-message'),menu:$('agent-menu'),form:$('agent-composer'),commands,mentions,onSend:send,onInput:text=>{if(current)drafts.set(current,text);}});
   for(const b of $('agent-tabs').querySelectorAll('[data-agent-tab]'))b.onclick=()=>{if(!current)return;const nav=$('agent-tabs'),stuck=nav.getBoundingClientRect().top<=1;tabs.set(current,b.dataset.agentTab);if(b.dataset.agentTab==='corpus'){const c=corpusInfo(current);if(c.data)loadCorpus(current);}refresh();
    // Conversation opens at its latest message; Corpus opens at its top when the tab row is pinned.

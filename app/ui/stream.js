@@ -13,7 +13,7 @@ const OPTION={allow_once:'Allow once',add_to_scope:'Add to scope',deny:'Deny'};
 const ANSWERED={allow_once:'Allowed once',add_to_scope:'Added to scope',deny:'Denied',text:'Replied',cancelled:'Closed: the task was cancelled'};
 const MAX_PAGES=20,COMPACT_ITEMS=5;
 const tasks=new Map(),views=new WeakMap(),parents=new Map();
-let request=()=>Promise.reject(Error('No bridge')),changed=()=>{},hostChanged=()=>{},open=()=>{},rowStatus=()=>null,stampOf=()=>'';
+let request=()=>Promise.reject(Error('No bridge')),changed=()=>{},hostChanged=()=>{},open=()=>{},rowStatus=()=>null,stampOf=()=>'',showTab=null,isRoot=()=>false;
 
 const el=(tag,cls,text,parent)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=String(text);if(parent)parent.append(e);return e;};
 const tokens=n=>Number(n||0).toLocaleString('en-US');
@@ -261,12 +261,12 @@ function digest(m,list){
    entries.push({key:'work:'+lead,work:true,lead,items:work,open,live,text,children});
    if(open){for(const it of work)entries.push({key:it.key,it,inWork:true});entries.push({key:'work-end:'+lead,end:true,lead});}
   }
-  for(const it of kept)entries.push({key:it.key,it,preview:it===reply&&long(it.message)?'reply':null});
+  for(const it of kept)entries.push({key:it.key,it,preview:it===reply&&long(it.message)?'reply':null,pointer:!!it.citation});
  });
  return {entries,folded};
 }
 // The digest's part of a cached node's version.
-const entryVersion=(m,entry)=>entry.work?entry.text+'|'+entry.open+'|'+entry.children.map(c=>c.id+'='+c.name).join(','):entry.preview?entry.preview+'|'+openMsgs.has(m.id+'|'+entry.key):'';
+const entryVersion=(m,entry)=>entry.work?entry.text+'|'+entry.open+'|'+entry.children.map(c=>c.id+'='+c.name).join(','):entry.preview?entry.preview+'|'+openMsgs.has(m.id+'|'+entry.key):entry.pointer?'pointer|'+corpusButton(m):'';
 // Opened work lines and whole messages stay open for the session, per task.
 const openWork=new Set(),openMsgs=new Set();
 const workId=(m,entry)=>safe(String(m.id).slice(0,8))+'-'+safe(entry.lead);
@@ -320,6 +320,22 @@ function preview(m,it,entry,box,msg){
  el('span','',open?'▴':'▾',b).setAttribute('aria-hidden','true');
  b.onclick=()=>{if(openMsgs.has(key))openMsgs.delete(key);else openMsgs.add(key);it.version++;changed(m.id);};
 }
+// A citation report with any problem, in the chat view: one warn line with its counts, Show citation report ▸ (the brief
+// card of the problem rows, opened in place and kept in it.briefOpen) and, on a root research task, Open Corpus ›. The
+// toggle keeps its id, so render() gives focus back; the brief card's box is always there, so aria-controls names it.
+const corpusButton=m=>!!(showTab&&isRoot(m.id));
+function citationPointer(m,it,card){
+ const R=window.interspaceResearchCards,id=safe(String(m.id).slice(0,8))+'-'+safe(it.key),open=!!it.briefOpen,bump=()=>{it.version++;changed(m.id);};
+ card.classList.add('citation-pointer','is-line');
+ el('p','pointer-text',R.citationPointerText(it.citation),card);
+ const b=el('button','pointer-toggle',open?'Hide citation report ':'Show citation report ',card);b.type='button';b.id='cite-'+id;
+ b.setAttribute('aria-expanded',String(open));b.setAttribute('aria-controls','cite-box-'+id);
+ el('span','',open?'▾':'▸',b).setAttribute('aria-hidden','true');
+ b.onclick=()=>{it.briefOpen=!it.briefOpen;bump();};
+ if(corpusButton(m)){const c=el('button','pointer-corpus','Open Corpus ',card);c.type='button';c.setAttribute('aria-label','Open Corpus tab');el('span','','›',c).setAttribute('aria-hidden','true');c.onclick=()=>showTab('corpus');}
+ const box=el('div','card cite-box',null,card);box.id='cite-box-'+id;box.hidden=!open;
+ if(open)R.citationCard(box,it.citation,{state:it,bump,brief:true});
+}
 function build(m,it,compact,entry){
  if(entry?.work)return workLine(m,entry);
  if(entry?.end)return workEnd(m,entry);
@@ -336,6 +352,7 @@ function build(m,it,compact,entry){
    closedText:it.team.closed||(terminal(m.status)||!late?statusText(m.status).toLowerCase():statusText({state:row}).toLowerCase()),bump:()=>{it.version++;changed(m.id);}});}
  else if(it.sub)window.interspaceTeam.subagentCard(card,{...subContext(m,it,compact),...fold});
  else if(it.ask)askCard(m,it,card,compact);
+ else if(it.citation&&entry?.pointer)citationPointer(m,it,card);
  else if(it.citation)window.interspaceResearchCards.citationCard(card,it.citation,{state:it,bump:()=>{it.version++;changed(m.id);}});
  else if(it.call||it.result||it.output!=null)toolCard(m,it,card);
  else if(it.diff){card.classList.add('diff-card');diffBlock(m,it,it.diff,card);}
@@ -411,7 +428,8 @@ function optimistic(taskId,text,clientId){const m=model(taskId);item(m,'client:'
 function failed(taskId,clientId,reason){const it=model(taskId).items.get('client:'+clientId);if(!it)return;it.message.failed=reason;it.version++;changed(taskId);}
 
 window.interspaceStream={
- init(options){request=options.request;hostChanged=options.changed||hostChanged;open=options.open||open;rowStatus=options.rowStatus||rowStatus;stampOf=options.stamp||stampOf;changed=id=>{hostChanged(id);childChanged(id);};},
+ // showTab(tab) switches the task view's results tab; isRoot(id) says whether a task is a root research task.
+ init(options){request=options.request;hostChanged=options.changed||hostChanged;open=options.open||open;rowStatus=options.rowStatus||rowStatus;stampOf=options.stamp||stampOf;showTab=options.showTab||showTab;isRoot=options.isRoot||isRoot;changed=id=>{hostChanged(id);childChanged(id);};},
  receive,sync:id=>sync(model(id)),render,activity,childStatus,optimistic,failed,statusText,budgetText,
  has:id=>tasks.has(id)&&tasks.get(id).lastSeq>0,ids:()=>[...tasks.keys()],
  // How many steps the task's last main-conversation render folded into work lines (0 outside Simple's chat view).

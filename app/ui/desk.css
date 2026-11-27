@@ -553,6 +553,12 @@ html:has(#agent-view.split:not([hidden])){overflow:hidden;height:100%;overscroll
 .work-line .work-open:hover,.work-line .work-details:hover,.work-end .work-hide:hover{background:transparent;text-decoration:underline}
 .stream>.in-work,.stream>.work-end{margin-left:14px}
 @media(max-width:600px){.stream>.in-work,.stream>.work-end{margin-left:8px}}
+/* A citation report with problems: one warn line whose buttons wrap inline, then (opened) the brief card in place. */
+.card.citation-pointer{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 12px;border-left-color:var(--warn);color:var(--warn);overflow-wrap:anywhere}
+.citation-pointer .pointer-text{flex:0 1 auto;font-size:14px;font-weight:550}
+.citation-pointer .pointer-toggle,.citation-pointer .pointer-corpus{font-size:12.5px;padding:2px 0;border:0;background:transparent;color:var(--accent)}
+.citation-pointer .pointer-toggle:hover,.citation-pointer .pointer-corpus:hover{background:transparent;text-decoration:underline}
+.citation-pointer>.cite-box{flex:1 1 100%;margin-top:6px;color:var(--ink)}
 /* An earlier turn's long message or reply shows its first lines: the block that crosses the cut is clamped to 3 lines,
    later blocks are hidden, then Show whole message / Show whole reply. A cut list item clamps an inner box, so it
    keeps its bullet. */

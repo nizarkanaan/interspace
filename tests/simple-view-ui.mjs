@@ -61,7 +61,8 @@ export default async function check(page,url){
     cEv('citation_report',report(ref('verified'),ref('verified'),ref('not_found')),'cite_c'),reply(cEv,'cm','Checked.')],
    L:[user(lEv,'user_u1','Find sources.'),status(lEv,'running'),call(lEv,'l1','research_search',{query:'O-RAN xApp slicing'})],
    X:[user(xEv,'user_u1','First question','u1'),reply(xEv,'msg_1',para(600,'First answer'),'u1'),
-    user(xEv,'user_u4','Fourth question','u4'),reply(xEv,'msg_1','Fourth answer','u4')]}});
+    user(xEv,'user_u4','Fourth question','u4'),reply(xEv,'msg_1','Fourth answer','u4')]},
+  corpora:{R:{v:1,updated_at:'2026-11-27T10:00:00Z',full:true,incomplete:0,papers:[]}}});
  const nav=page.locator('[data-view=research]'),stream=page.locator('#agent-stream');
  const keys=()=>page.evaluate(()=>[...document.querySelectorAll('#agent-stream>[data-item]')].map(n=>n.dataset.item));
  const heading=()=>text(page.locator('#heading'));
@@ -89,6 +90,29 @@ export default async function check(page,url){
  assert(await details.getAttribute('aria-expanded')==='false'&&await details.getAttribute('aria-label')==='Details of this work, 8 steps'&&(await text(details))==='Details ▸','Details button: '+await details.evaluate(b=>b.outerHTML));
  assert(await details.locator('span[aria-hidden=true]').textContent()==='▸','Arrow not hidden from screen readers');
  assert(await stream.locator('.in-work').count()===0,'Folded items shown while the line is closed');
+
+ // A citation report with a problem stays outside as one warn line: its counts, Show citation report ▸ and, on a root
+ // research task, Open Corpus ›. Show opens a brief card in place: only the problem rows, then Show all N references.
+ const cite=stream.locator('[data-item=cite_2]'),showCite=page.locator('#cite-R-cite_2'),citeBox=page.locator('#cite-box-R-cite_2');
+ assert(await cite.evaluate(n=>n.classList.contains('citation-pointer')),'No citation pointer: '+await cite.evaluate(n=>n.className));
+ assert((await text(cite.locator('.pointer-text')))==='Citations: 2 of 3 verified · 1 mismatch'&&await cite.locator('.reference').count()===0,'Citation pointer: '+await text(cite));
+ {const s=await showCite.evaluate(b=>({type:b.type,expanded:b.getAttribute('aria-expanded'),controls:b.getAttribute('aria-controls'),arrow:b.querySelector('span[aria-hidden=true]')?.textContent}));
+  assert((await text(showCite))==='Show citation report ▸'&&s.type==='button'&&s.expanded==='false'&&s.controls==='cite-box-R-cite_2'&&s.arrow==='▸','Show citation report: '+JSON.stringify(s));
+  assert(await cite.getByRole('button',{name:'Show citation report',exact:true}).count()===1,'Show citation report has another name');}
+ {const corpus=cite.getByRole('button',{name:'Open Corpus tab',exact:true});
+  assert(await corpus.count()===1&&(await text(corpus))==='Open Corpus ›'&&await corpus.getAttribute('type')==='button','Open Corpus button: '+await cite.innerHTML());}
+ await showCite.focus();await page.keyboard.press('Enter');
+ await page.waitForFunction(()=>document.querySelector('#cite-R-cite_2')?.getAttribute('aria-expanded')==='true');
+ assert((await text(showCite))==='Hide citation report ▾'&&await active()==='cite-R-cite_2','Opened pointer: '+await text(showCite)+' focus on '+await active());
+ {const rows=citeBox.locator('.reference'),notes=await citeBox.evaluate(b=>[...b.querySelectorAll(':scope>p.footnote')].map(p=>p.textContent));
+  assert(await rows.count()===1&&(await text(rows)).includes('Not verified: differs from the published record in year'),'Brief card rows: '+await citeBox.innerText());
+  assert(same(notes,['1 reference is not verified.'])&&!(await text(citeBox)).includes('Checked at'),'Brief card footnotes: '+JSON.stringify(notes));}
+ {const all=citeBox.getByRole('button',{name:'Show all 3 references'});
+  await all.focus();await page.keyboard.press('Enter');
+  await page.waitForFunction(()=>document.querySelectorAll('#cite-box-R-cite_2 .reference').length===3);
+  assert(await active()==='cite-box-R-cite_2-all','Show all: focus on '+await active());
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(()=>document.querySelectorAll('#cite-box-R-cite_2 .reference').length===1);}
 
  // T1: Details by keyboard puts the folded items back in place, in order, each with its own controls; the closing
  // Hide details folds them again and gives focus back to the line.
@@ -196,6 +220,10 @@ export default async function check(page,url){
  assert(order.before==='l2'&&order.last==='l2','New step not last before Hide details: '+JSON.stringify(order));
  assert(await active()==='work-L-user_u1','Focus left the line: '+await active());
  assert((await text(line('user_u1'))).startsWith('Working · Searching “second query” · Searched 1 source once · 1 paper'),'Live line after a result: '+await text(line('user_u1')));
+ // A retracted reference: the pointer ends with do not cite.
+ await push(page,[lEv('citation_report',report(ref('verified'),ref('retracted')),'cite_l')]);
+ await page.waitForFunction(()=>document.querySelector('#agent-stream>[data-item=cite_l]'));
+ assert((await text(stream.locator('[data-item=cite_l] .pointer-text')))==='Citations: 1 of 2 verified · 1 retracted: do not cite','Retracted pointer: '+await text(stream.locator('[data-item=cite_l]')));
 
  // Open from the line, and Review Focus 3: a script click never focuses the button, yet Back lands on it, with the
  // line where it was.
@@ -206,6 +234,10 @@ export default async function check(page,url){
  const before=await lineTop();
  await page.evaluate(()=>document.getElementById('work-open-C').click());
  await shows(C_TITLE);
+ // A subagent's own view has the pointer, but no Open Corpus: Corpus is for root research tasks only.
+ await page.waitForFunction(()=>document.querySelector('#agent-stream>[data-item=cite_c].citation-pointer'));
+ {const c=stream.locator('[data-item=cite_c]');
+  assert((await text(c.locator('.pointer-text')))==='Citations: 2 of 3 verified · 1 not found'&&await c.getByRole('button',{name:'Open Corpus tab'}).count()===0&&await c.getByRole('button',{name:'Show citation report'}).count()===1,'Subagent pointer: '+await c.innerHTML());}
  await page.locator('#agent-back').click();
  await shows(R_TITLE);
  assert(await active()==='work-open-C','Back focus: '+await active());
@@ -246,6 +278,8 @@ export default async function check(page,url){
  await page.waitForFunction(()=>!document.querySelector('#agent-stream .work-line'));
  assert(await page.locator('#agent-stream .in-work').count()===0,'Stale in-work in Detailed');
  assert(same(await keys(),DETAILED_R),'Detailed items: '+JSON.stringify(await keys()));
+ {const c=await cite.evaluate(n=>({report:n.classList.contains('citation-report'),pointer:n.classList.contains('citation-pointer'),rows:n.querySelectorAll('.reference').length}));
+  assert(c.report&&!c.pointer&&c.rows===3&&await stream.locator('.citation-pointer').count()===0,'Detailed citation report: '+JSON.stringify(c));}
  for(const k of ['user_u1','msg_b','msg_c'])assert((await whole(k))?.more===0,k+' cut in Detailed');
  await page.evaluate(()=>window.interspaceDisplay.setDetail('simple'));
  await page.waitForFunction(()=>document.querySelector('#agent-stream .work-line'));
@@ -264,7 +298,16 @@ export default async function check(page,url){
  // Previews: clamped blocks and the Show whole toggles never overflow either.
  const fitsR=await fit(page,'simple-view-previews',async()=>{if(await heading()!==R_TITLE)await openTask('R',R_TITLE);},false,[320,390,600]);
 
+ // Open Corpus from R's pointer switches the results tab to Corpus, puts focus on that tab and fetches R's corpus again.
+ if(await heading()!==R_TITLE)await openTask('R',R_TITLE);
+ {const tab=page.locator('[data-agent-tab=corpus]'),loads=async()=>(await requests(page,'task_corpus')).filter(p=>p.task_id==='R').length,before=await loads();
+  assert(await tab.getAttribute('aria-pressed')==='false','Corpus already shown');
+  await cite.getByRole('button',{name:'Open Corpus tab'}).click();
+  await page.waitForFunction(()=>document.querySelector('[data-agent-tab=corpus]').getAttribute('aria-pressed')==='true');
+  assert(await page.evaluate(()=>document.activeElement===document.querySelector('[data-agent-tab=corpus]')),'Open Corpus: focus on '+await active());
+  await page.waitForFunction(n=>window.rFixture.requests.filter(r=>r.method==='task_corpus'&&r.params.task_id==='R').length>n,before);}
+
  assert(!(await page.evaluate(()=>window.pwned)),'Script ran');
  assert(!errors.length,'Page errors: '+errors.join(' | '));
- return {checks:'research turns as your message, one work line and the reply; work-line counts (sources, papers, look-ups, report, team, subagents, all-verified citations, values, steps); folded count; at most 2 Open buttons; Details and Hide details by keyboard with focus kept; opened items in order with their own controls; open lines kept per task; asks, errors, failed calls, open teams, running and paused subagents, status rows and an edited scope never fold; Approve team sends team_answer; settled scope rows fold; a live line stays open with the new step last and focus kept; Working with the running search; Open from the line and Back to it with focus and position; compact and nested copies untouched; collision in Simple; earlier long messages and replies cut to their first lines (crossing block clamped, a list cut per item, later blocks hidden, links past the cut unreachable) with Show whole message, Show whole reply and Show less by keyboard with focus kept; the newest turn, a 600-character reply, pending, failed and streaming messages never cut; whole replies kept for the session and across Detailed; Detailed parity without stale in-work and the line kept open across it; long query and previews fit 320/390/600',responsiveStates:fits.length+fitsR.length};
+ return {checks:'research turns as your message, one work line and the reply; work-line counts (sources, papers, look-ups, report, team, subagents, all-verified citations, values, steps); folded count; at most 2 Open buttons; Details and Hide details by keyboard with focus kept; opened items in order with their own controls; open lines kept per task; asks, errors, failed calls, open teams, running and paused subagents, status rows and an edited scope never fold; Approve team sends team_answer; settled scope rows fold; a live line stays open with the new step last and focus kept; Working with the running search; Open from the line and Back to it with focus and position; compact and nested copies untouched; collision in Simple; earlier long messages and replies cut to their first lines (crossing block clamped, a list cut per item, later blocks hidden, links past the cut unreachable) with Show whole message, Show whole reply and Show less by keyboard with focus kept; the newest turn, a 600-character reply, pending, failed and streaming messages never cut; whole replies kept for the session and across Detailed; Detailed parity without stale in-work and the line kept open across it; a citation report with problems as one warn line (counts, mismatch, not found, retracted: do not cite) with Show citation report opening the brief card of problem rows and Show all by keyboard with focus kept, Open Corpus only on a root research task switching to the Corpus tab with focus and a fresh task_corpus, and the full report in Detailed; long query, previews and the citation pointer fit 320/390/600',responsiveStates:fits.length+fitsR.length};
 }
