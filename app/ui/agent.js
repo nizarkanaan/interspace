@@ -83,7 +83,10 @@ function scopeArea(id){
  else{editor.replaceChildren();delete editor.dataset.for;}
 }
 function renderAgent(){
- const id=current;$('agent-view').hidden=view!=='agent'||!id;if($('agent-view').hidden)return;
+ const id=current;$('agent-view').hidden=view!=='agent'||!id;
+ // Leaving the reader undoes the split: while `placed` stays true the page-level scroll guard keeps every other
+ // page (Settings, the desks) pinned to the top.
+ if($('agent-view').hidden){place(false);return;}
  head($('agent-head'),id);$('agent-stop').hidden=!stoppable(id);$('agent-back').textContent=isResearch(id)?'← Research':'← Tasks';
  scopeArea(id);
  outputsArea(id);

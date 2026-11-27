@@ -70,6 +70,13 @@ export default async function check(page,url){
  {const wide=await page.evaluate(()=>[...document.querySelectorAll('body *')].filter(e=>e.getBoundingClientRect().right>innerWidth+1&&e.offsetParent).slice(0,4).map(e=>e.tagName+'#'+e.id+'.'+e.className+':'+Math.round(e.getBoundingClientRect().right)));
   assert(!(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth)),'No sideways scroll at 390: '+JSON.stringify(wide));}
  await page.setViewportSize({width:1280,height:1000});
+ // Leaving the split reader must free the page: Settings scrolls (the reader's scroll guard once pinned it to the top).
+ await page.waitForFunction(()=>document.querySelector('#agent-view.split'));
+ await page.getByRole('button',{name:'Settings',exact:true}).click();
+ await page.waitForFunction(()=>document.getElementById('agent-view').hidden);
+ await page.evaluate(()=>scrollTo(0,400));
+ assert(await page.evaluate(()=>scrollY)>0,'Settings scrolls after leaving the split reader');
+ assert(!(await page.evaluate(()=>document.getElementById('agent-view').classList.contains('split'))),'Hidden reader keeps no split');
  assert(!errors.length,'Page errors: '+errors.join('; '));
  assert(!(await page.evaluate(()=>window.pwned)),'Script ran');
  return {checks:'Read opens the Report tab (no inline report view), verdicts in words from the corpus, summary, literal text, citation links incl. lists and ranges, unknown brackets kept, keyboard jump and Back to text, Save, refetch on change, no sideways scroll'};
