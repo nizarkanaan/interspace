@@ -20,23 +20,53 @@ const PRESETS={
  verify_references:{label:'Verify my references',ask:'Notes for the check (optional)',placeholder:'Anything the check should know, for example the field',bib:true,compose:(q,bib)=>'Check each reference below with the citation checker. Report which are verified, which differ from the published record and how, which were not found, and which are retracted. Do not add, remove or rewrite references.'+(q?'\n\nNotes: '+q:'')+'\n\nReferences:\n'+bib}
 };
 
-// The provider and model the Orchestrator will use: an override, or the routing default.
-function resolved(provider,model){
+// The provider, model and effort the Orchestrator will use: an override, or the routing default. The routing
+// effort goes with the routing's own provider and model and only when no effort is picked (the backend's rule),
+// so shownEffort says what will run while effort holds only what the user picked.
+function resolved(provider,model,effort){
  const route=P.routeFor('orchestrator');
- if(provider)return {provider,model:model||null,overridden:true};
- return {provider:route?.provider||null,model:model||route?.model||null,overridden:!!model};
+ const choice=provider?{provider,model:model||null,overridden:true}:{provider:route?.provider||null,model:model||route?.model||null,overridden:!!model};
+ const keeps=!effort&&!!route&&choice.provider===route.provider&&(choice.model||null)===(route.model||null);
+ return {...choice,effort:effort||null,shownEffort:effort||(keeps?route.effort||null:null),keepsRoute:keeps};
 }
 function defaultLabel(){const r=P.routeFor('orchestrator');return r?.provider?'Your default: '+P.title(r.provider)+(r.model?' · '+r.model:''):'Your default';}
 function fillProviders(value){
  const select=$('new-provider'),signature=JSON.stringify([defaultLabel(),P.list().map(p=>[p.name,p.title])]);
  if(select.dataset.signature!==signature){P.providerOptions(select,{value,defaultLabel:defaultLabel()});select.dataset.signature=signature;}
  select.value=[...select.options].some(o=>o.value===value)?value:'';
- syncModel();
 }
-function syncModel(){
- const provider=$('new-provider').value||P.routeFor('orchestrator')?.provider||'',input=$('new-model'),list=$('new-model-list');
- const p=P.get(provider);list.replaceChildren();for(const m of p?.models||[]){const o=document.createElement('option');o.value=m;list.append(o);}
- input.placeholder=!$('new-provider').value&&P.routeFor('orchestrator')?.model?'Default: '+P.routeFor('orchestrator').model:p?.default_model?'Default: '+p.default_model:'The provider’s default';
+// The model and effort dropdowns. The model control can swap its element when the provider's list arrives, so
+// both are always looked up again by id.
+let built=null,lastModel='';
+const modelNode=()=>$('new-model'),effortNode=()=>$('new-effort');
+const pickedProvider=()=>$('new-provider').value;
+function buildEffort(value){
+ effortNode()?.parentElement.remove();
+ const route=P.routeFor('orchestrator'),choice=resolved(pickedProvider(),modelNode()?.value.trim()||'','');
+ // The model the effort list belongs to: the routing's own, until another model is picked.
+ P.effortSelect($('new-model-slot'),{id:'new-effort',label:'Orchestrator effort (optional)',provider:choice.provider||'',model:choice.model||'',value,
+  defaultLabel:choice.keepsRoute&&route?.effort?'Default (your default: '+route.effort+')':undefined});
+ effortNode().onchange=()=>host.changed?.();
+}
+function buildModel(model){
+ const route=P.routeFor('orchestrator'),provider=pickedProvider()||route?.provider||'';
+ const node=P.modelInput($('new-model-slot'),{id:'new-model',label:'Orchestrator model (optional)',provider,value:model,
+  defaultLabel:!pickedProvider()&&route?.model?'Your default: '+route.model:undefined});
+ lastModel=model;
+ node.onchange=node.oninput=()=>{
+  const m=modelNode();m.setCustomValidity('');
+  if(m.value!==lastModel){lastModel=m.value;buildEffort('');}
+  host.changed?.();
+ };
+}
+function buildControls(model,effort){
+ $('new-model-slot').replaceChildren();buildModel(model);buildEffort(effort);
+ const r=P.routeFor('orchestrator');built=[pickedProvider(),r?.provider,r?.model,r?.effort].join('|');
+}
+// Builds the controls when the form opens, or again when the routing, the provider or a restored draft differs.
+function syncControls(d){
+ const r=P.routeFor('orchestrator'),key=[pickedProvider(),r?.provider,r?.model,r?.effort].join('|');
+ if(built!==key||modelNode()?.value!==(d.model||'')||effortNode()?.value!==(d.effort||''))buildControls(d.model||'',d.effort||'');
 }
 const radio=name=>document.querySelector('input[name='+name+']:checked')?.value||'';
 function setRadio(name,value){for(const r of document.querySelectorAll('input[name='+name+']'))r.checked=r.value===value;}
@@ -49,13 +79,13 @@ function message(){
 }
 
 // Draft fields, kept per desk project by app.js with the rest of the new-task draft.
-function read(){return {title:$('new-title').value,agentProject:$('new-agent-project').value,provider:$('new-provider').value,model:$('new-model').value,kind:kind(),preset:preset(),bib:$('new-bib').value};}
+function read(){return {title:$('new-title').value,agentProject:$('new-agent-project').value,provider:$('new-provider').value,model:modelNode()?.value||'',effort:effortNode()?.value||'',kind:kind(),preset:preset(),bib:$('new-bib').value};}
 function fill(d,nextState){
  state=nextState||state;
  const select=$('new-agent-project'),list=state?.projects||[],signature=JSON.stringify(list.map(p=>[p.id,p.name]));
  if(select.dataset.signature!==signature){select.replaceChildren();for(const p of list){const o=document.createElement('option');o.value=p.id;o.textContent=p.name;select.append(o);}select.dataset.signature=signature;}
  select.value=list.some(p=>p.id===d.agentProject)?d.agentProject:state.project_id||list[0]?.id||'';
- $('new-title').value=d.title||'';$('new-model').value=d.model||'';fillProviders(d.provider||'');
+ $('new-title').value=d.title||'';fillProviders(d.provider||'');syncControls(d);
  setRadio('new-kind',d.kind==='project'&&list.length?'project':d.kind==='research'||!list.length?'research':'project');
  setRadio('new-preset',PRESETS[d.preset]?d.preset:'question');$('new-bib').value=d.bib||'';
  sync();
@@ -78,7 +108,7 @@ function invalid(input,text){input.setCustomValidity(text);input.reportValidity(
 
 async function review(){
  if(loading||step)return;
- const titleInput=$('new-title'),modelInput=$('new-model'),goal=$('new-goal'),bib=$('new-bib');
+ const titleInput=$('new-title'),modelInput=modelNode(),goal=$('new-goal'),bib=$('new-bib');
  for(const i of [titleInput,modelInput,goal,bib])i.setCustomValidity('');
  const research=kind()==='research',p=PRESETS[preset()],question=goal.value.trim();
  if(research&&p.bib&&!bib.value.trim())return invalid(bib,'Paste the references to check.');
@@ -86,10 +116,12 @@ async function review(){
  const text=research?message():goal.value;
  if(research&&text.length>MAX_MESSAGE)return invalid(p.bib?bib:goal,'This is too long for one message ('+text.length.toLocaleString('en-US')+' of '+MAX_MESSAGE.toLocaleString('en-US')+' characters). Check fewer references at a time.');
  const fallback=research?(preset()==='question'?firstLine(question):p.label+(question?': '+firstLine(question):'')):firstLine(goal.value);
- const title=titleInput.value.trim()||Array.from(fallback).slice(0,160).join(''),model=modelInput.value.trim(),project_id=research?null:$('new-agent-project').value;
- const choice=resolved($('new-provider').value,model);
+ const title=titleInput.value.trim()||Array.from(fallback).slice(0,160).join(''),model=modelInput.value.trim(),effort=effortNode().value,project_id=research?null:$('new-agent-project').value;
+ const choice=resolved($('new-provider').value,model,effort);
  if(!title)return invalid(titleInput,'Give the task a title.');
  if(Array.from(title).length>160)return invalid(titleInput,'Use at most 160 characters.');
+ const gone=modelInput.tagName==='SELECT'&&modelInput.selectedOptions[0]?.textContent.endsWith('(not available)');
+ if(gone)return invalid(modelInput,model+' is not available on '+P.title(choice.provider||'')+'. Choose another model.');
  const problem=P.checkModel(choice.provider,model);if(problem)return invalid(modelInput,problem);
  if(!research&&!project_id)return;
  const desk=state.project_id;loading=true;formError='';host.refresh();
@@ -109,6 +141,7 @@ async function create(doc){
   // The backend applies routing.orchestrator itself (role 'orchestrator'); only what the user changed is sent.
   // A model typed for the default provider names that provider too, since the model is checked against it.
   if(s.overridden){if(s.provider)params.provider=s.provider;params.model=s.model;}
+  if(s.effort)params.effort=s.effort;
   const result=await host.request('agent_create',params,{manual:true});
   if(!result?.task_id)throw Error('The task could not be created.');
   if(step===s)step=null;
@@ -127,14 +160,14 @@ function render(nextState){
  const note=$('new-agent-scope-note');note.replaceChildren();
  note.append('“'+s.title+'” · '+(s.kind==='research'?(PRESETS[s.preset]?.label||'Research question')+', no project':projectName(s.project_id))+' · Orchestrator on ');
  if(s.provider)P.badge(s.provider,note);else note.append('your default provider');
- note.append((s.model?' · '+s.model:' · default model')+(s.overridden?'':' (from your defaults)')+'. '+(s.kind==='research'
+ note.append((s.model?' · '+s.model:' · default model')+(s.shownEffort?' · '+s.shownEffort+' effort':'')+(s.overridden||s.effort?'':' (from your defaults)')+'. '+(s.kind==='research'
   ?'This is the starting scope: research sources only, with no project, files, commands or network. Subagents the Orchestrator proposes only read, inside it.'
   :'This is the starting scope: the project workspace only, no network. Subagents the Orchestrator proposes work inside it.')+' Change it here; after Create task, approve it on the task before the first message.');
  $('new-agent-error').textContent=s.error;
  if(editor.dataset.step!==String(s.id)){editor.dataset.step=String(s.id);Scope.editor(editor,{scope:s.scope},{projectName,heading:'Review scope',note:'Nothing is created until you choose Create task.',submitLabel:'Create task',closeLabel:'Back',saving:s.saving,onSave:create,onClose:back});}
  const submit=editor.querySelector('button[type=submit]');if(submit)submit.disabled=s.saving;
 }
-window.interspaceAgentNew={init(options){host=options;$('new-provider').addEventListener('change',syncModel);
+window.interspaceAgentNew={init(options){host=options;$('new-provider').addEventListener('change',()=>{buildControls('','');host.changed?.();});
  for(const r of document.querySelectorAll('input[name=new-kind],input[name=new-preset]'))r.addEventListener('change',()=>{host.changed?.();sync();host.refresh();});
  for(const id of ['new-goal','new-bib'])$(id).addEventListener('input',()=>{$(id).setCustomValidity('');sync();});},
  render,review,read,fill,sync,reviewing:()=>!!(step&&state&&step.desk===state.project_id)};

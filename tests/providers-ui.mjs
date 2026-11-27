@@ -177,33 +177,53 @@ export default async function check(page,url){
  assert(await page.locator('#new-runtime').count()===0,'Old runtime picker still present');
  await page.waitForFunction(()=>document.querySelector('#new-provider option')?.textContent==='Your default: Claude · claude-opus-5-5');
  assert(await page.locator('#new-provider').inputValue()==='','Default not selected');
- assert(await page.locator('#new-model').getAttribute('placeholder')==='Default: claude-opus-5-5','Model placeholder does not show the default');
+ await page.waitForFunction(()=>document.querySelector('select#new-model')&&document.querySelector('select#new-effort'));
+ assert((await page.locator('#new-model option:checked').textContent())==='Your default: claude-opus-5-5'&&await page.locator('#new-datalist,#new-model-list').count()===0,'Model dropdown does not show the default');
+ assert((await page.locator('#new-effort option:checked').textContent())==='Default (your default: high)','Effort default not shown: '+await page.locator('#new-effort option:checked').textContent());
  await page.locator('#new-title').fill('Default orchestrator');
  await page.getByRole('button',{name:'Review scope',exact:true}).click();
  await page.waitForFunction(()=>document.querySelector('#new-agent-scope .scope-editor'));
- assert((await text(page.locator('#new-agent-scope-note'))).includes('Orchestrator on Claude · claude-opus-5-5 (from your defaults)'),'Scope note misses the Orchestrator: '+await text(page.locator('#new-agent-scope-note')));
+ assert((await text(page.locator('#new-agent-scope-note'))).includes('Orchestrator on Claude · claude-opus-5-5 · high effort (from your defaults)'),'Scope note misses the Orchestrator: '+await text(page.locator('#new-agent-scope-note')));
  await page.getByRole('button',{name:'Create task',exact:true}).click();
  await page.waitForFunction(()=>!document.querySelector('#agent-view').hidden);
  let creates=await req('agent_create');
  // Routing defaults are applied by the backend: without an override nothing names a provider or model.
- assert(creates.length===1&&!('provider' in creates[0])&&!('model' in creates[0])&&!('role' in creates[0])&&creates[0].title==='Default orchestrator','Default create params: '+JSON.stringify(creates));
+ assert(creates.length===1&&!('provider' in creates[0])&&!('model' in creates[0])&&!('effort' in creates[0])&&!('role' in creates[0])&&creates[0].title==='Default orchestrator','Default create params: '+JSON.stringify(creates));
  assert((await text(page.locator('#agent-head'))).includes('Orchestrator on Claude · claude-opus-5-5'),'Header misses the Orchestrator provider');
- // Override with a free-text model on a provider without a model list; a list provider refuses other names.
+ // Picking an effort sends it alone; another model resets the effort to Default; a provider change clears both.
+ await page.getByRole('button',{name:'New task',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelector('select#new-effort'));
+ await page.locator('#new-title').fill('Max effort');
+ await page.locator('#new-effort').selectOption('max');
+ await page.locator('#new-model').selectOption('claude-haiku-5-5');
+ assert(await page.locator('#new-effort').inputValue()==='','Effort kept after another model');
+ assert((await page.locator('#new-effort option:checked').textContent())==='Default (low)','Default label for a different model: '+await page.locator('#new-effort option:checked').textContent());
+ await page.locator('#new-model').selectOption('');
+ assert((await page.locator('#new-effort option:checked').textContent())==='Default (your default: high)','Routing default not restored');
+ await page.locator('#new-effort').selectOption('max');
+ await page.getByRole('button',{name:'Review scope',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelector('#new-agent-scope .scope-editor'));
+ assert((await text(page.locator('#new-agent-scope-note'))).includes('Claude · claude-opus-5-5 · max effort.'),'Note misses the picked effort: '+await text(page.locator('#new-agent-scope-note')));
+ await page.getByRole('button',{name:'Create task',exact:true}).click();
+ await page.waitForFunction(()=>!document.querySelector('#agent-view').hidden);
+ creates=await req('agent_create');
+ assert(creates.length===2&&creates[1].effort==='max'&&!('provider' in creates[1])&&!('model' in creates[1]),'Effort create params: '+JSON.stringify(creates[1]));
+ // Override the provider: its own models in a dropdown, effort back to Default.
  await page.getByRole('button',{name:'New task',exact:true}).click();
  await page.locator('#new-title').fill('Codex orchestrator');
- await page.locator('#new-provider').selectOption('claude');await page.locator('#new-model').fill('gpt-5');
- await page.getByRole('button',{name:'Review scope',exact:true}).click();
- assert((await req('scope_default')).length===1,'Model outside the provider list accepted');
+ await page.locator('#new-effort').selectOption('high');
  await page.locator('#new-provider').selectOption('codex');
- assert((await page.locator('#new-model').getAttribute('placeholder'))==='The provider’s default','Placeholder not updated for the override');
- await page.locator('#new-model').fill('codex-fixture-2');
+ await page.waitForFunction(()=>[...document.querySelectorAll('#new-model option')].some(o=>o.value==='codex-fixture-2'));
+ assert(JSON.stringify(await page.locator('#new-model option').evaluateAll(o=>o.map(x=>x.value)))===JSON.stringify(['','codex-fixture-1','codex-fixture-2']),'Codex models not offered');
+ assert(await page.locator('#new-model').inputValue()===''&&await page.locator('#new-effort').inputValue()==='','Provider change kept model or effort');
+ await page.locator('#new-model').selectOption('codex-fixture-2');
  await page.getByRole('button',{name:'Review scope',exact:true}).click();
  await page.waitForFunction(()=>document.querySelector('#new-agent-scope .scope-editor'));
  assert(!(await text(page.locator('#new-agent-scope-note'))).includes('from your defaults'),'Override labelled as a default');
  await page.getByRole('button',{name:'Create task',exact:true}).click();
  await page.waitForFunction(()=>!document.querySelector('#agent-view').hidden);
  creates=await req('agent_create');
- assert(creates.length===2&&creates[1].provider==='codex'&&creates[1].model==='codex-fixture-2','Override create params: '+JSON.stringify(creates[1]));
+ assert(creates.length===3&&creates[2].provider==='codex'&&creates[2].model==='codex-fixture-2'&&!('effort' in creates[2]),'Override create params: '+JSON.stringify(creates[2]));
  await page.locator('[data-view=tasks]').click();
  assert((await text(page.locator('#desk-tasks'))).includes('Orchestrator on Codex · codex-fixture-2'),'Desk row misses the override');
 

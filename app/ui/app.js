@@ -118,7 +118,7 @@ document.querySelectorAll('[data-task-tab]').forEach(b=>b.onclick=()=>{taskTab=b
 $('new-task').onclick=()=>navigate('new');$('back-tasks').onclick=()=>navigate('tasks');
 $('new-goal').oninput=saveNew;
 $('new-task-form').onsubmit=e=>{e.preventDefault();window.interspaceAgentNew.review();};
-for(const id of ['new-title','new-model'])$(id).oninput=()=>{$(id).setCustomValidity('');saveNew();};
+$('new-title').oninput=()=>{$('new-title').setCustomValidity('');saveNew();};
 for(const id of ['new-agent-project','new-provider'])$(id).addEventListener('change',saveNew);
 $('new-bib').addEventListener('input',saveNew);
 window.interspaceAgentNew.init({request,refresh:()=>{if(state&&view==='new')renderNew();},changed:saveNew,created:agentCreated});

@@ -107,16 +107,17 @@ export default async function check(page,url){
   const newAgent=async(title,provider,model,goal)=>{
    await page.getByRole('button',{name:'New task',exact:true}).click();
    assert(await page.locator('#new-agent-fields').isVisible()&&await page.locator('#new-mode').count()===0,'Agent fields not shown');
-   await page.locator('#new-title').fill(title);await page.locator('#new-provider').selectOption(provider);await page.locator('#new-model').fill(model);
+   await page.locator('#new-title').fill(title);await page.locator('#new-provider').selectOption(provider);if(model){await page.waitForFunction(m=>[...document.querySelectorAll('#new-model option')].some(o=>o.value===m),model);await page.locator('#new-model').selectOption(model);}
    if(goal)await page.locator('#new-goal').fill(goal);
    await page.getByRole('button',{name:'Review scope',exact:true}).click();
    await until(()=>page.locator('#new-agent-scope .scope-editor').isVisible(),'the scope editor');
    assert(await page.locator('#new-task-form').isHidden(),'Form still shown during scope review');
   };
   await page.getByRole('button',{name:'New task',exact:true}).click();
-  await page.locator('#new-model').fill('bad model');await page.locator('#new-title').fill('Bad');
+  // The model and effort are dropdowns that offer only what the provider lists; a title is still required.
+  await page.waitForFunction(()=>document.querySelector('select#new-model')&&document.querySelector('select#new-effort'));
   await page.getByRole('button',{name:'Review scope',exact:true}).click();
-  assert(calls('scope_default').length===0,'Invalid model reached the backend');
+  assert(calls('scope_default').length===0,'A task without a title reached the backend');
   await page.locator('[data-view=tasks]').click();
 
   await newAgent('Fix the parser','','','Please ask before reading parser.py');

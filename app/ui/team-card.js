@@ -73,8 +73,9 @@ function memberEditor(ctx,team,d,m,label,list,locked){
   const sync=()=>{const w=access.querySelector('option[value=write]');const can=!research&&(!P.get(m.provider)||P.canWrite(m.provider));w.disabled=!can;w.textContent=can?ACCESS.write:research?ACCESS.write+' (not in a research task)':ACCESS.write+' (not available on '+P.title(m.provider)+')';if(!can&&m.access==='write')m.access='read';access.value=m.access==='write'?'write':'read';};
   sync();
   const remark=()=>head.querySelector('.marker').replaceWith(marker(proposed,m));
-  provider.onchange=()=>{m.provider=provider.value;model.setProvider(provider.value);if(model.value&&P.checkModel(m.provider,model.value)){model.value='';m.model=null;}sync();head.querySelector('.provider-badge').replaceWith(P.badge(m.provider));remark();};
-  model.oninput=()=>{model.setCustomValidity('');m.model=model.value.trim()||null;remark();};
+  // A model belongs to its provider, so a new provider starts at Default; the model control is always looked up again because its list can swap it.
+  provider.onchange=()=>{m.provider=provider.value;m.model=null;const cur=box.querySelector('.member-model');cur.value='';cur.setCustomValidity('');cur.setProvider(provider.value);sync();head.querySelector('.provider-badge').replaceWith(P.badge(m.provider));remark();};
+  model.onchange=model.oninput=()=>{const cur=box.querySelector('.member-model');cur.setCustomValidity('');m.model=cur.value.trim()||null;remark();};
   access.onchange=()=>{m.access=access.value;remark();};
  }
  if(!locked){const b=el('button','quiet',removed?'Keep':'Remove',box);b.type='button';b.setAttribute('aria-label',(removed?'Keep ':'Remove ')+label);b.onclick=()=>{if(removed)d.removed.delete(m.member_id);else d.removed.add(m.member_id);ctx.bump();};}

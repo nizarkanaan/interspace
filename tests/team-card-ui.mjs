@@ -28,6 +28,7 @@ export default async function check(page,url){
    let result={};
    if(r.method==='state')result=state();
    else if(r.method==='providers_list')result=providers;
+   else if(r.method==='provider_models'){const eff=['low','medium','high','xhigh','max'],m={claude:['claude-sonnet-5-5','claude-opus-5-5','claude-haiku-5-5'],codex:['codex-fixture-1','codex-fixture-2']}[p.provider]||[];result={provider:p.provider,models:m.map((id,i)=>({id,is_default:i===0,default_effort:'low',efforts:eff})),error:m.length?'':'Models are not listed for this provider.'};}
    else if(r.method==='task_events'){const events=(f.history[p.task_id]||[]).filter(e=>e.seq>p.after_seq);result={events,last_seq:events.length?events.at(-1).seq:p.after_seq,complete:true};}
    else if(r.method==='scope_get')result={scope:{...scope,task_id:p.task_id},scope_digest:'sha256:aa',scope_approval:{v:1,scope_version:1,scope_digest:'sha256:aa',approved_at:'2026-11-15T09:00:00.000Z',by:'user'}};
    else if(r.method==='team_answer')result={status:p.decision==='approve'?'approved':'declined'};
@@ -78,17 +79,29 @@ export default async function check(page,url){
  await card.getByLabel('Implementer provider').selectOption('claude');
  await card.getByLabel('Implementer access').selectOption('write');
 
- // Edits: provider, model and brief, and a removed member. A bad model is caught before anything is sent.
+ // Model dropdowns: Default plus the provider's own models, refilled when the provider changes, and no effort control.
+ const options=async label=>card.getByLabel(label).locator('option').evaluateAll(o=>o.map(x=>x.value));
+ assert(await card.locator('select.member-model').count()===2,'Member models are not dropdowns: '+await card.locator('select.member-model').count());
+ assert(JSON.stringify(await options('Implementer model'))===JSON.stringify(['','claude-sonnet-5-5','claude-opus-5-5','claude-haiku-5-5']),'Claude list wrong: '+await options('Implementer model'));
+ assert(JSON.stringify(await options('Researcher model'))===JSON.stringify(['','codex-fixture-1','codex-fixture-2']),'Codex list wrong: '+await options('Researcher model'));
+ assert(await card.locator('input.member-model').count()===1,'Provider without a list does not keep the typed box');
+ assert(await card.locator('.team-member [id$=-effort],.team-member label:text-matches("effort","i")').count()===0,'Effort control on the team card');
+ // Edits: provider, model and brief, and a removed member. A provider change clears the model.
+ await card.getByLabel('Implementer model').selectOption('claude-haiku-5-5');
+ await card.getByLabel('Implementer provider').selectOption('codex');
+ await page.waitForFunction(()=>[...document.querySelectorAll('#agent-view select.member-model')].some(s=>s.id.endsWith('-model')&&[...s.options].some(o=>o.value==='codex-fixture-2')&&s.value===''));
+ assert(await card.getByLabel('Implementer model').inputValue()===''&&!(await card.getByLabel('Implementer model').locator('option:checked').textContent()).includes('not available'),'Model kept across a provider change');
+ await card.getByLabel('Implementer provider').selectOption('claude');
+ await page.waitForFunction(()=>[...document.querySelectorAll('#agent-view select.member-model')].some(s=>[...s.options].some(o=>o.value==='claude-haiku-5-5')));
+ await card.getByLabel('Implementer model').selectOption('claude-sonnet-5-5');
  await card.getByLabel('Researcher provider').selectOption('claude');
- await card.getByLabel('Researcher model').fill('not-a-claude-model');
+ await page.waitForFunction(()=>[...document.querySelectorAll('#agent-view select.member-model')].filter(s=>[...s.options].some(o=>o.value==='claude-haiku-5-5')).length===2);
+ assert(await card.getByLabel('Researcher model').inputValue()==='','Researcher model not reset to Default');
  await card.getByLabel('Implementer brief').fill('Add input validation to parse()\nwith tests');
  await card.getByRole('button',{name:'Remove Reviewer',exact:true}).click();
  assert((await text(card)).includes('Removed')&&await card.getByRole('button',{name:'Keep Reviewer',exact:true}).count()===1,'Removed member not marked');
  assert(await card.getByLabel('Implementer brief').inputValue()==='Add input validation to parse()\nwith tests','Edit lost after a rebuild');
- await card.getByRole('button',{name:'Approve team',exact:true}).click();
- assert((await req('team_answer')).length===0,'Invalid model reached the backend');
- assert((await text(card)).includes('claude-haiku-5-5'),'Model choices not explained');
- await card.getByLabel('Researcher model').fill('claude-haiku-5-5');
+ await card.getByLabel('Researcher model').selectOption('claude-haiku-5-5');
  await card.getByRole('button',{name:'Approve team',exact:true}).click();
  const answers=await req('team_answer');
  const expected={task_id:'T',team_id:'team1',decision:'approve',members:[{member_id:'m1',role:'researcher',brief:'Map the parser code',provider:'claude',model:'claude-haiku-5-5',access:'read'},{member_id:'m2',role:'implementer',brief:'Add input validation to parse()\nwith tests',provider:'claude',model:'claude-sonnet-5-5',access:'write'}]};
