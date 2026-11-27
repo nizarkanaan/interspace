@@ -300,8 +300,8 @@ const LONG=600,PREVIEW={message:240,reply:300};
 // crosses it keeps showing, clamped to 3 lines (.is-cut), with its links out of the tab order, and a list that crosses
 // it is cut per item. A cut item clamps its text in an inner box, so it keeps its bullet or number. A table that
 // crosses it is cut per row instead (a clamp would break its layout): its header and first body row always show, a
-// later row that starts past the cut is hidden, and the links in the rows shown stay reachable. Returns whether
-// anything was cut.
+// later row that starts past the cut is hidden, and the links in the rows shown stay reachable; a table with no row
+// past the cut is not cut. Returns whether anything was cut.
 function cut(box,limit){
  let total=0,cutting=false;
  const walk=node=>{
@@ -311,8 +311,11 @@ function cut(box,limit){
   if(node.matches('ul,ol')){for(const li of node.children)walk(li);return;}
   if(node.matches('.table-wrap')){
    total+=node.querySelector('thead')?.textContent.length||0;
-   [...(node.querySelector('tbody')?.rows||[])].forEach((tr,i)=>{if(i&&total>=limit)tr.hidden=true;else total+=tr.textContent.length;});
-   node.classList.add('is-cut');cutting=true;return;
+   let hid=false;
+   [...(node.querySelector('tbody')?.rows||[])].forEach((tr,i)=>{if(i&&total>=limit){tr.hidden=true;hid=true;}else total+=tr.textContent.length;});
+   // A table whose rows all start before the cut shows whole and cuts nothing: the blocks after it are still hidden.
+   if(hid){node.classList.add('is-cut');cutting=true;}
+   return;
   }
   if(node.tagName==='LI'){const text=el('div','cut-text');text.append(...node.childNodes);node.append(text);}
   node.classList.add('is-cut');for(const a of node.querySelectorAll('a'))a.tabIndex=-1;total+=n;cutting=true;

@@ -211,11 +211,43 @@ export default async function check(page,url){
  {const t=await page.evaluate(()=>{const w=document.querySelector('#agent-report .table-wrap'),t=w.querySelector('table'),text=document.querySelector('#agent-report .reader-text');
    return {wrap:[w.scrollWidth,w.clientWidth],table:Math.round(t.getBoundingClientRect().width),text:Math.round(text.getBoundingClientRect().width),rows:Math.round(t.tBodies[0].rows[0].getBoundingClientRect().height),page:document.documentElement.scrollWidth<=innerWidth};});
   assert(t.wrap[0]<=t.wrap[1]&&t.table<=t.text&&t.rows>40&&t.page,'Table at 1440x900 needs a sideways scroll or does not wrap: '+JSON.stringify(t));}
+ // Words in table cells that wrap across two lines (ordinary words only: a token over 24 characters may break).
+ const brokenWords=()=>page.evaluate(()=>{const out=[];for(const c of document.querySelectorAll('#agent-report .md-table th,#agent-report .md-table td')){
+  const w=document.createTreeWalker(c,NodeFilter.SHOW_TEXT);while(w.nextNode()){const n=w.currentNode;for(const m of n.nodeValue.matchAll(/\S+/g)){if(m[0].length>24)continue;
+   const r=document.createRange();r.setStart(n,m.index);r.setEnd(n,m.index+m[0].length);if(new Set([...r.getClientRects()].map(x=>Math.round(x.top))).size>1)out.push(m[0]);}}}return out;});
+ assert(!(await brokenWords()).length,'Words broken inside table cells at 1440x900: '+JSON.stringify(await brokenWords()));
  for(const width of [320,390,600]){await page.setViewportSize({width,height:900});await page.waitForFunction(()=>!document.querySelector('#agent-view.split'));
   const r=await page.evaluate(()=>({shown:!!document.querySelector('#agent-report .table-wrap')?.getClientRects().length,page:document.documentElement.scrollWidth,width:innerWidth}));
   assert(r.shown&&r.page<=r.width,'Table report overflows at '+width+': '+JSON.stringify(r));}
+
+ // References written as numbered lines with no blank line between them ("[1] …\n[2] …", as agents write them) are one
+ // reference each, so every citation links, those in a table's first column too, and Show in text finds them; a
+ // wrapped entry's next line stays with its entry. A long unbroken token in a cell (a DOI) wraps inside its column, so at
+ // 1440x900 the table still needs no sideways scroll.
+ const LONG_DOI='10.5555/'+'x'.repeat(192);
+ const LINES_REPORT='# Gains as reported\n\nThe gains below are as the authors state them [1].\n\n| Ref | Method | Source |\n|---|---|---|\n'+
+  '| [3] | Transfer learning between slices | '+LONG_DOI+' |\n| [2] | Federated learning across two xApps | arXiv |\n| [5] | A method nobody checked | none |\n\n## References\n'+
+  ['[1] Example, A. (2019). Emergency call fallback across mobile operators in practice. doi:10.5555/fb.1',
+   '[2] Sample, B. (2021). Measuring 112 call recovery after network outages.','    arXiv:2101.00001',
+   '[3] Wakefield, A. (1998). A retracted study of call routing reliability that was withdrawn. doi:10.5555/retracted',
+   '[4] Nobody, C. (2031). An invented paper about network fallback timing.',
+   '[5] Unknown, D. (2015). A paper the agents never searched for at all, about outages.'].join('\n')+'\n';
+ await page.setViewportSize({width:1440,height:900});
+ await page.waitForFunction(()=>document.querySelector('#agent-view.split'));
+ await page.evaluate(t=>{window.rFixture.readable.r1['report.md']=t;},LINES_REPORT);
+ await push(page,[ev('r1','outputs',{outputs:[{name:'report.md',kind:'report',bytes:1500}]})]);
+ await page.waitForFunction(()=>document.querySelector('#agent-report .reader-text')?.textContent.includes('A method nobody checked'));
+ assert(await reader.locator('.report-reference').count()===5&&(await text(reader.locator('.reader-summary')))==='5 references: 1 verified, 1 retracted, 1 not verified, 1 not checked, 1 not in the corpus.','Numbered reference lines: '+await text(reader.locator('.reader-summary')));
+ assert((await text(reader.locator('#report-ref-2'))).includes('arXiv:2101.00001')&&!(await text(reader.locator('#report-ref-1'))).includes('Sample, B.'),'Wrapped reference line: '+await text(reader.locator('#report-ref-2')));
+ {const first=await reader.locator('.md-table').evaluate(t=>[...t.tBodies[0].rows].map(r=>[...r.cells[0].querySelectorAll('.cite-link')].map(a=>[a.textContent,a.getAttribute('href'),a.dataset.claim])));
+  assert(JSON.stringify(first)===JSON.stringify([[['3','#report-ref-3','3:1']],[['2','#report-ref-2','2:1']],[['5','#report-ref-5','5:1']]]),'Citations in the first column with line references: '+JSON.stringify(first));}
+ await reader.locator('.claim-item').getByRole('link',{name:'Show in text'}).click();
+ assert(await page.evaluate(()=>document.activeElement?.dataset.claim==='3:1'&&!!document.activeElement.closest('td')),'Show in text with line references');
+ {const t=await page.evaluate(()=>{const w=document.querySelector('#agent-report .table-wrap'),cols=[...w.querySelector('tbody tr').cells].map(c=>Math.round(c.getBoundingClientRect().width));
+   return {wrap:[w.scrollWidth,w.clientWidth],cols,page:document.documentElement.scrollWidth<=innerWidth};});
+  assert(t.wrap[0]<=t.wrap[1]&&Math.min(...t.cols)>=40&&t.page,'A long DOI in a cell needs a sideways scroll at 1440x900: '+JSON.stringify(t));}
  await page.setViewportSize({width:1280,height:1000});
  assert(!errors.length,'Page errors: '+errors.join('; '));
  assert(!(await page.evaluate(()=>window.pwned)),'Script ran');
- return {checks:'Read opens the Report tab (no inline report view), verdicts in words from the corpus, summary, literal text, citation links incl. lists and ranges, unknown brackets kept, keyboard jump and Back to text, Save, refetch on change, no sideways scroll; Focus: button on the results tab row only in the split reader, hides the conversation and the sidebar, results at least 90% wide, every tab, Esc and Exit focus, sidebar state kept and nothing saved, needs-you banner from the live task state with an always-present live region and Go to conversation to the team card, sidebar toggle never saves a fitted split width, leaving the task exits Focus; a report with a Markdown table: citations in its cells (first column included) linked in reading order with claim ids, references, verdicts and summary unchanged, a claim verdict on a cell citation, Show in text and Back to text to a cell, four long columns wrapping without a sideways scroll at 1440x900, no page overflow at 320/390/600'};
+ return {checks:'Read opens the Report tab (no inline report view), verdicts in words from the corpus, summary, literal text, citation links incl. lists and ranges, unknown brackets kept, keyboard jump and Back to text, Save, refetch on change, no sideways scroll; Focus: button on the results tab row only in the split reader, hides the conversation and the sidebar, results at least 90% wide, every tab, Esc and Exit focus, sidebar state kept and nothing saved, needs-you banner from the live task state with an always-present live region and Go to conversation to the team card, sidebar toggle never saves a fitted split width, leaving the task exits Focus; a report with a Markdown table: citations in its cells (first column included) linked in reading order with claim ids, references, verdicts and summary unchanged, a claim verdict on a cell citation, Show in text and Back to text to a cell, four long columns wrapping between words without a sideways scroll at 1440x900, no page overflow at 320/390/600; references as numbered [n] lines with no blank line between them each a reference (a wrapped line kept with its entry), linking the first column’s citations, Show in text to a cell, and a long DOI in a cell wrapping with no sideways scroll at 1440x900'};
 }

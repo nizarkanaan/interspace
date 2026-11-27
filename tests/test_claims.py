@@ -56,6 +56,47 @@ class SplitTests(unittest.TestCase):
         self.assertEqual(claims.references(plain), {2: 'Second entry.', 7: 'Seventh.'})
         self.assertEqual(claims.split('No references here [1].'), [])
 
+    def test_each_table_row_is_its_own_sentence(self):
+        refs = ''.join('%d. Author %s. (2020). Paper number %d about the topic.\n' % (n, 'ABCDE'[n - 1], n) for n in range(1, 6))
+        text = ('# Gains\n\nThe gains are as the authors state them [1].\n'
+                '| Ref | Method | Result |\n|:--|---|--:|\n'
+                '| [2] | Federated **learning**. Two agents coordinate. | Higher throughput. Lower delay. |\n'
+                '| [3] | Transfer \\| reuse | Lower delay, as in [2] |\n'
+                '[4], [5] | Constrained methods | Fewer violations | an extra cell [1] |\n'
+                'After the table [1].\n\n'
+                'a | b [3]\nc | d\n\n'
+                '## References\n\n' + refs)
+        found = claims.split(text)
+        # The reader's numbering: rows in order, cells left to right, a cell past the header's count not shown.
+        self.assertEqual([c['id'] for c in found], ['1:1', '2:1', '3:1', '2:2', '4:1', '5:1', '1:2', '3:2'])
+        sentences = [c['sentence'] for c in found]
+        self.assertEqual(sentences[0], 'The gains are as the authors state them [1].')
+        self.assertEqual(sentences[1], '[2] · Federated learning. Two agents coordinate. · Higher throughput. Lower delay.')
+        self.assertEqual(sentences[2], '[3] · Transfer | reuse · Lower delay, as in [2]')
+        self.assertEqual(sentences[3], sentences[2])
+        self.assertEqual(sentences[4], '[4], [5] · Constrained methods · Fewer violations')
+        self.assertEqual(sentences[5], sentences[4])
+        self.assertEqual(sentences[6], 'After the table [1].')
+        self.assertEqual(sentences[7], 'a | b [3] c | d')  # Pipes without a delimiter row are text, as in the reader.
+
+    def test_a_long_table_gives_every_row_its_own_claim(self):
+        rows = ''.join('| [%d] | Method %d with a long description of what it does and how | Gain of %d%% over the baseline |\n'
+                       % (n, n, n) for n in range(1, 21))
+        refs = ''.join('[%d] Author. (2020). Paper number %d about the topic.\n' % (n, n) for n in range(1, 21))
+        text = '# Gains\n\n| Ref | Method | Gain |\n|---|---|---|\n' + rows + '\n## References\n' + refs
+        found = claims.split(text)
+        self.assertEqual([c['id'] for c in found], ['%d:1' % n for n in range(1, 21)])
+        self.assertEqual(len({c['sentence'] for c in found}), 20)
+        self.assertEqual(found[19]['sentence'], '[20] · Method 20 with a long description of what it does and how · Gain of 20% over the baseline')
+        self.assertFalse(any('|' in c['sentence'] or '---' in c['sentence'] or 'Ref' in c['sentence'] for c in found))
+
+    def test_ids_match_the_reader_for_the_table_report_in_reader_ui(self):
+        text = ('# Gains as reported\n\nThe gains below are as the authors state them [1].\n\n| Ref | Method | Evaluation | Headline result |\n'
+                '|---|---|---|---|\n| [2] | Federated | Simulation | Higher throughput |\n| [3] | Transfer | Simulation | Lower delay, as in [2] |\n'
+                '| [4], [5] | Constrained | Testbed | Fewer violations |\n\n## References\n\n'
+                + ''.join('%d. Author. (2020). Paper number %d about the topic.\n' % (n, n) for n in range(1, 6)))
+        self.assertEqual([c['id'] for c in claims.split(text)], ['1:1', '2:1', '3:1', '2:2', '4:1', '5:1'])  # As tests/reader-ui.mjs.
+
 
 class CheckTests(unittest.TestCase):
     def started(self):

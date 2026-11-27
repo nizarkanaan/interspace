@@ -30,6 +30,11 @@ SENTENCE_END = re.compile(r'(?<=[.?!])\s+(?=["“(\[]?[A-Z])')
 ABBREVIATIONS = ('et al.', 'e.g.', 'i.e.', 'cf.', 'Fig.', 'fig.', 'vs.', 'Eq.', 'No.')
 DOI = re.compile(r'10\.\d{4,9}/[^\s"<>]+', re.I)
 ARXIV = re.compile(r'arxiv[:\s/]*(\d{4}\.\d{4,5})', re.I)
+# Pipe tables, found as the reader finds them (app/ui/research-cards.js markdown()): a delimiter cell, and the lines that
+# end a table's body (a fence, heading, quote or list item).
+TABLE_DELIMITER = re.compile(r'^:?-+:?$')
+TABLE_END = re.compile(r'^(?:```|#{1,6}\s|>|\s*(?:[-*+]|\d+[.)])\s)')
+ROW_JOIN = ' · '
 
 
 def report_hash(text):
@@ -82,10 +87,42 @@ def report_problem(text):
     return None
 
 
+def _cells(line):
+    """A table row's cells, or None when the line has no unescaped pipe: one outer pipe on each side is dropped, the rest
+    is split on unescaped pipes and trimmed, and \\| is a literal pipe (research-cards.js cells())."""
+    s = line.strip()
+    if not re.search(r'(?:^|[^\\])\|', s):
+        return None
+    if s.startswith('|'):
+        s = s[1:]
+    if s.endswith('|') and not s.endswith('\\|'):
+        s = s[:-1]
+    return [cell.replace('\\|', '|').strip() for cell in re.split(r'(?<!\\)\|', s)]
+
+
+def _table_at(lines, i):
+    """The rows of the pipe table whose header row is lines[i] (header first, each cut to the header's cells, as the
+    reader shows them) and the index of the line after it; or None when lines[i] does not start a table."""
+    head = None if lines[i].startswith('>') else _cells(lines[i])
+    delimiter = _cells(lines[i + 1]) if head and i + 1 < len(lines) else None
+    if not delimiter or len(delimiter) != len(head) or not all(TABLE_DELIMITER.match(c) for c in delimiter):
+        return None
+    rows, end = [head], i + 2
+    while end < len(lines) and not TABLE_END.match(lines[end]) and _cells(lines[end]) is not None:
+        rows.append(_cells(lines[end])[:len(head)])
+        end += 1
+    return rows, end
+
+
 def _body_paragraphs(text):
-    """The report's reading text before its References heading, without code, one entry per paragraph or item."""
+    """The report's reading text before its References heading, without code: [(text, row)], one entry per paragraph,
+    item or table row. A table row (its header row too) is its non-empty cells joined by ' · ', with row True: it is
+    one sentence, so each row's claims get that row, not the whole table's markup."""
     out, block, fenced = [], [], False
-    for line in text.split('\n'):
+    lines, i = text.split('\n'), 0
+    while i < len(lines):
+        line = lines[i]
+        i += 1
         if FENCE.match(line):
             fenced = not fenced
             continue
@@ -95,14 +132,22 @@ def _body_paragraphs(text):
             break
         if not line.strip() or ITEM.match(line) or re.match(r'^\s{0,3}#{1,6}\s', line):
             if block:
-                out.append(' '.join(block))
+                out.append((' '.join(block), False))
             block = []
             if line.strip():
                 block = [ITEM.match(line).group(1) if ITEM.match(line) else re.sub(r'^\s{0,3}#{1,6}\s+', '', line)]
             continue
+        table = _table_at(lines, i - 1)
+        if table:
+            if block:
+                out.append((' '.join(block), False))
+            block = []
+            rows, i = table
+            out.extend((ROW_JOIN.join(cell for cell in row if cell), True) for row in rows)
+            continue
         block.append(line.strip())
     if block:
-        out.append(' '.join(block))
+        out.append((' '.join(block), False))
     return out
 
 
@@ -123,8 +168,8 @@ def split(text):
     """Claims from a report: [{id, n, k, sentence, reference}] in reading order, at most MAX_CLAIMS."""
     refs = references(text)
     counts, claims = {}, []
-    for paragraph in _body_paragraphs(text):
-        for sentence in _sentences(paragraph):
+    for paragraph, row in _body_paragraphs(text):
+        for sentence in [paragraph] if row else _sentences(paragraph):
             scan = CODE.sub(' ', LINK.sub(' ', sentence))
             for group in CITE.finditer(scan):
                 for token in re.findall(r'\d+', group.group(1)):

@@ -196,9 +196,10 @@ function inline(text,parent){
 }
 // Pipe tables (a GFM subset): a line with an unescaped | over a delimiter row (cells of ---, :--, :-: or --: split by
 // |, one per header cell) starts a table, even right after a paragraph or a list. Body rows follow until a blank line,
-// a line with no unescaped |, or a fence, heading or quote, which then renders as usual. A short row gets empty cells
-// and a long one loses its extra cells. Cells go through inline(), so they stay text-safe; alignment is a class.
-const DELIMITER=/^:?-+:?$/,BLOCK=/^(```|#{1,6}\s|>)/;
+// a line with no unescaped |, or a fence, heading, quote or list item, which then renders as usual. A short row gets
+// empty cells and a long one loses its extra cells. Cells go through inline(), so they stay text-safe; alignment is a
+// class.
+const DELIMITER=/^:?-+:?$/,BLOCK=/^(```|#{1,6}\s|>|\s*(?:[-*+]|\d+[.)])\s)/;
 // A row's cells, or null when the line has no unescaped |: one outer pipe on each side is dropped, the rest is split
 // on unescaped pipes and trimmed, and \| is a literal |.
 function cells(line){
@@ -233,7 +234,9 @@ function table(lines,i,head,align,box){
   row('td',r,body||(body=el('tbody','',null,t)));
  }
  const names=[...top.cells].map(c=>c.textContent.trim()).filter(Boolean).join(', '),label='Table'+(names?': '+names:'');
- wrap.tabIndex=0;wrap.setAttribute('role','region');wrap.setAttribute('aria-label',label.length>80?label.slice(0,79).trimEnd()+'…':label);
+ // The label is cut by characters (code points), so an emoji or other astral character at the cut is never split.
+ const ch=[...label];
+ wrap.tabIndex=0;wrap.setAttribute('role','region');wrap.setAttribute('aria-label',ch.length>80?ch.slice(0,79).join('').trimEnd()+'…':label);
  return i-1;
 }
 function markdown(text,parent){

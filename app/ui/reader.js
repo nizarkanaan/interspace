@@ -42,6 +42,20 @@ function referenceList(box){
  const refs=lists.length?lists.flatMap(l=>[...l.children]):section.filter(n=>n.tagName==='P'&&/^\s*\[?\d{1,3}[\].)]\s/.test(n.textContent));
  return refs.map((node,i)=>{const lead=node.textContent.match(/^\s*\[?(\d{1,3})[\].)]\s/);return {node,n:lead?Number(lead[1]):i+1};});
 }
+// Agents often write the reference list as numbered lines with no blank line between them ("[1] …\n[2] …"), which
+// Markdown joins into one paragraph, so only the first would be a reference. Under a References heading, each line that
+// starts with a bracketed number starts its own paragraph; a wrapped entry's next line stays with it, and a list there
+// (1. …) is left alone.
+function separateReferences(text){
+ const lines=String(text).split('\n');let refs=false,fenced=false;
+ return lines.map((line,i)=>{
+  if(/^```/.test(line))fenced=!fenced;
+  else if(fenced)return line;
+  else if(/^#{1,6}\s/.test(line))refs=HEADING.test(line.replace(/^#{1,6}\s+/,'').replace(/[*_]/g,''));
+  else if(refs&&i&&lines[i-1].trim()&&/^\s*\[\d{1,3}\]\s/.test(line))return '\n'+line;
+  return line;
+ }).join('\n');
+}
 function numbers(group){
  const out=[];for(const part of group.split(/\s*,\s*/)){const r=part.split(/\s*[–-]\s*/).map(Number);out.push(...r);}
  return out.filter(n=>Number.isInteger(n));
@@ -90,7 +104,7 @@ function render(container,{name,bytes,text,truncated,corpus,loading,error,saving
  if(text==null){el('p','muted',loading?'Loading the report…':'The report is not loaded yet.',container);return;}
  if(truncated)el('p','notice','Only the beginning of this report is shown. Save it to read all of it.',container);
  const state={from:null};
- const box=RC.markdown(text,container);box.classList.add('reader-text');
+ const box=RC.markdown(separateReferences(text),container);box.classList.add('reader-text');
  const refs=referenceList(box),known=new Set();
  const tally={};
  for(const {node,n} of refs){
