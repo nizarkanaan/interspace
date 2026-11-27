@@ -92,9 +92,16 @@ function drawer(parent,table,ui,{onResolve,shut}){
  const form=el('div','ev-own',null,d);
  const input=el('input',null,null,form);input.id='ev-own-value';input.maxLength=300;input.value=ui.draft||'';input.setAttribute('aria-label','Your value for '+col.name);input.oninput=()=>{ui.draft=input.value;};
  const save=()=>{if(input.value.trim()){ui.typing=null;ui.draft='';onResolve(row.id,col.id,input.value);}};
- input.onkeydown=e=>{if(e.key==='Enter'&&!e.isComposing){e.preventDefault();save();}};
+ // Cancel, or Esc in the field, stops typing and goes back to Type my own; the drawer stays open.
+ const cancel=()=>{ui.typing=null;ui.draft='';ui.rerender();document.getElementById('ev-own')?.focus();};
+ input.onkeydown=e=>{
+  if(e.isComposing)return;
+  if(e.key==='Enter'){e.preventDefault();save();}
+  // Handled here, so the window's Esc (agent.js) does not also close the drawer.
+  else if(e.key==='Escape'){e.preventDefault();cancel();}
+ };
  const ok=el('button','primary','Save',form);ok.type='button';ok.id='ev-own-save';ok.onclick=save;
- const no=el('button','quiet','Cancel',form);no.type='button';no.id='ev-own-cancel';no.onclick=()=>{ui.typing=null;ui.draft='';ui.rerender();};
+ const no=el('button','quiet','Cancel',form);no.type='button';no.id='ev-own-cancel';no.onclick=cancel;
  if(ui.focusOwn){ui.focusOwn=false;requestAnimationFrame(()=>input.focus());}
  return d;
 }
@@ -119,7 +126,7 @@ function render(container,data,ui,{busy,canFill,error,note,onFill,onResolve,onEx
  // Keyboard focus, the table's scroll and the drawer's scroll survive the rebuild.
  const active=document.activeElement,mine=!!active&&container.contains(active);
  const keep=mine?active.id:null,keepCell=mine&&active.matches('td[data-cell]')?active.dataset.cell:null;
- const oldWrap=container.querySelector('.ev-wrap'),oldDrawer=container.querySelector('#ev-drawer');
+ const oldWrap=container.querySelector('.ev-wrap'),oldDrawer=container.querySelector('#ev-drawer'),inDrawer=mine&&!!oldDrawer?.contains(active);
  const scroll=oldWrap?[oldWrap.scrollLeft,oldWrap.scrollTop]:null,drawerScroll=oldDrawer?[oldDrawer.dataset.for,oldDrawer.scrollTop]:null;
  container.replaceChildren();container.classList.remove('has-table');
  el('h2','visually-hidden','Evidence table',container);
@@ -176,6 +183,12 @@ function render(container,data,ui,{busy,canFill,error,note,onFill,onResolve,onEx
  if(d&&drawerScroll&&drawerScroll[0]===d.dataset.for)d.scrollTop=drawerScroll[1];
  if(keepCell)cellIn(container,keepCell)?.focus({preventScroll:true});
  else if(keep){const again=document.getElementById(keep);if(again)again.focus();}
+ // The drawer button that was used (Use, Undo, Save) can be gone after the update: keyboard focus stays in the drawer,
+ // on Undo, the first choice or the drawer itself, or goes back to the cell when the drawer has closed.
+ if(inDrawer&&!container.contains(document.activeElement)){
+  const next=d?d.querySelector('#ev-undo')||d.querySelector('.ev-drawer-actions button')||d:cellIn(container,drawerScroll[0])||wrap;
+  next.focus({preventScroll:true});
+ }
 }
 
 window.interspaceEvidence={render,paperLabel,closeDrawer};

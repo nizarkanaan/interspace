@@ -97,21 +97,50 @@ export default async function check(page,url){
  const dt=await text(drawer);
  assert(dt.includes(TITLE1)&&dt.includes('2020')&&dt.includes('Study design')&&dt.includes('The kind of study.')&&dt.includes('Field study')&&dt.includes('“We studied 40 outages”')&&dt.includes('Observational')&&dt.includes('“observational design”'),'Drawer: '+dt);
  assert(await tab.locator('img').count()===0,'Literal title in the drawer');
+ // The drawer's buttons look like buttons: the sidebar's rules (transparent buttons, hidden scrollbar) stay in the sidebar.
+ {const bg=await page.evaluate(()=>getComputedStyle(document.getElementById('ev-use-claude')).backgroundColor);
+  assert(bg!=='rgba(0, 0, 0, 0)'&&bg!=='transparent','Use button background: '+bg);}
+ // Keyboard focus stays in the drawer when the button that was used is gone after the update.
+ const inDrawer=()=>page.evaluate(()=>{const a=document.activeElement,d=document.getElementById('ev-drawer');return d&&d.contains(a)?a.id||'ev-drawer':a?.dataset?.cell||a?.tagName;});
  await drawer.getByRole('button',{name:'Use Claude’s'}).click();
  await page.waitForFunction(()=>document.querySelector('#agent-evidence [data-cell="r1:design"]')?.classList.contains('is-resolved'));
  assert(JSON.stringify((await requests(page,'table_resolve')).at(-1))===JSON.stringify({task_id:'r1',row:'r1',column:'design',value:'Field study'}),'Resolve request');
  assert(await word('r1:design')==='Decided'&&await drawer.getByRole('button',{name:'Undo'}).isVisible(),'Decided, with Undo in the drawer');
+ assert(await inDrawer()==='ev-undo','Focus after Use Claude’s: '+await inDrawer());
  await drawer.getByRole('button',{name:'Undo'}).click();
  await page.waitForFunction(()=>document.querySelector('#agent-evidence [data-cell="r1:design"]')?.classList.contains('is-disagree'));
+ assert(await inDrawer()==='ev-use-claude','Focus after Undo: '+await inDrawer());
 
  // A pushed table update re-renders and the drawer stays on its cell, with the new data.
  await page.evaluate(()=>{window.rFixture.tableNow.table.rows[0].cells.design.values.codex.quote='an observational design, revised';});
  await push(page,[ev('r1','evidence',{rev:2})]);
  await page.waitForFunction(()=>(document.querySelector('#ev-drawer')?.textContent||'').includes('revised'));
  assert(await drawer.getAttribute('data-for')==='r1:design','Drawer follows its cell');
+ // A choice made after an update uses the updated value.
+ await page.evaluate(()=>{window.rFixture.tableNow.table.rows[0].cells.design.values.claude.value='Field trial';});
+ await push(page,[ev('r1','evidence',{rev:3})]);
+ await page.waitForFunction(()=>(document.querySelector('#ev-drawer')?.textContent||'').includes('Field trial'));
+ await drawer.getByRole('button',{name:'Use Claude’s'}).click();
+ await page.waitForFunction(()=>document.querySelector('#agent-evidence [data-cell="r1:design"]')?.classList.contains('is-resolved'));
+ {const r=(await requests(page,'table_resolve')).at(-1);
+  assert(r.row==='r1'&&r.column==='design'&&r.value==='Field trial','Resolve after an update: '+JSON.stringify(r));}
+ await drawer.getByRole('button',{name:'Undo'}).click();
+ await page.waitForFunction(()=>document.querySelector('#agent-evidence [data-cell="r1:design"]')?.classList.contains('is-disagree'));
 
- // Type my own, from the drawer.
+ // Esc in another window's dialog closes only that dialog, never the drawer behind it.
+ await page.evaluate(()=>{const d=document.getElementById('delete-dialog');d.replaceChildren();const b=document.createElement('button');b.type='button';b.textContent='Keep';d.append(b);d.showModal();b.focus();});
+ await page.keyboard.press('Escape');
+ assert(await page.evaluate(()=>!document.getElementById('delete-dialog').open)&&await drawer.count()===1,'Esc in a dialog: dialog closed, drawer kept');
+ await page.evaluate(()=>document.getElementById('delete-dialog').replaceChildren());
+
+ // Type my own, from the drawer. Esc in the field stops typing and keeps the drawer open.
  await drawer.getByRole('button',{name:'Type my own'}).click();
+ await tab.getByLabel('Your value for Study design').fill('Half typed');
+ await page.keyboard.press('Escape');
+ await page.waitForFunction(()=>!document.getElementById('ev-own-value'));
+ assert(await drawer.count()===1&&await page.evaluate(()=>document.activeElement?.id)==='ev-own','Esc in the field cancels typing: '+await page.evaluate(()=>document.activeElement?.id||document.activeElement?.tagName));
+ await drawer.getByRole('button',{name:'Type my own'}).click();
+ assert(await tab.getByLabel('Your value for Study design').inputValue()==='','The cancelled value is gone');
  await tab.getByLabel('Your value for Study design').fill('Observational field study');
  await drawer.getByRole('button',{name:'Save'}).click();
  await page.waitForFunction(()=>(document.querySelector('#agent-evidence [data-cell="r1:design"]')?.textContent||'').includes('Observational field study'));
@@ -149,14 +178,14 @@ export default async function check(page,url){
  // The drawer closes when its row is gone.
  await tab.locator('[data-cell="r2:sample"]').click();await drawer.waitFor();
  await page.evaluate(()=>{window.rFixture.tableNow.table.rows.pop();});
- await push(page,[ev('r1','evidence',{rev:3})]);
+ await push(page,[ev('r1','evidence',{rev:4})]);
  await page.waitForFunction(()=>document.querySelectorAll('#agent-evidence tbody tr').length===1);
  assert(await drawer.count()===0,'Drawer closes when its row is gone');
 
  // A long table fills the pane, not a fixed 70vh, so its sideways scrollbar stays on screen.
  await page.setViewportSize({width:1280,height:800});
  await page.evaluate(()=>{const t=window.rFixture.tableNow.table;for(let i=0;i<30;i++)t.rows.push({...JSON.parse(JSON.stringify(t.rows[0])),id:'x'+i});});
- await push(page,[ev('r1','evidence',{rev:4})]);
+ await push(page,[ev('r1','evidence',{rev:5})]);
  await page.waitForFunction(()=>document.querySelectorAll('#agent-evidence tbody tr').length===31);
  const box=await page.evaluate(()=>{const w=document.querySelector('#agent-evidence .ev-wrap'),r=w.getBoundingClientRect();return {bottom:Math.round(r.bottom),height:innerHeight,max:getComputedStyle(w).maxHeight,scrolls:w.scrollHeight>w.clientHeight,split:document.getElementById('agent-view').classList.contains('split')};});
  assert(box.split&&box.max!=='560px'&&box.bottom<=box.height&&box.scrolls,'Table fills the pane: '+JSON.stringify(box));
@@ -184,5 +213,5 @@ export default async function check(page,url){
  assert(await tab.locator('#ev-fill').isVisible(),'Picker again');
  assert(!errors.length,'Page errors: '+errors.join('; '));
  assert(!(await page.evaluate(()=>window.pwned)),'Script ran');
- return {checks:'picker defaults, custom column, rows choice, Fill table starts and asks the Orchestrator, the note clears once a cell has a value, short paper labels with the title as tooltip, status words, two-line disagreement without quotes or buttons, 170px paper column, 120–220px value columns clamped to 3 lines, Needs you filter, drawer with paper, column and quotes, resolve and undo from the drawer, drawer follows its cell through a pushed update, type my own, Esc and × close, arrow keys and Enter, Esc closes the drawer before Focus, drawer closes when its row is gone, table fills the pane at 1280×800 with the drawer beside it, full-width drawer at 390px, export through the save panel, inline new-table confirmation'};
+ return {checks:'picker defaults, custom column, rows choice, Fill table starts and asks the Orchestrator, the note clears once a cell has a value, short paper labels with the title as tooltip, status words, two-line disagreement without quotes or buttons, 170px paper column, 120–220px value columns clamped to 3 lines, Needs you filter, drawer with paper, column and quotes, resolve and undo from the drawer, drawer follows its cell through a pushed update, a choice after an update sends the new value, focus stays in the drawer after a choice, Esc in a dialog leaves the drawer, type my own with Esc to cancel typing, Esc and × close, arrow keys and Enter, Esc closes the drawer before Focus, drawer closes when its row is gone, table fills the pane at 1280×800 with the drawer beside it, full-width drawer at 390px, export through the save panel, inline new-table confirmation'};
 }

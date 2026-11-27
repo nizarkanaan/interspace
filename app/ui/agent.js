@@ -371,6 +371,8 @@ window.interspaceAgent={
   // One Esc listener: it closes the evidence drawer first (evidence.js, once it has one), then leaves Focus.
   document.addEventListener('keydown',e=>{
    if(e.key!=='Escape'||e.defaultPrevented||e.isComposing)return;
+   // An open dialog (Delete) takes Esc for itself: the drawer and Focus behind it stay as they are.
+   if(e.target?.closest?.('dialog')||document.querySelector('dialog[open]'))return;
    if(window.interspaceEvidence?.closeDrawer?.()===true){e.preventDefault();return;}
    if(focused){e.preventDefault();setFocus(false);}
   });
